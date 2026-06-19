@@ -7,12 +7,16 @@ import io
 import pandas as pd
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_matching_service, get_parser
-from app.domain.entities import ArticleCandidate, TemplateArticle
+from app.api.deps import get_current_user, get_matching_service, get_parser
+from app.domain.entities import ArticleCandidate, Role, TemplateArticle, User
 from app.main import app
 from app.services.excel_parser import ExcelEstimateParser
 from app.services.matching_service import MatchingService
 from tests.fakes import FakeEmbedder, FakeLLMMatcher, FakeRepository
+
+
+def _fake_admin() -> User:
+    return User(id=1, email="admin@mr.kz", password_hash="h", role=Role.ADMIN)
 
 
 def _fake_matching_service() -> MatchingService:
@@ -36,6 +40,7 @@ def test_health() -> None:
 
 
 def test_match_endpoint() -> None:
+    app.dependency_overrides[get_current_user] = _fake_admin
     app.dependency_overrides[get_parser] = ExcelEstimateParser
     app.dependency_overrides[get_matching_service] = _fake_matching_service
 
