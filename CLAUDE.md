@@ -8,6 +8,9 @@
 видов работ («Вид раздела» = `СМР`) и через RAG (векторный поиск pgvector + LLM)
 сопоставляет их с эталонным справочником статей СМР.
 
+Сметы нигде не хранятся — поток stateless: загрузил → распарсили → обогатили из
+справочника → вернули результат. Персистентен только справочник (`template_articles`).
+
 - `backend/` — FastAPI, Clean Architecture, Python 3.11+, управляется `uv`.
 - `frontend/` — Vite + React + TypeScript + Tailwind v4 + shadcn/ui.
 - `justfile` — единый task runner (корень проекта).
@@ -46,12 +49,18 @@
 - Сопоставление: эмбеддинг → топ-3 (pgvector) → `score > 0.90` ⇒ «Уверенное совпадение»,
   иначе LLM-арбитр (Claude) выбирает из топ-3 ⇒ «Требует проверки». См.
   [matching_service.py](backend/app/services/matching_service.py).
+- **Auth-слой:** порты `UserRepository` / `PasswordHasher` / `TokenService` в `domain/ports.py`;
+  роли `user` / `admin`; enforcement через `get_current_user` / `require_admin` в `api/deps.py`.
 
 ## БД
 
 - Облачный PostgreSQL (Neon) + pgvector. Подключение только через `DATABASE_URL` в `backend/.env`.
-- Схема SQL — [backend/migrations/001_init.sql](backend/migrations/001_init.sql), ORM-модель —
-  [models.py](backend/app/infrastructure/db/models.py). **Держать синхронными** при изменении структуры.
+- Источник правды — Alembic-ревизии ([backend/alembic/versions/](backend/alembic/versions/)) +
+  ORM-модели ([models.py](backend/app/infrastructure/db/models.py)). Начальная ревизия `0001`
+  написана вручную (pgvector/HNSW/триггеры не поддерживаются автогенерацией корректно).
+  При изменении схемы: `just makemigration name="..."` (автогенерация) или ручная ревизия,
+  затем `just migrate`. ORM-модели держать синхронными с ревизиями.
+- Применение миграций: `just migrate` (`alembic upgrade head`). Откат: `just migrate-down`.
 - Поиск — косинусная близость: `score = 1 - cosine_distance` (порог 0.90 — это similarity).
 
 ## Тесты
@@ -88,3 +97,4 @@
 
 - Журнал работ — [docs/devlog/](docs/devlog/) (отчёт по каждой задаче).
 - Инструкции (настройка Neon и т.п.) — [docs/instructions/](docs/instructions/).
+- Технический долг — [docs/TECH_DEBT.md](docs/TECH_DEBT.md) (отложенные задачи, полировка, план на будущее).

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
-from app.api.deps import get_matching_service, get_parser
+from app.api.deps import get_current_user, get_matching_service, get_parser
 from app.api.schemas import MatchResultOut
 from app.services.excel_parser import ExcelEstimateParser
 from app.services.matching_service import MatchingService
 
-router = APIRouter(prefix="/estimates", tags=["estimates"])
+router = APIRouter(
+    prefix="/estimates", tags=["estimates"], dependencies=[Depends(get_current_user)]
+)
 
 
 @router.post("/match", response_model=list[MatchResultOut])

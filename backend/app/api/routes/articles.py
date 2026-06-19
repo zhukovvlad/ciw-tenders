@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, status
 
-from app.api.deps import get_article_service
+from app.api.deps import get_article_service, get_current_user, require_admin
 from app.api.schemas import ArticleCreate, ArticleOut
 from app.services.article_service import ArticleService
 
-router = APIRouter(prefix="/articles", tags=["articles"])
+router = APIRouter(prefix="/articles", tags=["articles"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("", response_model=list[ArticleOut])
@@ -20,7 +20,8 @@ def list_articles(
     return [ArticleOut.from_entity(a) for a in service.list(limit=limit, offset=offset)]
 
 
-@router.post("", response_model=ArticleOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ArticleOut, status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_admin)])
 def create_article(
     payload: ArticleCreate,
     service: ArticleService = Depends(get_article_service),
@@ -33,7 +34,8 @@ def create_article(
     return ArticleOut.from_entity(article)
 
 
-@router.delete("/{article_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{article_id}", status_code=status.HTTP_204_NO_CONTENT,
+               dependencies=[Depends(require_admin)])
 def delete_article(
     article_id: int,
     service: ArticleService = Depends(get_article_service),

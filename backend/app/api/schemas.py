@@ -2,9 +2,45 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from datetime import datetime
 
-from app.domain.entities import MatchResult, TemplateArticle
+from pydantic import BaseModel, EmailStr, Field
+
+from app.domain.entities import MatchResult, Role, TemplateArticle, User
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=1, max_length=1024)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserCreateRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=1024)
+    role: Role = Role.USER
+
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    role: Role
+    is_active: bool
+    created_at: datetime
+
+    @classmethod
+    def from_entity(cls, user: User) -> UserOut:
+        return cls(
+            id=user.id or 0,
+            email=user.email,
+            role=user.role,
+            is_active=user.is_active,
+            created_at=user.created_at,  # type: ignore[arg-type]
+        )
 
 
 class ArticleCreate(BaseModel):
