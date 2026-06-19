@@ -29,6 +29,8 @@ class JwtTokenService(TokenService):
     def decode(self, token: str) -> TokenPayload:
         try:
             data = jwt.decode(token, self._secret, algorithms=[self._algorithm])
+            return TokenPayload(user_id=int(data["sub"]))
         except jwt.PyJWTError as exc:
             raise TokenError(str(exc)) from exc
-        return TokenPayload(user_id=int(data["sub"]))
+        except (KeyError, ValueError) as exc:
+            raise TokenError(str(exc)) from exc

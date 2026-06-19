@@ -36,3 +36,10 @@ def test_tampered_token_raises_token_error() -> None:
     service = _service()
     with pytest.raises(TokenError):
         service.decode("not.a.valid.token")
+
+
+def test_non_numeric_sub_raises_token_error() -> None:
+    service = _service()
+    bad = jwt.encode({"sub": "not-an-int"}, "s", algorithm="HS256")
+    with pytest.raises(TokenError):
+        service.decode(bad)

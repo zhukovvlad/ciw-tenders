@@ -38,7 +38,7 @@ class AuthService:
         if user is None:
             # Прогоняем verify против dummy-хэша, чтобы время ответа не выдавало
             # отсутствие email (защита от тайминг-перечисления).
-            self._hasher.verify(password, self._dummy_hash)
+            _ = self._hasher.verify(password, self._dummy_hash)
             raise AuthError("Неверный email или пароль")
         if not self._hasher.verify(password, user.password_hash):
             raise AuthError("Неверный email или пароль")
