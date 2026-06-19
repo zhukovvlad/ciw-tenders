@@ -1,5 +1,7 @@
 """Конфигурация приложения. Единственный источник правды для переменных окружения."""
 
+from __future__ import annotations
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,6 +26,13 @@ class Settings(BaseSettings):
     embedding_dim: int = 768
 
     frontend_origin: str = "http://localhost:5173"
+
+    jwt_secret: str
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 720  # 12 ч
+
+    admin_email: str = ""
+    admin_password: str = ""
 
 
 @lru_cache
