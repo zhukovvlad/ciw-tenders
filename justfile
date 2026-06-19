@@ -19,9 +19,17 @@ install:
     cd {{backend}}; uv sync
     cd {{frontend}}; npm install
 
-# Подсказка по применению SQL-миграций к облачной БД (требует переменную DATABASE_URL).
+# Применить миграции к БД (alembic upgrade head). Требует DATABASE_URL в backend/.env.
 migrate:
-    @echo 'Примените миграцию вручную: psql "$DATABASE_URL" -f {{backend}}/migrations/001_init.sql'
+    cd {{backend}}; uv run alembic upgrade head
+
+# Откатить последнюю миграцию.
+migrate-down:
+    cd {{backend}}; uv run alembic downgrade -1
+
+# Сгенерировать новую ревизию из ORM-моделей: just makemigration name="add x"
+makemigration name:
+    cd {{backend}}; uv run alembic revision --autogenerate -m "{{name}}"
 
 # Запуск FastAPI (hot-reload) в виртуальном окружении.
 dev-back:
