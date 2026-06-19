@@ -1,0 +1,61 @@
+# Tech Debt
+
+Реестр технического долга проекта. Живой документ: при появлении долга — добавь строку,
+при погашении — удали (или помести в «Погашено» с датой). Каждый пункт: что, почему отложено,
+как чинить, ссылки.
+
+Приоритеты: 🔴 high (ломает/блокирует развитие) · 🟡 medium (мешает, но обходимо) · 🟢 low (полировка).
+
+---
+
+## 🔴 ORM `TemplateArticleModel` расходится со схемой (иерархия)
+
+- **Что:** [models.py](../backend/app/infrastructure/db/models.py) для `template_articles` всё ещё на
+  `section_name` и без `parent_id`, а Alembic-ревизия `0001` создаёт таблицу с `parent_id`
+  (иерархия разделов) и **без** `section_name`.
+- **Почему отложено:** иерархию схемы ввели отдельно от переработки матчинга; сознательно решили
+  «решать по мере поступления» (см. [devlog 2026-06-19-auth](devlog/2026-06-19-auth-authorization.md)).
+- **Последствия:** запросы к `template_articles` через ORM упадут на реальной схеме; `--autogenerate`
+  выдаст ложный diff (add `section_name` / drop `parent_id`). Поиск/матчинг и `article_service`
+  (эмбеддинг строит из `section_name`) надо переписать под дерево (`parent_id` / рекурсивный CTE).
+- **Как чинить:** привести `TemplateArticleModel`, `TemplateArticle` (entity), репозиторий,
+  `article_service`, `anthropic_matcher`, DTO к иерархии; решить, откуда брать «раздел» (JOIN/CTE).
+
+## 🟡 Alembic autogenerate шумит на `Vector`/HNSW
+
+- **Что:** при будущих `just makemigration` автогенерация некорректно интроспектит тип `Vector` и
+  HNSW-индекс → ложные drop/create индекса.
+- **Как чинить:** добавить `include_object`/`include_name`-фильтр в
+  [alembic/env.py](../backend/alembic/env.py) при первой реальной автогенерации. Для `0001` неактуально
+  (написана руками).
+
+## 🟢 Полировка из финального ревью авторизации
+
+- **Тесты:** нет теста «инвалид/просроченный токен → 401» на `GET /api/auth/me` (есть только «нет токена»);
+  `test_create_user_anonymous_401` не проверяет заголовок `WWW-Authenticate` (основной гвард на `/me` — проверяет);
+  `test_user_repository_mapping` не ассертит `created_at`/`password_hash`.
+- **Фейк:** `FakeUserRepository.add` ([fakes.py](../backend/tests/fakes.py)) не enforce-ит уникальность
+  email (реальный репозиторий — через UNIQUE) → дубль-инсерт в логике сервиса фейк не поймает.
+- **Мелочи:** `UserOut.from_entity` `id=user.id or 0` — молчаливый sentinel (для персистнутого юзера
+  недостижим, но лучше падать явно); `JwtTokenService.issue` без гварда на `User.id is None`;
+  таблица команд в [CLAUDE.md](../CLAUDE.md) не содержит `just migrate*` (в прозе есть);
+  лишний `CREATE EXTENSION` в [neon-database-setup.md](instructions/neon-database-setup.md) (ревизия `0001`
+  уже его делает); порядок импортов в `alembic/script.py.mako` (ruff I001 на сгенерированных ревизиях).
+
+---
+
+## Сознательно вне объёма (не долг, а план на будущее)
+
+Решено не делать в текущей итерации авторизации (см. спек, раздел «Вне объёма»):
+
+- Refresh-токены, logout / блэклист токенов (пока access-only + `is_active`).
+- Rate-limit / лок-аут на `POST /api/auth/login`.
+- Сброс и смена пароля; самостоятельная регистрация.
+- Фронтенд: страница логина, хранение токена, гварды роутов (бэкенд даёт готовый API).
+- Перевод `/api/estimates/match` на отдачу Excel-файла; вынос обогащения смет в фоновые задачи.
+
+---
+
+## Погашено
+
+_(пусто)_

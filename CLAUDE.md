@@ -97,3 +97,4 @@
 
 - Журнал работ — [docs/devlog/](docs/devlog/) (отчёт по каждой задаче).
 - Инструкции (настройка Neon и т.п.) — [docs/instructions/](docs/instructions/).
+- Технический долг — [docs/TECH_DEBT.md](docs/TECH_DEBT.md) (отложенные задачи, полировка, план на будущее).
