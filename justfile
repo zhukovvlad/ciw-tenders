@@ -57,3 +57,7 @@ test:
 # Production-сборка фронтенда.
 build:
     cd {{frontend}}; npm run build
+
+# Создать/повысить первого администратора из ADMIN_EMAIL/ADMIN_PASSWORD (backend/.env).
+create-admin:
+    cd {{backend}}; uv run python -m app.scripts.create_admin
