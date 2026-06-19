@@ -1,0 +1,21 @@
+# Python / uv
+backend/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+
+# Окружение и секреты
+.env
+*.env
+!*.env.example
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
