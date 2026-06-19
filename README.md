@@ -25,8 +25,8 @@ cp backend/.env.example backend/.env   # заполнить DATABASE_URL и кл
 psql "$DATABASE_URL" -f backend/migrations/001_init.sql
 
 # 2. Запуск (в двух терминалах)
-just dev-back                     # FastAPI на :8000
-just dev-front                    # Vite на :5173 (проксирует /api на :8000)
+just dev-back                     # FastAPI на :8260
+just dev-front                    # Vite на :5173 (проксирует /api на :8260)
 ```
 
 ## Команды

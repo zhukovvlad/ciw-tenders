@@ -15,7 +15,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // В dev проксируем запросы API на бэкенд FastAPI.
-      "/api": "http://localhost:8000",
+      "/api": "http://localhost:8260",
     },
   },
 })
