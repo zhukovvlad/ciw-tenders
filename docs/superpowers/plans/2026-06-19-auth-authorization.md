@@ -28,6 +28,7 @@
 
 1. **Порт `UserRepository` — без `list_users`/`set_active`.** В спеке они перечислены, но ни один эндпоинт их не вызывает (управление юзерами = фронтенд, вне объёма). YAGNI: не плодим мёртвые абстрактные методы. Когда появится админ-UI — добавим вместе с роутами. Промоут роли в `create_admin` сделан напрямую через ORM-модель (скрипт инфраструктурного уровня), без порта.
 2. **Новая зависимость `pydantic[email]`** (`EmailStr`) для валидации email в DTO — в спеке явно не упомянута, но это очевидно правильный тип для поля email; стоимость — один пакет.
+3. **`DuplicateError → HTTP 409`** (обработчик в `main.py`). Спек фиксировал только 401/403; 409 на дубль email — естественное дополнение семантики, отмечено здесь, чтобы не выглядело сюрпризом на ревью.
 
 ## Предусловие (вне объёма этого плана)
 
@@ -642,11 +643,21 @@ Expected: FAIL (модуль `auth_service` не найден).
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from app.domain.entities import Role, User
 from app.domain.errors import AuthError, DuplicateError
 from app.domain.ports import PasswordHasher, TokenService, UserRepository
 
 _TIMING_PASSWORD = "timing-equalizer-not-a-real-password"
+
+
+@lru_cache(maxsize=8)
+def _dummy_hash(hasher: PasswordHasher) -> str:
+    """Dummy-хэш для выравнивания тайминга. Кэшируется по hasher, поэтому полный
+    argon2 считается один раз на процесс (get_password_hasher — @lru_cache singleton),
+    а не на каждый запрос /login."""
+    return hasher.hash(_TIMING_PASSWORD)
 
 
 class AuthService:
@@ -659,8 +670,8 @@ class AuthService:
         self._users = users
         self._hasher = hasher
         self._tokens = tokens
-        # dummy-хэш теми же параметрами, что и боевые, — для выравнивания тайминга.
-        self._dummy_hash = hasher.hash(_TIMING_PASSWORD)
+        # dummy-хэш теми же параметрами, что и боевые (один verify на обоих путях).
+        self._dummy_hash = _dummy_hash(hasher)
 
     def login(self, email: str, password: str) -> str:
         email = email.strip().lower()
@@ -724,18 +735,26 @@ git commit -m "feat(auth): AuthService (логин с выравниванием
 ```python
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 
 class UserModel(Base):
     __tablename__ = "users"
+    # Констрейнты и дефолты дублируют DDL ревизии 0001 один-в-один (ORM = источник
+    # правды наравне с Alembic). Имена совпадают с именами в миграции.
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'admin')", name="users_role_check"),
+        CheckConstraint("email = lower(email)", name="users_email_is_lower"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    role: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    role: Mapped[str] = mapped_column(Text, nullable=False, server_default="user")
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -1137,6 +1156,16 @@ def test_create_user_as_non_admin_403() -> None:
         json={"email": "new@mr.kz", "password": "password123"},
     )
     assert resp.status_code == 403
+
+
+def test_create_user_anonymous_401() -> None:
+    _wire_fakes()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/auth/users",
+        json={"email": "new@mr.kz", "password": "password123"},
+    )
+    assert resp.status_code == 401  # require_admin → get_current_user → нет токена
 ```
 
 - [ ] **Step 6: Запустить — FAIL, затем (после Steps 1–4 уже сделаны) PASS**
@@ -1164,6 +1193,8 @@ git commit -m "feat(auth): DTO, DI-гварды (get_current_user/require_admin)
 
 **Interfaces:**
 - Consumes: `get_current_user`, `require_admin` (Task 7).
+
+> ⚠️ Тесты матрицы используют `FakeRepository`, поэтому подтверждают **авторизацию**, а не CRUD статей против реальной схемы. CRUD `/articles` против мигрированной БД не покрыт из-за известного рассинхрона `TemplateArticleModel` (`section_name`) ↔ ревизия `0001` (`parent_id`) — см. «Предусловие». Зелёная матрица здесь = «гварды работают», не «запись статей работает».
 
 - [ ] **Step 1: Защитить `/estimates`**
 
@@ -1502,10 +1533,11 @@ def upgrade() -> None:
             id            SERIAL PRIMARY KEY,
             email         TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
-            role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+            role          TEXT NOT NULL DEFAULT 'user',
             is_active     BOOLEAN NOT NULL DEFAULT TRUE,
             created_at    TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at    TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT users_role_check CHECK (role IN ('user', 'admin')),
             CONSTRAINT users_email_is_lower CHECK (email = lower(email))
         )
         """
@@ -1572,7 +1604,12 @@ Expected: `Running upgrade  -> 0001, initial schema...`; в БД появляю�
 
 - [ ] **Step 8: Проверить обратимость (downgrade → upgrade)**
 
-Run:
+⚠️ **Деструктивно:** `downgrade base` дропает `template_articles`/`users` со всеми данными.
+НЕ запускать на dev-БД, где уже засеян справочник. Проверять на **пустой БД** или на
+**отдельной ветке Neon** (Neon → Branches → создать ветку, временно подставить её
+`DATABASE_URL`, после проверки удалить ветку).
+
+Run (на пустой/одноразовой БД):
 ```bash
 cd backend; uv run alembic downgrade base
 cd backend; uv run alembic upgrade head
