@@ -8,6 +8,9 @@
 видов работ («Вид раздела» = `СМР`) и через RAG (векторный поиск pgvector + LLM)
 сопоставляет их с эталонным справочником статей СМР.
 
+Сметы нигде не хранятся — поток stateless: загрузил → распарсили → обогатили из
+справочника → вернули результат. Персистентен только справочник (`template_articles`).
+
 - `backend/` — FastAPI, Clean Architecture, Python 3.11+, управляется `uv`.
 - `frontend/` — Vite + React + TypeScript + Tailwind v4 + shadcn/ui.
 - `justfile` — единый task runner (корень проекта).
