@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 
 
@@ -12,6 +13,13 @@ class MatchStatus(StrEnum):
     CONFIDENT = "Уверенное совпадение"
     NEEDS_REVIEW = "Требует проверки"
     NO_MATCH = "Нет совпадений"
+
+
+class Role(StrEnum):
+    """Роль пользователя."""
+
+    USER = "user"
+    ADMIN = "admin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,3 +59,22 @@ class MatchResult:
     status: MatchStatus
     score: float
     candidates: list[ArticleCandidate] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class User:
+    """Учётная запись пользователя."""
+
+    email: str
+    password_hash: str
+    role: Role = Role.USER
+    is_active: bool = True
+    id: int | None = None
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TokenPayload:
+    """Полезная нагрузка JWT (без роли — роль читается из БД)."""
+
+    user_id: int

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from app.domain.entities import ArticleCandidate, TemplateArticle
+from app.domain.entities import ArticleCandidate, TemplateArticle, TokenPayload, User
 
 
 class ArticleRepository(ABC):
@@ -48,3 +48,36 @@ class LLMMatcher(ABC):
     def choose_best(
         self, query: str, candidates: list[ArticleCandidate]
     ) -> TemplateArticle | None: ...
+
+
+class UserRepository(ABC):
+    """Хранилище пользователей."""
+
+    @abstractmethod
+    def get_by_email(self, email: str) -> User | None: ...
+
+    @abstractmethod
+    def get_by_id(self, user_id: int) -> User | None: ...
+
+    @abstractmethod
+    def add(self, user: User) -> User: ...
+
+
+class PasswordHasher(ABC):
+    """Хеширование и проверка паролей."""
+
+    @abstractmethod
+    def hash(self, plain: str) -> str: ...
+
+    @abstractmethod
+    def verify(self, plain: str, hashed: str) -> bool: ...
+
+
+class TokenService(ABC):
+    """Выпуск и разбор JWT."""
+
+    @abstractmethod
+    def issue(self, user: User) -> str: ...
+
+    @abstractmethod
+    def decode(self, token: str) -> TokenPayload: ...
