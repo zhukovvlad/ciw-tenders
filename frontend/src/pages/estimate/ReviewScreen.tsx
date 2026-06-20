@@ -58,7 +58,7 @@ export function ReviewScreen({ state, dispatch, onExport, onNewEstimate }: Revie
     enabled: Boolean(active),
     candidateCount: active?.candidates.length ?? 0,
     onPick: (i) => { if (active?.candidates[i]) { dispatch({ type: "pickCandidate", row: active.row_number, code: active.candidates[i].article_code }); gotoNext() } },
-    onConfirm: () => { if (active) { dispatch({ type: "confirmArbiter", row: active.row_number }); gotoNext() } },
+    onConfirm: () => { if (active) { dispatch(active.status === "no_match" ? { type: "confirmNoMatch", row: active.row_number } : { type: "confirmArbiter", row: active.row_number }); gotoNext() } },
     onNext: gotoNext,
   })
 

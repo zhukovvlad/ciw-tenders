@@ -32,4 +32,14 @@ describe("ReviewScreen", () => {
     await userEvent.click(screen.getByRole("button", { name: /Выгрузить/ }))
     expect(onExport).toHaveBeenCalled()
   })
+
+  it("Enter подтверждает строку no_match без совпадения (confirmNoMatch)", async () => {
+    render(<Wrap />)
+    // Переключиться на фильтр «Без пары» — первой активной строкой станет no_match строка
+    await userEvent.click(screen.getByRole("button", { name: /Без пары/ }))
+    // Нажать Enter — onConfirm должен отправить confirmNoMatch, а не confirmArbiter (no-op)
+    await userEvent.keyboard("{Enter}")
+    // После confirmNoMatch строка переходит в статус "Нет совпадения" (decision.kind === "no_match")
+    expect(screen.getAllByText("Нет совпадения").length).toBeGreaterThan(0)
+  })
 })

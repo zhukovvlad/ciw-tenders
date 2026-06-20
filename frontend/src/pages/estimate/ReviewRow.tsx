@@ -45,7 +45,7 @@ export function ReviewRow({ row, decision, expanded, onToggle, onPickCandidate, 
             ? <span className="text-muted-foreground">— без пары —</span>
             : <span>{flagged && <ChevronDown className="mr-1 inline size-3 text-[var(--ds-accent-hover)]" />}<span className="font-mono text-xs text-muted-foreground">{chosenCode}</span> {decision.kind === "confirmed" ? decision.name : row.matched_name}</span>}
         </td>
-        <td className="px-4 py-2 text-right font-mono text-xs text-muted-foreground">{row.status === "needs_review" ? row.score.toFixed(2) : row.status === "confident" ? row.score.toFixed(2) : ""}</td>
+        <td className="px-4 py-2 text-right font-mono text-xs text-muted-foreground">{row.status !== "no_match" ? row.score.toFixed(2) : ""}</td>
         <td className={"px-4 py-2 text-sm " + (statusTone[row.status] ?? "")}>{statusLabel(row, decision)}</td>
       </tr>
 
