@@ -10,8 +10,18 @@ function Harness(props: Parameters<typeof useReviewKeyboard>[0]) {
 
 describe("useReviewKeyboard", () => {
   it("цифры выбирают кандидата, Enter подтверждает, n — следующая", async () => {
-    const onPick = vi.fn(), onConfirm = vi.fn(), onNext = vi.fn()
-    render(<Harness enabled candidateCount={3} onPick={onPick} onConfirm={onConfirm} onNext={onNext} />)
+    const onPick = vi.fn(),
+      onConfirm = vi.fn(),
+      onNext = vi.fn()
+    render(
+      <Harness
+        enabled
+        candidateCount={3}
+        onPick={onPick}
+        onConfirm={onConfirm}
+        onNext={onNext}
+      />
+    )
     await userEvent.keyboard("2")
     expect(onPick).toHaveBeenCalledWith(1)
     await userEvent.keyboard("{Enter}")
@@ -22,10 +32,26 @@ describe("useReviewKeyboard", () => {
 
   it("игнорирует ввод в поле и при enabled=false", async () => {
     const onPick = vi.fn()
-    const { rerender } = render(<Harness enabled={false} candidateCount={3} onPick={onPick} onConfirm={vi.fn()} onNext={vi.fn()} />)
+    const { rerender } = render(
+      <Harness
+        enabled={false}
+        candidateCount={3}
+        onPick={onPick}
+        onConfirm={vi.fn()}
+        onNext={vi.fn()}
+      />
+    )
     await userEvent.keyboard("1")
     expect(onPick).not.toHaveBeenCalled()
-    rerender(<Harness enabled candidateCount={3} onPick={onPick} onConfirm={vi.fn()} onNext={vi.fn()} />)
+    rerender(
+      <Harness
+        enabled
+        candidateCount={3}
+        onPick={onPick}
+        onConfirm={vi.fn()}
+        onNext={vi.fn()}
+      />
+    )
     const input = document.querySelector("input")!
     input.focus()
     await userEvent.keyboard("1")

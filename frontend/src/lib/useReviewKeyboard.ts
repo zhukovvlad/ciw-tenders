@@ -11,10 +11,18 @@ interface Options {
 function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
   if (target.isContentEditable) return true
-  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"))
+  return Boolean(
+    target.closest("input, textarea, select, [contenteditable='true']")
+  )
 }
 
-export function useReviewKeyboard({ enabled, candidateCount, onPick, onConfirm, onNext }: Options): void {
+export function useReviewKeyboard({
+  enabled,
+  candidateCount,
+  onPick,
+  onConfirm,
+  onNext,
+}: Options): void {
   useEffect(() => {
     if (!enabled) return
     const handler = (e: KeyboardEvent) => {
@@ -22,11 +30,16 @@ export function useReviewKeyboard({ enabled, candidateCount, onPick, onConfirm, 
       if (isEditable(e.target)) return
       if (e.key === "1" || e.key === "2" || e.key === "3") {
         const idx = Number(e.key) - 1
-        if (idx < candidateCount) { e.preventDefault(); onPick(idx) }
+        if (idx < candidateCount) {
+          e.preventDefault()
+          onPick(idx)
+        }
       } else if (e.key === "Enter") {
-        e.preventDefault(); onConfirm()
+        e.preventDefault()
+        onConfirm()
       } else if (e.key.toLowerCase() === "n") {
-        e.preventDefault(); onNext()
+        e.preventDefault()
+        onNext()
       }
     }
     window.addEventListener("keydown", handler)

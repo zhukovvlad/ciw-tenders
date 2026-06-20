@@ -9,7 +9,12 @@ export function initReview(fileName: string, rows: MatchRow[]): ReviewState {
   for (const r of rows) {
     decisions[r.row_number] =
       r.status === "confident" && r.matched_code && r.matched_name
-        ? { kind: "confirmed", code: r.matched_code, name: r.matched_name, manual: false }
+        ? {
+            kind: "confirmed",
+            code: r.matched_code,
+            name: r.matched_name,
+            manual: false,
+          }
         : { kind: "pending" }
   }
   return { fileName, rows, decisions, filter: "all" }
@@ -28,7 +33,10 @@ function rowByNum(state: ReviewState, n: number): MatchRow | undefined {
   return state.rows.find((r) => r.row_number === n)
 }
 
-export function reviewReducer(state: ReviewState, action: ReviewAction): ReviewState {
+export function reviewReducer(
+  state: ReviewState,
+  action: ReviewAction
+): ReviewState {
   const set = (row: number, d: Decision): ReviewState => ({
     ...state,
     decisions: { ...state.decisions, [row]: d },
@@ -45,16 +53,31 @@ export function reviewReducer(state: ReviewState, action: ReviewAction): ReviewS
     case "confirmArbiter": {
       const r = rowByNum(state, action.row)
       if (!r || !r.matched_code || !r.matched_name) return state
-      return set(action.row, { kind: "confirmed", code: r.matched_code, name: r.matched_name, manual: false })
+      return set(action.row, {
+        kind: "confirmed",
+        code: r.matched_code,
+        name: r.matched_name,
+        manual: false,
+      })
     }
     case "pickCandidate": {
       const r = rowByNum(state, action.row)
       const c = r?.candidates.find((x) => x.article_code === action.code)
       if (!c) return state
-      return set(action.row, { kind: "confirmed", code: c.article_code, name: c.name, manual: false })
+      return set(action.row, {
+        kind: "confirmed",
+        code: c.article_code,
+        name: c.name,
+        manual: false,
+      })
     }
     case "manualPick":
-      return set(action.row, { kind: "confirmed", code: action.candidate.article_code, name: action.candidate.name, manual: true })
+      return set(action.row, {
+        kind: "confirmed",
+        code: action.candidate.article_code,
+        name: action.candidate.name,
+        manual: true,
+      })
     default:
       return state
   }
@@ -64,9 +87,14 @@ export function decisionFor(state: ReviewState, row: MatchRow): Decision {
   return state.decisions[row.row_number] ?? { kind: "pending" }
 }
 
-export function progress(state: ReviewState): { reviewed: number; total: number } {
+export function progress(state: ReviewState): {
+  reviewed: number
+  total: number
+} {
   const required = state.rows.filter(requiresDecision)
-  const reviewed = required.filter((r) => decisionFor(state, r).kind !== "pending").length
+  const reviewed = required.filter(
+    (r) => decisionFor(state, r).kind !== "pending"
+  ).length
   return { reviewed, total: required.length }
 }
 

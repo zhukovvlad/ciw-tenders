@@ -12,10 +12,23 @@ import { DoneScreen } from "@/pages/estimate/DoneScreen"
 type Phase = "start" | "processing" | "review" | "done"
 
 export function EstimateFlow() {
-  const [phase, setPhase] = useState<Phase>(() => (loadReview() ? "review" : "start"))
-  const [fileName, setFileName] = useState<string>(() => loadReview()?.fileName ?? "")
-  const [prog, setProg] = useState<Progress>({ phase: "parsing", done: 0, total: 0, etaSeconds: null })
-  const [state, dispatch] = useReducer(reviewReducer, undefined, () => loadReview() ?? initReview("", []))
+  const [phase, setPhase] = useState<Phase>(() =>
+    loadReview() ? "review" : "start"
+  )
+  const [fileName, setFileName] = useState<string>(
+    () => loadReview()?.fileName ?? ""
+  )
+  const [prog, setProg] = useState<Progress>({
+    phase: "parsing",
+    done: 0,
+    total: 0,
+    etaSeconds: null,
+  })
+  const [state, dispatch] = useReducer(
+    reviewReducer,
+    undefined,
+    () => loadReview() ?? initReview("", [])
+  )
 
   // персист ревью на каждое изменение
   useEffect(() => {
@@ -26,7 +39,10 @@ export function EstimateFlow() {
   useEffect(() => {
     const { reviewed, total } = progress(state)
     if (phase !== "review" || reviewed >= total) return
-    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = "" }
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ""
+    }
     window.addEventListener("beforeunload", handler)
     return () => window.removeEventListener("beforeunload", handler)
   }, [phase, state])
@@ -49,12 +65,30 @@ export function EstimateFlow() {
   }
 
   function handleExport() {
-    downloadCsv(`${fileName.replace(/\.[^.]+$/, "")}_сопоставлено.csv`, exportEstimateCsv(state))
+    downloadCsv(
+      `${fileName.replace(/\.[^.]+$/, "")}_сопоставлено.csv`,
+      exportEstimateCsv(state)
+    )
     setPhase("done")
   }
 
   if (phase === "start") return <StartScreen onFile={handleFile} />
-  if (phase === "processing") return <ProcessingScreen fileName={fileName} progress={prog} />
-  if (phase === "done") return <DoneScreen state={state} onExport={handleExport} onNewEstimate={handleNew} />
-  return <ReviewScreen state={state} dispatch={dispatch} onExport={handleExport} onNewEstimate={handleNew} />
+  if (phase === "processing")
+    return <ProcessingScreen fileName={fileName} progress={prog} />
+  if (phase === "done")
+    return (
+      <DoneScreen
+        state={state}
+        onExport={handleExport}
+        onNewEstimate={handleNew}
+      />
+    )
+  return (
+    <ReviewScreen
+      state={state}
+      dispatch={dispatch}
+      onExport={handleExport}
+      onNewEstimate={handleNew}
+    />
+  )
 }

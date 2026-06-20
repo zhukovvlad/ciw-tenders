@@ -8,8 +8,17 @@ import { initReview, reviewReducer } from "@/lib/reviewState"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
 
 function Wrap({ onExport = vi.fn() }: { onExport?: () => void }) {
-  const [state, dispatch] = useReducer(reviewReducer, undefined, () => initReview("смета.xlsx", MOCK_ROWS))
-  return <ReviewScreen state={state} dispatch={dispatch} onExport={onExport} onNewEstimate={vi.fn()} />
+  const [state, dispatch] = useReducer(reviewReducer, undefined, () =>
+    initReview("смета.xlsx", MOCK_ROWS)
+  )
+  return (
+    <ReviewScreen
+      state={state}
+      dispatch={dispatch}
+      onExport={onExport}
+      onNewEstimate={vi.fn()}
+    />
+  )
 }
 
 describe("ReviewScreen", () => {

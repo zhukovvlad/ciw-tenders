@@ -8,7 +8,10 @@ export function saveReview(state: ReviewState): void {
   } catch (err) {
     // Прототип-стенд-ин. На крупных сметах прод обязан использовать IndexedDB (per спека).
     // Не глушим молча: иначе провал восстановления невидим.
-    console.warn("saveReview: не удалось сохранить сессию (вероятно QuotaExceededError) — нужен IndexedDB в проде", err)
+    console.warn(
+      "saveReview: не удалось сохранить сессию (вероятно QuotaExceededError) — нужен IndexedDB в проде",
+      err
+    )
   }
 }
 

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { matchEstimate, searchArticles, exportEstimateCsv } from "@/lib/mock/api"
+import {
+  matchEstimate,
+  searchArticles,
+  exportEstimateCsv,
+} from "@/lib/mock/api"
 import { initReview } from "@/lib/reviewState"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
 
@@ -25,7 +29,12 @@ describe("mock api", () => {
 
   it("exportEstimateCsv: ручной выбор → пустой Score, статус «Ручной выбор»", () => {
     const state = initReview("смета.xlsx", MOCK_ROWS)
-    state.decisions[3] = { kind: "confirmed", code: "СМР-99-999", name: "Ручная статья", manual: true }
+    state.decisions[3] = {
+      kind: "confirmed",
+      code: "СМР-99-999",
+      name: "Ручная статья",
+      manual: true,
+    }
     const csv = exportEstimateCsv(state)
     const line = csv.split("\n").find((l) => l.startsWith("3;"))!
     const cells = line.split(";")

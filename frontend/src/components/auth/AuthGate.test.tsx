@@ -8,7 +8,11 @@ afterEach(() => logout())
 
 describe("AuthGate", () => {
   it("показывает вход, затем контент после логина", async () => {
-    render(<AuthGate><div>Секретный контент</div></AuthGate>)
+    render(
+      <AuthGate>
+        <div>Секретный контент</div>
+      </AuthGate>
+    )
     expect(screen.queryByText("Секретный контент")).not.toBeInTheDocument()
     await userEvent.type(screen.getByLabelText(/логин/i), "operator")
     await userEvent.type(screen.getByLabelText(/пароль/i), "secret")

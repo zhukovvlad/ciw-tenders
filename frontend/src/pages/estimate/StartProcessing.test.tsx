@@ -16,11 +16,21 @@ describe("StartScreen", () => {
 
 describe("ProcessingScreen", () => {
   it("на фазе embedding ETA-число не показывается", () => {
-    render(<ProcessingScreen fileName="смета.xlsx" progress={{ phase: "embedding", done: 10, total: 15, etaSeconds: null }} />)
+    render(
+      <ProcessingScreen
+        fileName="смета.xlsx"
+        progress={{ phase: "embedding", done: 10, total: 15, etaSeconds: null }}
+      />
+    )
     expect(screen.queryByText(/сек/i)).not.toBeInTheDocument()
   })
   it("на фазе matching показывается ETA-число", () => {
-    render(<ProcessingScreen fileName="смета.xlsx" progress={{ phase: "matching", done: 5, total: 15, etaSeconds: 8 }} />)
+    render(
+      <ProcessingScreen
+        fileName="смета.xlsx"
+        progress={{ phase: "matching", done: 5, total: 15, etaSeconds: 8 }}
+      />
+    )
     expect(screen.getByText(/сек/i)).toBeInTheDocument()
   })
 })

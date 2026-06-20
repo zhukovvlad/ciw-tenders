@@ -12,13 +12,22 @@ describe("EstimateFlow", () => {
     const input = screen.getByLabelText(/файл сметы/i)
     await userEvent.upload(input, new File(["x"], "смета.xlsx"))
     // после мок-обработки появляется главный экран проверки
-    await waitFor(() => expect(screen.getByText(/проверено/i)).toBeInTheDocument(), { timeout: 5000 })
+    await waitFor(
+      () => expect(screen.getByText(/проверено/i)).toBeInTheDocument(),
+      { timeout: 5000 }
+    )
   })
 
   it("восстанавливает ревью из sessionStorage при монтировании", async () => {
     const { unmount } = render(<EstimateFlow />)
-    await userEvent.upload(screen.getByLabelText(/файл сметы/i), new File(["x"], "смета.xlsx"))
-    await waitFor(() => expect(screen.getByText(/проверено/i)).toBeInTheDocument(), { timeout: 5000 })
+    await userEvent.upload(
+      screen.getByLabelText(/файл сметы/i),
+      new File(["x"], "смета.xlsx")
+    )
+    await waitFor(
+      () => expect(screen.getByText(/проверено/i)).toBeInTheDocument(),
+      { timeout: 5000 }
+    )
     unmount()
     render(<EstimateFlow />) // новый маунт — должен сразу показать ревью
     expect(screen.getByText(/проверено/i)).toBeInTheDocument()

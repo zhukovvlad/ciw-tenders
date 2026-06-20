@@ -6,7 +6,10 @@ import { App } from "@/App"
 import { AUTH_KEY } from "@/lib/mock/auth"
 import { clearReview } from "@/lib/session"
 
-afterEach(() => { localStorage.clear(); clearReview() })
+afterEach(() => {
+  localStorage.clear()
+  clearReview()
+})
 
 describe("App", () => {
   it("после входа показывает поток сметы и переключает на справочник", async () => {
