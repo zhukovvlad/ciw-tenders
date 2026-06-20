@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { saveReview, loadReview, clearReview } from "@/lib/session"
+import { saveReview, loadReview, clearReview, REVIEW_SESSION_KEY } from "@/lib/session"
 import { initReview } from "@/lib/reviewState"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
 
@@ -19,6 +19,10 @@ describe("session", () => {
   it("clearReview стирает", () => {
     saveReview(initReview("x.xlsx", MOCK_ROWS))
     clearReview()
+    expect(loadReview()).toBeNull()
+  })
+  it("loadReview отклоняет неправильную форму объекта", () => {
+    sessionStorage.setItem(REVIEW_SESSION_KEY, JSON.stringify({ foo: 1 }))
     expect(loadReview()).toBeNull()
   })
 })

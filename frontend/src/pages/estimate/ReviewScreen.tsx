@@ -69,7 +69,7 @@ export function ReviewScreen({
     setActiveRowOverride(next ? next.row_number : null)
   }
 
-  const active = state.rows.find((r) => r.row_number === activeRow)
+  const active = queue.find((r) => r.row_number === activeRow)
   useReviewKeyboard({
     enabled: Boolean(active),
     candidateCount: active?.candidates.length ?? 0,

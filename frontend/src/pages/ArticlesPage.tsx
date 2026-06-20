@@ -15,7 +15,9 @@ export function ArticlesPage() {
   function add(e: React.FormEvent) {
     e.preventDefault()
     if (!form.article_code || !form.name) return
-    setArticles((a) => [{ ...form, score: 0 }, ...a])
+    const trimmedCode = form.article_code.trim()
+    if (articles.some((a) => a.article_code === trimmedCode)) return
+    setArticles((a) => [{ ...form, article_code: trimmedCode, score: 0 }, ...a])
     setForm(EMPTY)
   }
 

@@ -17,10 +17,15 @@ export function LoginScreen({ onSuccess }: LoginScreenProps) {
     e.preventDefault()
     setBusy(true)
     setError(false)
-    const ok = await login(email, password)
-    setBusy(false)
-    if (ok) onSuccess()
-    else setError(true)
+    try {
+      const ok = await login(email, password)
+      if (ok) onSuccess()
+      else setError(true)
+    } catch {
+      setError(true)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (

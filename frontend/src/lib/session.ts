@@ -19,7 +19,18 @@ export function loadReview(): ReviewState | null {
   const raw = sessionStorage.getItem(REVIEW_SESSION_KEY)
   if (!raw) return null
   try {
-    return JSON.parse(raw) as ReviewState
+    const parsed = JSON.parse(raw)
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      typeof parsed.fileName !== "string" ||
+      !Array.isArray(parsed.rows) ||
+      parsed.decisions === null ||
+      typeof parsed.decisions !== "object"
+    ) {
+      return null
+    }
+    return parsed as ReviewState
   } catch {
     return null
   }

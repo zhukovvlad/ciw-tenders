@@ -69,7 +69,9 @@ const HEADERS = [
 /** Стенд-ин выгрузки: CSV (`;`-разделитель). Прод заменит на бэкенд .xlsx. */
 export function exportEstimateCsv(state: ReviewState): string {
   const esc = (v: string) =>
-    v.includes(";") || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : v
+    v.includes(";") || v.includes('"') || v.includes("\n") || v.includes("\r")
+      ? `"${v.replace(/"/g, '""')}"`
+      : v
   const lines = [HEADERS.join(";")]
   for (const row of state.rows) {
     const d = decisionFor(state, row)

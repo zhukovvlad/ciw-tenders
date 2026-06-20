@@ -20,7 +20,7 @@ export function StartScreen({ onFile }: StartScreenProps) {
           e.preventDefault()
           setHot(false)
           const f = e.dataTransfer.files?.[0]
-          if (f) onFile(f)
+          if (f && /\.xlsx?$/i.test(f.name)) onFile(f)
         }}
         className={
           "flex min-h-64 cursor-pointer flex-col items-center justify-center gap-3 rounded-lg border border-dashed text-center " +
@@ -44,7 +44,7 @@ export function StartScreen({ onFile }: StartScreenProps) {
           className="sr-only"
           onChange={(e) => {
             const f = e.target.files?.[0]
-            if (f) onFile(f)
+            if (f && /\.xlsx?$/i.test(f.name)) onFile(f)
           }}
         />
       </label>

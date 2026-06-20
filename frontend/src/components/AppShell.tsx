@@ -1,6 +1,7 @@
 // frontend/src/components/AppShell.tsx
 import { FileSpreadsheet, Library } from "lucide-react"
 import { logout } from "@/lib/mock/auth"
+import { clearReview } from "@/lib/session"
 
 interface AppShellProps {
   tab: "estimate" | "articles"
@@ -39,6 +40,7 @@ export function AppShell({ tab, onTab, children }: AppShellProps) {
         </nav>
         <button
           onClick={() => {
+            clearReview()
             logout()
             location.reload()
           }}

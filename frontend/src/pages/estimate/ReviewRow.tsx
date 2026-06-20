@@ -126,6 +126,7 @@ export function ReviewRow({
                 value={query}
                 onChange={(e) => runSearch(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
+                aria-label="Поиск статьи в справочнике"
                 placeholder="Нет верного — искать в справочнике…"
                 className="flex-1 bg-transparent py-2 text-sm outline-none"
               />

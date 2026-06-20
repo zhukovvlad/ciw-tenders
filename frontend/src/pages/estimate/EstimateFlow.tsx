@@ -50,12 +50,17 @@ export function EstimateFlow() {
   async function handleFile(file: File) {
     setFileName(file.name)
     setPhase("processing")
-    const rows = await matchEstimate(file, setProg)
-    // Чистая загрузка нового состояния в reducer (без мутаций): action "load" из Task 5.
-    const fresh = initReview(file.name, rows)
-    dispatch({ type: "load", state: fresh })
-    saveReview(fresh)
-    setPhase("review")
+    try {
+      const rows = await matchEstimate(file, setProg)
+      // Чистая загрузка нового состояния в reducer (без мутаций): action "load" из Task 5.
+      const fresh = initReview(file.name, rows)
+      dispatch({ type: "load", state: fresh })
+      saveReview(fresh)
+      setPhase("review")
+    } catch (err) {
+      console.error(err)
+      setPhase("start")
+    }
   }
 
   function handleNew() {
