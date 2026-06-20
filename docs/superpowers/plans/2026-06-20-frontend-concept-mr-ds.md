@@ -1204,7 +1204,7 @@ Expected: FAIL — модуль не найден.
 
 ```tsx
 // frontend/src/pages/estimate/ReviewScreen.tsx
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Download, Plus } from "lucide-react"
 import type { ReviewState } from "@/lib/types"
 import {
@@ -1228,14 +1228,17 @@ const counts = (state: ReviewState) => ({
 })
 
 export function ReviewScreen({ state, dispatch, onExport, onNewEstimate }: ReviewScreenProps) {
-  const rows = filteredRows(state)
+  // useMemo: rows/queue стабильны между рендерами, пока не изменился state — иначе
+  // новый массив на каждый рендер пересоздавал бы автостарт-эффект (и нервировал
+  // react-hooks/exhaustive-deps). Стабилизируем, а не глушим правило.
+  const rows = useMemo(() => filteredRows(state), [state])
   const { reviewed, total } = progress(state)
   const c = counts(state)
   const [activeRow, setActiveRow] = useState<number | null>(null)
 
   // Очередь навигации = спорные строки ИЗ ВИДИМОГО (отфильтрованного) набора,
   // чтобы «следующая» не уезжала на строку, скрытую активным фильтром.
-  const queue = rows.filter((r) => r.status !== "confident")
+  const queue = useMemo(() => rows.filter((r) => r.status !== "confident"), [rows])
   const gotoNext = () => {
     const idx = queue.findIndex((r) => r.row_number === activeRow)
     const next = queue.slice(idx + 1).find((r) => decisionFor(state, r).kind === "pending")
