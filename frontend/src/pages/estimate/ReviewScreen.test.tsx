@@ -4,7 +4,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useReducer } from "react"
 import { ReviewScreen } from "@/pages/estimate/ReviewScreen"
-import { initReview, reviewReducer, progress } from "@/lib/reviewState"
+import { initReview, reviewReducer } from "@/lib/reviewState"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
 
 function Wrap({ onExport = vi.fn() }: { onExport?: () => void }) {

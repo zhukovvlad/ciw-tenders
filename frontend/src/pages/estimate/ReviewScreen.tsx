@@ -1,5 +1,5 @@
 // frontend/src/pages/estimate/ReviewScreen.tsx
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { Download, Plus } from "lucide-react"
 import type { ReviewState } from "@/lib/types"
 import {
@@ -29,24 +29,29 @@ export function ReviewScreen({ state, dispatch, onExport, onNewEstimate }: Revie
   const rows = useMemo(() => filteredRows(state), [state])
   const { reviewed, total } = progress(state)
   const c = counts(state)
-  const [activeRow, setActiveRow] = useState<number | null>(null)
+  const [activeRowOverride, setActiveRowOverride] = useState<number | null | "auto">("auto")
 
   // Очередь навигации = спорные строки ИЗ ВИДИМОГО (отфильтрованного) набора,
   // чтобы «следующая» не уезжала на строку, скрытую активным фильтром.
   const queue = useMemo(() => rows.filter((r) => r.status !== "confident"), [rows])
+
+  // Производное: если "auto" — первая нерешённая; иначе — явное значение
+  const activeRow = useMemo<number | null>(() => {
+    if (activeRowOverride === "auto") {
+      const first = queue.find((r) => decisionFor(state, r).kind === "pending")
+      return first ? first.row_number : null
+    }
+    return activeRowOverride
+  }, [activeRowOverride, queue, state])
+
+  const setActiveRow = (v: number | null) => setActiveRowOverride(v)
+
   const gotoNext = () => {
     const idx = queue.findIndex((r) => r.row_number === activeRow)
     const next = queue.slice(idx + 1).find((r) => decisionFor(state, r).kind === "pending")
       ?? queue.find((r) => decisionFor(state, r).kind === "pending")
-    setActiveRow(next ? next.row_number : null)
+    setActiveRowOverride(next ? next.row_number : null)
   }
-  // автостарт: первая нерешённая спорная в текущем фильтре
-  useEffect(() => {
-    if (activeRow === null) {
-      const first = queue.find((r) => decisionFor(state, r).kind === "pending")
-      if (first) setActiveRow(first.row_number)
-    }
-  }, [activeRow, queue, state])
 
   const active = state.rows.find((r) => r.row_number === activeRow)
   useReviewKeyboard({

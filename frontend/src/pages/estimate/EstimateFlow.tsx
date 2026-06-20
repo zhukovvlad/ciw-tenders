@@ -1,5 +1,5 @@
 // frontend/src/pages/estimate/EstimateFlow.tsx
-import { useEffect, useReducer, useRef, useState } from "react"
+import { useEffect, useReducer, useState } from "react"
 import type { Progress } from "@/lib/mock/api"
 import { downloadCsv, exportEstimateCsv, matchEstimate } from "@/lib/mock/api"
 import { initReview, progress, reviewReducer } from "@/lib/reviewState"
@@ -12,11 +12,10 @@ import { DoneScreen } from "@/pages/estimate/DoneScreen"
 type Phase = "start" | "processing" | "review" | "done"
 
 export function EstimateFlow() {
-  const restored = useRef(loadReview())
-  const [phase, setPhase] = useState<Phase>(restored.current ? "review" : "start")
-  const [fileName, setFileName] = useState(restored.current?.fileName ?? "")
+  const [phase, setPhase] = useState<Phase>(() => (loadReview() ? "review" : "start"))
+  const [fileName, setFileName] = useState<string>(() => loadReview()?.fileName ?? "")
   const [prog, setProg] = useState<Progress>({ phase: "parsing", done: 0, total: 0, etaSeconds: null })
-  const [state, dispatch] = useReducer(reviewReducer, undefined, () => restored.current ?? initReview("", []))
+  const [state, dispatch] = useReducer(reviewReducer, undefined, () => loadReview() ?? initReview("", []))
 
   // персист ревью на каждое изменение
   useEffect(() => {

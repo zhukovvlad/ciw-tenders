@@ -1,168 +1,58 @@
-import { Loader2, Plus, Trash2 } from "lucide-react"
-import { useEffect, useState } from "react"
-
-import { Badge } from "@/components/ui/badge"
+// frontend/src/pages/ArticlesPage.tsx
+import { useState } from "react"
+import { Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { api, type Article, type ArticleCreate } from "@/lib/api"
+import type { Candidate } from "@/lib/types"
+import { MOCK_ARTICLES } from "@/lib/mock/fixtures"
 
-const EMPTY: ArticleCreate = { article_code: "", name: "", section_name: "" }
+const EMPTY = { article_code: "", name: "", section_name: "" }
 
 export function ArticlesPage() {
-  const [articles, setArticles] = useState<Article[]>([])
-  const [form, setForm] = useState<ArticleCreate>(EMPTY)
-  const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [articles, setArticles] = useState<Candidate[]>(MOCK_ARTICLES)
+  const [form, setForm] = useState(EMPTY)
 
-  async function refresh() {
-    setLoading(true)
-    setError(null)
-    try {
-      setArticles(await api.listArticles())
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    // Первичная загрузка справочника при монтировании.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh()
-  }, [])
-
-  async function handleCreate(e: React.FormEvent) {
+  function add(e: React.FormEvent) {
     e.preventDefault()
-    setSaving(true)
-    setError(null)
-    try {
-      await api.createArticle(form)
-      setForm(EMPTY)
-      await refresh()
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleDelete(id: number) {
-    try {
-      await api.deleteArticle(id)
-      await refresh()
-    } catch (e) {
-      setError((e as Error).message)
-    }
+    if (!form.article_code || !form.name) return
+    setArticles((a) => [{ ...form, score: 0 }, ...a])
+    setForm(EMPTY)
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Новая статья справочника</CardTitle>
-          <CardDescription>
-            Эталонные статьи СМР. При создании строка автоматически векторизуется (Gemini).
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleCreate} className="grid gap-3 sm:grid-cols-[160px_1fr_1fr_auto]">
-            <Input
-              placeholder="Код (СМР-01-001)"
-              value={form.article_code}
-              onChange={(e) => setForm({ ...form, article_code: e.target.value })}
-              required
-            />
-            <Input
-              placeholder="Наименование работы"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required
-            />
-            <Input
-              placeholder="Раздел"
-              value={form.section_name}
-              onChange={(e) => setForm({ ...form, section_name: e.target.value })}
-              required
-            />
-            <Button type="submit" disabled={saving}>
-              {saving ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-              Добавить
-            </Button>
-          </form>
-          {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            Справочник
-            <Badge variant="secondary">{articles.length}</Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> Загрузка…
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[140px]">Код</TableHead>
-                  <TableHead>Наименование</TableHead>
-                  <TableHead>Раздел</TableHead>
-                  <TableHead className="w-[60px]" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {articles.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
-                      Справочник пуст
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  articles.map((a) => (
-                    <TableRow key={a.id}>
-                      <TableCell className="font-mono text-xs">{a.article_code}</TableCell>
-                      <TableCell>{a.name}</TableCell>
-                      <TableCell className="text-muted-foreground">{a.section_name}</TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(a.id)}
-                          aria-label="Удалить"
-                        >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+    <div className="mx-auto max-w-5xl p-6">
+      <h2 className="font-display mb-1 text-lg">Новая статья справочника</h2>
+      <p className="mb-3 text-sm text-muted-foreground">Эталонные статьи СМР. (Мок: добавление локальное, без сети.)</p>
+      <form onSubmit={add} className="mb-6 grid gap-3 sm:grid-cols-[160px_1fr_1fr_auto]">
+        <Input placeholder="Код (СМР-01-001)" value={form.article_code} onChange={(e) => setForm({ ...form, article_code: e.target.value })} />
+        <Input placeholder="Наименование" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <Input placeholder="Раздел" value={form.section_name} onChange={(e) => setForm({ ...form, section_name: e.target.value })} />
+        <Button type="submit"><Plus className="size-4" />Добавить</Button>
+      </form>
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr className="bg-[var(--ds-surface-sunken)] text-left text-xs uppercase tracking-wide text-muted-foreground">
+            <th className="px-4 py-2.5 font-normal">Код</th>
+            <th className="px-4 py-2.5 font-normal">Наименование</th>
+            <th className="px-4 py-2.5 font-normal">Раздел</th>
+            <th className="w-10" />
+          </tr>
+        </thead>
+        <tbody>
+          {articles.map((a) => (
+            <tr key={a.article_code} className="border-t border-[var(--ds-hairline)]">
+              <td className="px-4 py-2 font-mono text-xs">{a.article_code}</td>
+              <td className="px-4 py-2">{a.name}</td>
+              <td className="px-4 py-2 text-muted-foreground">{a.section_name}</td>
+              <td className="px-4 py-2">
+                <button aria-label="Удалить" onClick={() => setArticles((arr) => arr.filter((x) => x.article_code !== a.article_code))}>
+                  <Trash2 className="size-4 text-destructive" />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

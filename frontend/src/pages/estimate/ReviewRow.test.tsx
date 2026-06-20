@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ReviewRow } from "@/pages/estimate/ReviewRow"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
