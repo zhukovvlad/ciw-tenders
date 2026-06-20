@@ -19,3 +19,8 @@ frontend/dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+temp/
+
+# Superpowers brainstorming artifacts
+.superpowers/
