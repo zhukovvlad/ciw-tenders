@@ -121,6 +121,7 @@ export function EstimatePage() {
                     </TableCell>
                     <TableCell className="font-mono">{r.score.toFixed(2)}</TableCell>
                     <TableCell>
+                      {/* @ts-expect-error pre-existing: success/warning Badge variants arrive with the redesign; EstimatePage is removed in Task 13 */}
                       <Badge variant={statusVariant(r.status)}>{r.status}</Badge>
                     </TableCell>
                   </TableRow>
