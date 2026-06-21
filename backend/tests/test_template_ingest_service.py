@@ -31,6 +31,14 @@ def test_first_import_creates_all_pending() -> None:
     assert {a.article_code for a in repo.rows.values()} == {"1", "1.1"}
 
 
+def test_import_resolves_parent_id() -> None:
+    # фейк, как и SQL-адаптер, проставляет parent_id во второй фазе (резолв code->id)
+    repo = FakeImportRepository()
+    _service(repo).import_template(_xlsx(["(1.) Раздел", "(1.1.) Под"]))
+    assert repo.get("1").parent_id is None
+    assert repo.get("1.1").parent_id == repo.get("1").id
+
+
 def test_reimport_unchanged_keeps_embedding() -> None:
     repo = FakeImportRepository()
     _service(repo).import_template(_xlsx(["(1.) Раздел"]))

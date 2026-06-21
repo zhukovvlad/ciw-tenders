@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 
 from app.infrastructure.ai.openrouter_embedder import OpenRouterEmbedder
 
 
-def _embedder(handler, captured) -> OpenRouterEmbedder:
+def _embedder(
+    handler: Callable[[httpx.Request], httpx.Response], captured: dict[str, Any]
+) -> OpenRouterEmbedder:
     client = httpx.Client(transport=httpx.MockTransport(handler))
     return OpenRouterEmbedder(
         api_key="k",

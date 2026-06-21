@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from collections.abc import Callable
 
 import pandas as pd
 from fastapi.testclient import TestClient
@@ -30,7 +31,7 @@ def _user() -> User:
     return User(id=2, email="user@mr.kz", password_hash="h", role=Role.USER)
 
 
-def _service_factory(repo: FakeImportRepository):
+def _service_factory(repo: FakeImportRepository) -> Callable[[], TemplateIngestService]:
     def _factory() -> TemplateIngestService:
         return TemplateIngestService(parser=TemplateParser(), repository=repo)
 

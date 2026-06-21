@@ -32,7 +32,7 @@ class ArticleService:
         if parent_code:
             parent = self._repository.get_by_code(parent_code)
             if parent is None:
-                raise ValueError(f"Родитель с кодом {parent_code} не найден")
+                raise TemplateValidationError(f"Родитель с кодом {parent_code} не найден")
             parent_id = parent.id
             embedding_input = f"{parent.embedding_input}. {name}"
         article = TemplateArticle(

@@ -46,3 +46,9 @@ def test_create_rejects_non_numeric_code() -> None:
     # нечисловой код уронил бы GET /api/articles (cast в int[]) — отвергаем на входе
     with pytest.raises(TemplateValidationError):
         ArticleService(FakeRepository()).create(article_code="1a", name="Кривой")
+
+
+def test_create_missing_parent_raises_validation() -> None:
+    # несуществующий parent_code — ошибка ввода (маппится в 400), а не 500
+    with pytest.raises(TemplateValidationError):
+        ArticleService(FakeRepository()).create(article_code="1.1", name="Лист", parent_code="9")

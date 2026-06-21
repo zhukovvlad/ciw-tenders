@@ -48,7 +48,10 @@ class SqlAlchemyArticleImportRepository(ArticleImportRepository):
                     )
                 )
             for upd in plan.updates:
-                values: dict = {"name": upd.name, "embedding_input": upd.embedding_input}
+                values: dict[str, object] = {
+                    "name": upd.name,
+                    "embedding_input": upd.embedding_input,
+                }
                 if upd.invalidate_embedding:
                     values["embedding"] = None
                 self._session.execute(
@@ -66,16 +69,28 @@ class SqlAlchemyArticleImportRepository(ArticleImportRepository):
             }
             for ins in plan.inserts:
                 if ins.parent_code:
+                    parent_id = id_by_code.get(ins.parent_code)
+                    if parent_id is None:
+                        raise ValueError(
+                            f"Родитель '{ins.parent_code}' не найден для '{ins.article_code}'"
+                        )
                     self._session.execute(
                         update(TemplateArticleModel)
                         .where(TemplateArticleModel.article_code == ins.article_code)
-                        .values(parent_id=id_by_code.get(ins.parent_code))
+                        .values(parent_id=parent_id)
                     )
             for upd in plan.updates:
+                parent_id = None
+                if upd.parent_code is not None:
+                    parent_id = id_by_code.get(upd.parent_code)
+                    if parent_id is None:
+                        raise ValueError(
+                            f"Родитель '{upd.parent_code}' не найден для '{upd.article_code}'"
+                        )
                 self._session.execute(
                     update(TemplateArticleModel)
                     .where(TemplateArticleModel.id == upd.id)
-                    .values(parent_id=id_by_code.get(upd.parent_code) if upd.parent_code else None)
+                    .values(parent_id=parent_id)
                 )
             self._session.commit()
         except Exception:

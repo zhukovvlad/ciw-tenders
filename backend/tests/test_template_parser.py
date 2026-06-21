@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from app.domain.errors import TemplateValidationError
-from app.services.template_parser import TemplateParser
+from app.services.template_parser import ParsedTemplateRow, ParseResult, TemplateParser
 
 
 def _xlsx(values: list[str]) -> bytes:
@@ -16,7 +16,7 @@ def _xlsx(values: list[str]) -> bytes:
     return buffer.getvalue()
 
 
-def _by_code(result) -> dict:
+def _by_code(result: ParseResult) -> dict[str, ParsedTemplateRow]:
     return {r.article_code: r for r in result.rows}
 
 

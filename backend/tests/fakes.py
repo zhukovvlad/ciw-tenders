@@ -157,6 +157,25 @@ class FakeImportRepository(ArticleImportRepository):
                     None if upd.invalidate_embedding else self.rows[upd.article_code].embedding
                 ),
             )
+        # Фаза 2: резолв parent_id по карте code->id — как в SqlAlchemyArticleImportRepository.
+        id_by_code = {a.article_code: a.id for a in self.rows.values()}
+        for planned in (*plan.inserts, *plan.updates):
+            if planned.parent_code is None:
+                continue
+            parent_id = id_by_code.get(planned.parent_code)
+            if parent_id is None:
+                raise ValueError(
+                    f"Родитель '{planned.parent_code}' не найден для '{planned.article_code}'"
+                )
+            current = self.rows[planned.article_code]
+            self.rows[planned.article_code] = TemplateArticle(
+                id=current.id,
+                parent_id=parent_id,
+                article_code=current.article_code,
+                name=current.name,
+                embedding_input=current.embedding_input,
+                embedding=current.embedding,
+            )
 
     # помощники для тестов
     def set_embedding(self, code: str, vector: list[float]) -> None:

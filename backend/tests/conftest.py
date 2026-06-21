@@ -5,6 +5,8 @@ create_engine не подключается при создании). Ключи
 фейки портов и dependency_overrides.
 """
 
+from __future__ import annotations
+
 import os
 
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://test:test@localhost/test")

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from app.core.config import Settings
 
 
-def test_jwt_defaults(monkeypatch) -> None:
+def test_jwt_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     # _env_file=None + delenv: изолируемся от .env-файла И от переменных окружения,
     # чтобы проверять именно дефолты класса (регресс-гард на опечатку в дефолте).
     monkeypatch.delenv("ADMIN_EMAIL", raising=False)
@@ -13,7 +15,7 @@ def test_jwt_defaults(monkeypatch) -> None:
     assert settings.jwt_expire_minutes == 720
 
 
-def test_embedding_defaults(monkeypatch) -> None:
+def test_embedding_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     settings = Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
     assert settings.openrouter_api_key == ""
