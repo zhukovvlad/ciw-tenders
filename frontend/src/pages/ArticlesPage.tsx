@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ArticleTable } from "@/components/articles/ArticleTable"
+import { ManualAddForm } from "@/components/articles/ManualAddForm"
 import { listArticles, deleteArticle } from "@/lib/api/articles"
 import { ApiError } from "@/lib/api/client"
 import { useAuth } from "@/lib/auth/AuthContext"
@@ -60,6 +61,10 @@ export function ArticlesPage() {
           <p className="text-xs text-muted-foreground">
             Доступно в следующих задачах плана (Task 8).
           </p>
+          <div className="mt-4 border-t border-[var(--ds-hairline)] pt-4">
+            <h3 className="mb-2 text-sm font-medium">Добавить статью вручную</h3>
+            <ManualAddForm onCreated={() => void reload()} />
+          </div>
         </div>
       )}
 
