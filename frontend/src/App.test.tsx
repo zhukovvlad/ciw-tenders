@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event"
 import { App } from "@/App"
 import { AUTH_TOKEN_KEY } from "@/lib/api/client"
 import * as authApi from "@/lib/api/auth"
+import * as articlesApi from "@/lib/api/articles"
 import { clearReview } from "@/lib/session"
 
 afterEach(() => {
@@ -22,10 +23,11 @@ describe("App", () => {
       role: "admin",
       is_active: true,
     })
+    vi.spyOn(articlesApi, "listArticles").mockResolvedValue([])
     render(<App />)
     // поток сметы стартует с dropzone
     expect(await screen.findByLabelText(/файл сметы/i)).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: /Справочник/ }))
-    expect(screen.getByText(/Новая статья справочника/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Справочник СМР/i)).toBeInTheDocument()
   })
 })
