@@ -19,9 +19,11 @@ class Settings(BaseSettings):
     database_url: str
     google_api_key: str = ""
     anthropic_api_key: str = ""
+    openrouter_api_key: str = ""
 
     confidence_threshold: float = 0.90
-    embedding_model: str = "text-embedding-004"
+    embedding_base_url: str = "https://openrouter.ai/api/v1"
+    embedding_model: str = "google/gemini-embedding-2"
     llm_model: str = "claude-3-5-sonnet-20240620"
     embedding_dim: int = 768
 

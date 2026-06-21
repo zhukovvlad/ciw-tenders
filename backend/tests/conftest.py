@@ -10,4 +10,5 @@ import os
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://test:test@localhost/test")
 os.environ.setdefault("GOOGLE_API_KEY", "test")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test")
+os.environ.setdefault("OPENROUTER_API_KEY", "test")
 os.environ.setdefault("JWT_SECRET", "test-secret-not-for-production")
