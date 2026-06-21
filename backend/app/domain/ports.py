@@ -8,7 +8,15 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from app.domain.entities import ArticleCandidate, TemplateArticle, TokenPayload, User
+from app.domain.entities import (
+    ArticleCandidate,
+    ExistingArticle,
+    ImportPlan,
+    PendingEmbedding,
+    TemplateArticle,
+    TokenPayload,
+    User,
+)
 
 
 class ArticleRepository(ABC):
@@ -18,10 +26,18 @@ class ArticleRepository(ABC):
     def add(self, article: TemplateArticle) -> TemplateArticle: ...
 
     @abstractmethod
+    def get_by_code(self, code: str) -> TemplateArticle | None: ...
+
+    @abstractmethod
     def list_all(self, limit: int = 100, offset: int = 0) -> list[TemplateArticle]: ...
 
     @abstractmethod
     def delete(self, article_id: int) -> None: ...
+
+    @abstractmethod
+    def has_descendant_codes(self, code: str) -> bool:
+        """Есть ли строки с article_code LIKE code || '.%'."""
+        ...
 
     @abstractmethod
     def search_similar(
@@ -81,3 +97,25 @@ class TokenService(ABC):
 
     @abstractmethod
     def decode(self, token: str) -> TokenPayload: ...
+
+
+class ArticleImportRepository(ABC):
+    """Снимок справочника и атомарное применение плана импорта."""
+
+    @abstractmethod
+    def load_existing(self) -> list[ExistingArticle]: ...
+
+    @abstractmethod
+    def apply_plan(self, plan: ImportPlan) -> None: ...
+
+
+class EmbeddingQueueRepository(ABC):
+    """Очередь векторизации = строки template_articles с embedding IS NULL."""
+
+    @abstractmethod
+    def fetch_pending(self, limit: int) -> list[PendingEmbedding]: ...
+
+    @abstractmethod
+    def save_embedding(self, article_id: int, embedding_input: str, vector: list[float]) -> bool:
+        """Compare-and-swap: пишет вектор только если embedding_input не изменился."""
+        ...

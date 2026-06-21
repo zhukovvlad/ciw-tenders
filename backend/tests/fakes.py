@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.domain.entities import ArticleCandidate, TemplateArticle, TokenPayload, User
+from app.domain.entities import (
+    ArticleCandidate,
+    ExistingArticle,
+    ImportPlan,
+    TemplateArticle,
+    TokenPayload,
+    User,
+)
 from app.domain.errors import TokenError
 from app.domain.ports import (
+    ArticleImportRepository,
     ArticleRepository,
     Embedder,
     LLMMatcher,
@@ -32,19 +40,27 @@ class FakeRepository(ArticleRepository):
     def add(self, article: TemplateArticle) -> TemplateArticle:
         stored = TemplateArticle(
             id=len(self._store) + 1,
+            parent_id=article.parent_id,
             article_code=article.article_code,
             name=article.name,
-            section_name=article.section_name,
+            embedding_input=article.embedding_input,
             embedding=article.embedding,
         )
         self._store.append(stored)
         return stored
+
+    def get_by_code(self, code: str) -> TemplateArticle | None:
+        return next((a for a in self._store if a.article_code == code), None)
 
     def list_all(self, limit: int = 100, offset: int = 0) -> list[TemplateArticle]:
         return self._store[offset : offset + limit]
 
     def delete(self, article_id: int) -> None:
         self._store = [a for a in self._store if a.id != article_id]
+
+    def has_descendant_codes(self, code: str) -> bool:
+        prefix = f"{code}."
+        return any(a.article_code.startswith(prefix) for a in self._store)
 
     def search_similar(self, embedding: list[float], top_k: int = 3) -> list[ArticleCandidate]:
         return self._candidates[:top_k]
@@ -99,3 +115,79 @@ class FakeUserRepository(UserRepository):
         )
         self._store.append(stored)
         return stored
+
+
+class FakeImportRepository(ArticleImportRepository):
+    """In-memory справочник для тестов сервиса импорта.
+
+    rows: code -> TemplateArticle (с id, embedding, embedding_input, parent_id).
+    """
+
+    def __init__(self) -> None:
+        self.rows: dict[str, TemplateArticle] = {}
+        self._next_id = 1
+
+    def load_existing(self) -> list[ExistingArticle]:
+        return [
+            ExistingArticle(id=a.id, article_code=a.article_code, embedding_input=a.embedding_input)
+            for a in self.rows.values()
+        ]
+
+    def apply_plan(self, plan: ImportPlan) -> None:
+        for code in plan.delete_codes:
+            self.rows.pop(code, None)
+        for ins in plan.inserts:
+            self.rows[ins.article_code] = TemplateArticle(
+                id=self._next_id,
+                parent_id=None,
+                article_code=ins.article_code,
+                name=ins.name,
+                embedding_input=ins.embedding_input,
+                embedding=None,
+            )
+            self._next_id += 1
+        for upd in plan.updates:
+            self.rows[upd.article_code] = TemplateArticle(
+                id=upd.id,
+                parent_id=None,
+                article_code=upd.article_code,
+                name=upd.name,
+                embedding_input=upd.embedding_input,
+                embedding=(
+                    None if upd.invalidate_embedding else self.rows[upd.article_code].embedding
+                ),
+            )
+        # Фаза 2: резолв parent_id по карте code->id — как в SqlAlchemyArticleImportRepository.
+        id_by_code = {a.article_code: a.id for a in self.rows.values()}
+        for planned in (*plan.inserts, *plan.updates):
+            if planned.parent_code is None:
+                continue
+            parent_id = id_by_code.get(planned.parent_code)
+            if parent_id is None:
+                raise ValueError(
+                    f"Родитель '{planned.parent_code}' не найден для '{planned.article_code}'"
+                )
+            current = self.rows[planned.article_code]
+            self.rows[planned.article_code] = TemplateArticle(
+                id=current.id,
+                parent_id=parent_id,
+                article_code=current.article_code,
+                name=current.name,
+                embedding_input=current.embedding_input,
+                embedding=current.embedding,
+            )
+
+    # помощники для тестов
+    def set_embedding(self, code: str, vector: list[float]) -> None:
+        a = self.rows[code]
+        self.rows[code] = TemplateArticle(
+            id=a.id,
+            parent_id=a.parent_id,
+            article_code=a.article_code,
+            name=a.name,
+            embedding_input=a.embedding_input,
+            embedding=vector,
+        )
+
+    def get(self, code: str) -> TemplateArticle:
+        return self.rows[code]

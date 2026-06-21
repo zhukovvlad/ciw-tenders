@@ -61,3 +61,7 @@ build:
 # Создать/повысить первого администратора из ADMIN_EMAIL/ADMIN_PASSWORD (backend/.env).
 create-admin:
     cd {{backend}}; uv run python -m app.scripts.create_admin
+
+# Фоновый воркер эмбеддингов (template_articles с embedding IS NULL). --once для одного прохода.
+embed-worker *args:
+    cd {{backend}}; uv run python -m app.scripts.embed_worker {{args}}

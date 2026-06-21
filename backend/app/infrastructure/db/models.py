@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    ForeignKey,
     Integer,
     String,
     Text,
@@ -27,10 +28,22 @@ class TemplateArticleModel(Base):
     __tablename__ = "template_articles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    article_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    parent_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("template_articles.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    article_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    section_name: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector(_EMBEDDING_DIM), nullable=True)
+    embedding_input: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(_EMBEDDING_DIM), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class UserModel(Base):

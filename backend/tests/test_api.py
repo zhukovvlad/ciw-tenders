@@ -22,7 +22,9 @@ def _fake_admin() -> User:
 def _fake_matching_service() -> MatchingService:
     candidates = [
         ArticleCandidate(
-            article=TemplateArticle(id=1, article_code="A", name="Фундамент", section_name="Бетон"),
+            article=TemplateArticle(
+                id=1, article_code="A", name="Фундамент", embedding_input="Бетон. Фундамент"
+            ),
             score=0.97,
         )
     ]

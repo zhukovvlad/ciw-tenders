@@ -15,6 +15,7 @@ from app.core.config import Settings, get_settings
 from app.domain.entities import Role, User
 from app.domain.errors import TokenError
 from app.domain.ports import (
+    ArticleImportRepository,
     ArticleRepository,
     Embedder,
     LLMMatcher,
@@ -23,16 +24,19 @@ from app.domain.ports import (
     UserRepository,
 )
 from app.infrastructure.ai.anthropic_matcher import AnthropicLLMMatcher
-from app.infrastructure.ai.gemini_embedder import GeminiEmbedder
+from app.infrastructure.ai.openrouter_embedder import OpenRouterEmbedder
 from app.infrastructure.auth.jwt_token_service import JwtTokenService
 from app.infrastructure.auth.password_hasher import Argon2PasswordHasher
 from app.infrastructure.db.article_repository import SqlAlchemyArticleRepository
+from app.infrastructure.db.import_repository import SqlAlchemyArticleImportRepository
 from app.infrastructure.db.session import get_session
 from app.infrastructure.db.user_repository import SqlAlchemyUserRepository
 from app.services.article_service import ArticleService
 from app.services.auth_service import AuthService
 from app.services.excel_parser import ExcelEstimateParser
 from app.services.matching_service import MatchingService
+from app.services.template_ingest_service import TemplateIngestService
+from app.services.template_parser import TemplateParser
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -102,7 +106,12 @@ def get_repository(session: Session = Depends(get_session)) -> ArticleRepository
 @lru_cache
 def get_embedder() -> Embedder:
     settings = get_settings()
-    return GeminiEmbedder(api_key=settings.google_api_key, model=settings.embedding_model)
+    return OpenRouterEmbedder(
+        api_key=settings.openrouter_api_key,
+        base_url=settings.embedding_base_url,
+        model=settings.embedding_model,
+        dimensions=settings.embedding_dim,
+    )
 
 
 @lru_cache
@@ -117,9 +126,20 @@ def get_parser() -> ExcelEstimateParser:
 
 def get_article_service(
     repository: ArticleRepository = Depends(get_repository),
-    embedder: Embedder = Depends(get_embedder),
 ) -> ArticleService:
-    return ArticleService(repository=repository, embedder=embedder)
+    return ArticleService(repository=repository)
+
+
+def get_import_repository(
+    session: Session = Depends(get_session),
+) -> ArticleImportRepository:
+    return SqlAlchemyArticleImportRepository(session)
+
+
+def get_template_ingest_service(
+    repository: ArticleImportRepository = Depends(get_import_repository),
+) -> TemplateIngestService:
+    return TemplateIngestService(parser=TemplateParser(), repository=repository)
 
 
 def get_matching_service(
