@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.domain.entities import MatchResult, Role, TemplateArticle, User
+from app.domain.entities import ImportReport, MatchResult, Role, TemplateArticle, User
 
 
 class LoginRequest(BaseModel):
@@ -64,6 +64,30 @@ class ArticleOut(BaseModel):
             article_code=entity.article_code,
             name=entity.name,
             parent_id=entity.parent_id,
+        )
+
+
+class ImportReportOut(BaseModel):
+    created: int
+    updated: int
+    deleted: int
+    unchanged: int
+    skipped: list[str]
+    pending_embeddings: int
+    dry_run: bool
+    force_required: bool
+
+    @classmethod
+    def from_entity(cls, report: ImportReport) -> ImportReportOut:
+        return cls(
+            created=report.created,
+            updated=report.updated,
+            deleted=report.deleted,
+            unchanged=report.unchanged,
+            skipped=report.skipped,
+            pending_embeddings=report.pending_embeddings,
+            dry_run=report.dry_run,
+            force_required=report.force_required,
         )
 
 

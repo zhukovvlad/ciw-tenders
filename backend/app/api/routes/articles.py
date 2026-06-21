@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
-from app.api.deps import get_article_service, get_current_user, require_admin
-from app.api.schemas import ArticleCreate, ArticleOut
+from app.api.deps import (
+    get_article_service,
+    get_current_user,
+    get_template_ingest_service,
+    require_admin,
+)
+from app.api.schemas import ArticleCreate, ArticleOut, ImportReportOut
+from app.domain.errors import DeletionGuardError, TemplateValidationError
 from app.services.article_service import ArticleService
+from app.services.template_ingest_service import TemplateIngestService
 
 router = APIRouter(prefix="/articles", tags=["articles"], dependencies=[Depends(get_current_user)])
 
@@ -41,3 +48,23 @@ def delete_article(
     service: ArticleService = Depends(get_article_service),
 ) -> None:
     service.delete(article_id)
+
+
+@router.post("/import", response_model=ImportReportOut, dependencies=[Depends(require_admin)])
+async def import_template(
+    file: UploadFile = File(...),
+    dry_run: bool = False,
+    force: bool = False,
+    service: TemplateIngestService = Depends(get_template_ingest_service),
+) -> ImportReportOut:
+    content = await file.read()
+    try:
+        report = service.import_template(content, dry_run=dry_run, force=force)
+    except TemplateValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except DeletionGuardError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": str(exc), "force_required": True, "deleted": exc.deleted},
+        ) from exc
+    return ImportReportOut.from_entity(report)
