@@ -46,6 +46,8 @@
    запись статьи (импорт *и* ручной `POST`) кладёт `embedding_input` + `embedding = NULL`;
    заполняет вектор только воркер. Эмбеддинг *запроса* при матчинге остаётся синхронным
    (это другой путь, его не трогаем).
+7. **Эмбеддер** — `google/gemini-embedding-2` через **OpenRouter**, `dimensions: 768`.
+   Обоснование и проверка — см. раздел «Эмбеддер» ниже.
 
 ## Архитектура — две фазы
 
@@ -60,7 +62,7 @@
                           template_articles  ◄── очередь = (embedding IS NULL)
                                   ▲
                                   │  (асинхронно, отдельный процесс)
-                     app.scripts.embed_worker  →  Embedder (Gemini, батчами)
+         app.scripts.embed_worker  →  Embedder (gemini-embedding-2 @768 via OpenRouter)
 ```
 
 Слои Clean Architecture сохраняются: сервисы зависят только от портов
@@ -170,13 +172,47 @@ ParsedTemplateRow:
 выборка `code → (id, embedding_input)`; bulk insert/update/delete; проставление `parent_id`.
 Конкретный набор методов уточняется в плане реализации.
 
+## Эмбеддер: `google/gemini-embedding-2` через OpenRouter
+
+Решение проверено живыми запросами к OpenRouter (июнь 2026):
+
+- OpenRouter поддерживает OpenAI-совместимый `POST /api/v1/embeddings`; батч-вход
+  (`input: [...]`) работает; стоимость копеечная (~$0.0000065 за ~43 токена; весь
+  справочник из 361 строки — доли цента).
+- Гугловские эмбеддеры на OpenRouter: `google/gemini-embedding-2` (новейший,
+  мультимодальный, апрель 2026 — берём его) и `google/gemini-embedding-001` (текстовый GA).
+  `google/text-embedding-004` (прежний в конфиге) на OpenRouter **отсутствует**.
+- Нативная размерность gemini-embedding — 3072, но параметр `dimensions: 768` (Matryoshka)
+  отдаёт ровно 768 → схема `VECTOR(768)` и HNSW-индекс **не меняются**.
+- Причина не брать 3072 «в лоб»: pgvector HNSW для типа `vector` не индексирует >2000
+  измерений (понадобился бы `halfvec`). 768 эту проблему снимает.
+- Ключ: используем уже имеющийся реальный `OPENROUTER_API_KEY` из `backend/.env`
+  (`GOOGLE_API_KEY` там — заглушка, прямого Google-ключа нет).
+
+Реализация — новый адаптер порта `Embedder` в `infrastructure/ai/`:
+`OpenRouterEmbedder` (OpenAI-совместимый клиент, base_url `https://openrouter.ai/api/v1`,
+в запрос добавляется `dimensions`). `embed_batch` шлёт список строк одним запросом.
+Прежний `GeminiEmbedder` (на `google.generativeai`) выводится из использования; зависимость
+`google.generativeai` (с её `FutureWarning`) для эмбеддинга больше не нужна.
+
+Изменения конфига ([config.py](../../../backend/app/core/config.py)): добавить
+`openrouter_api_key` и `embedding_base_url`; `embedding_model` → `google/gemini-embedding-2`;
+`embedding_dim` остаётся `768`. DI в [deps.py](../../../backend/app/api/deps.py) (`get_embedder`)
+переключается на `OpenRouterEmbedder`.
+
+Компромиссы: через OpenAI-совместимый endpoint недоступен гугловский `task_type`
+(retrieval_document/query) — небольшая потеря качества ранжирования; 768 — урезание от 3072
+(на косинусное ранжирование нормировка не влияет). При необходимости максимума качества
+позже — переход на 3072 с индексом `halfvec` (несовместим со старыми векторами, потребует
+переэмбеддинга — данных пока нет, так что сейчас это дёшево).
+
 ## Компонент 3: `embed_worker` (scripts)
 
 `uv run python -m app.scripts.embed_worker [--once] [--batch-size N]`.
 Переиспользует порт `Embedder` (Gemini) и сессию БД. Цикл:
 
-1. Взять пачку строк `WHERE embedding IS NULL` (по умолчанию 100 — учёт лимитов Gemini
-   на размер батча).
+1. Взять пачку строк `WHERE embedding IS NULL` (по умолчанию 100; наименования короткие,
+   лимит gemini-embedding-2 — 8192 токена на вход, упираться не будем).
 2. `embedder.embed_batch([embedding_input, ...])`.
 3. Записать векторы по `id`, коммит пачкой.
 4. Нет строк → при `--once` завершиться; иначе короткий sleep и повтор.
