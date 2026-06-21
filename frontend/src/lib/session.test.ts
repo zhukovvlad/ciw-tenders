@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { saveReview, loadReview, clearReview, REVIEW_SESSION_KEY } from "@/lib/session"
+import {
+  saveReview,
+  loadReview,
+  clearReview,
+  REVIEW_SESSION_KEY,
+} from "@/lib/session"
 import { initReview } from "@/lib/reviewState"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
 

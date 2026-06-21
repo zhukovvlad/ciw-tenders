@@ -27,7 +27,9 @@ export function ProcessingScreen({
         const pct = done
           ? 100
           : active
-            ? (progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100))
+            ? progress.total === 0
+              ? 0
+              : Math.round((progress.done / progress.total) * 100)
             : 0
         return (
           <div key={ph.key} className="mb-3">
