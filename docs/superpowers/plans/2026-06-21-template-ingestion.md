@@ -534,9 +534,11 @@ def get_article_service(
 
 ```python
 class ArticleCreate(BaseModel):
-    article_code: str = Field(..., examples=["1.4.1"])
-    name: str = Field(..., examples=["Мокап фасада"])
-    parent_code: str | None = Field(default=None, examples=["1.4"])
+    # код — только числовые сегменты через точку: list_all сортирует через cast в int[],
+    # нечисловой код уронил бы GET /api/articles (см. Task 7).
+    article_code: str = Field(..., pattern=r"^\d+(\.\d+)*$", examples=["1.4.1"])
+    name: str = Field(..., min_length=1, examples=["Мокап фасада"])
+    parent_code: str | None = Field(default=None, pattern=r"^\d+(\.\d+)*$", examples=["1.4"])
 
 
 class ArticleOut(BaseModel):
@@ -563,7 +565,7 @@ class CandidateOut(BaseModel):
 
 И в `MatchResultOut.from_entity` убрать `section_name=...` из конструкции `CandidateOut` (оставить `article_code`, `name`, `score`).
 
-- [ ] **Step 9: Обновить роут создания статьи под parent_code**
+- [ ] **Step 9: Обновить роуты статей (create под parent_code, поднять дефолт limit)**
 
 В [backend/app/api/routes/articles.py](../../../backend/app/api/routes/articles.py) в `create_article` заменить тело:
 
@@ -574,6 +576,18 @@ class CandidateOut(BaseModel):
         parent_code=payload.parent_code,
     )
     return ArticleOut.from_entity(article)
+```
+
+И поднять дефолтный `limit` в `list_articles`, чтобы дерево (362 строки) не обрезалось при просмотре справочника целиком:
+
+```python
+@router.get("", response_model=list[ArticleOut])
+def list_articles(
+    limit: int = 1000,
+    offset: int = 0,
+    service: ArticleService = Depends(get_article_service),
+) -> list[ArticleOut]:
+    return [ArticleOut.from_entity(a) for a in service.list(limit=limit, offset=offset)]
 ```
 
 - [ ] **Step 10: Поправить листинг кандидатов в anthropic_matcher**
@@ -880,7 +894,7 @@ git commit -m "feat(parser): TemplateParser — парсинг и санитай
 - Test: `backend/tests/test_import_planning.py`
 
 **Interfaces:**
-- Produces (в `domain/entities.py`): `ExistingArticle(id: int, article_code: str, embedding_input: str)`; `PlannedInsert(article_code, name, parent_code, embedding_input)`; `PlannedUpdate(id, article_code, name, parent_code, embedding_input, invalidate_embedding)`; `ImportPlan(inserts, updates, delete_ids, delete_codes, unchanged)`; `ImportReport(created, updated, deleted, unchanged, skipped, pending_embeddings, dry_run)`.
+- Produces (в `domain/entities.py`): `ExistingArticle(id: int, article_code: str, embedding_input: str)`; `PlannedInsert(article_code, name, parent_code, embedding_input)`; `PlannedUpdate(id, article_code, name, parent_code, embedding_input, invalidate_embedding)`; `ImportPlan(inserts, updates, delete_ids, delete_codes, unchanged)`; `ImportReport(created, updated, deleted, unchanged, skipped, pending_embeddings, dry_run, force_required)`.
 - Produces (в `services/import_planning.py`): `compute_plan(parsed: list[ParsedTemplateRow], existing: list[ExistingArticle]) -> ImportPlan`; `requires_force(plan: ImportPlan, existing_total: int, *, fraction_limit: float = 0.20) -> bool`.
 
 - [ ] **Step 1: Добавить dataclasses плана в domain/entities.py**
@@ -933,6 +947,7 @@ class ImportReport:
     skipped: list[str]
     pending_embeddings: int
     dry_run: bool
+    force_required: bool
 ```
 
 - [ ] **Step 2: Добавить DeletionGuardError**
@@ -1008,7 +1023,7 @@ def test_delete_collects_missing_codes() -> None:
 
 def test_requires_force_on_root_deletion() -> None:
     plan = compute_plan(
-        [_p("1.1", "Оставить", "1", "x")] if False else [],  # пустой файл
+        [],  # пустой файл -> всё существующее удаляется
         [ExistingArticle(id=1, article_code="1", embedding_input="Раздел верхнего уровня")],
     )
     # удаляется корневой узел "1"
@@ -1222,8 +1237,8 @@ def test_ancestor_rename_invalidates_descendant() -> None:
     _service(repo).import_template(_xlsx(["(1.) Старое", "(1.1.) Лист"]))
     repo.set_embedding("1.1", [9.0])
     report = _service(repo).import_template(_xlsx(["(1.) Новое", "(1.1.) Лист"]))
-    assert report.updated == 1  # сам корень "1"
-    # "1.1" не менял имя, но его embedding_input изменился из-за предка -> тоже update
+    # корень "1" (сменил имя) + потомок "1.1" (его embedding_input изменился из-за предка)
+    assert report.updated == 2
     assert repo.get("1.1").embedding is None
 
 
@@ -1232,7 +1247,19 @@ def test_dry_run_writes_nothing() -> None:
     report = _service(repo).import_template(_xlsx(["(1.) Раздел"]), dry_run=True)
     assert report.dry_run is True
     assert report.created == 1
+    assert report.force_required is False
     assert repo.rows == {}
+
+
+def test_dry_run_flags_force_required_without_writing() -> None:
+    repo = FakeImportRepository()
+    _service(repo).import_template(_xlsx(["(1.) Раздел", "(2.) Второй"]))
+    # dry-run импорта, который снёс бы корень "2": предупреждаем, но не пишем и не бросаем
+    report = _service(repo).import_template(_xlsx(["(1.) Раздел"]), dry_run=True)
+    assert report.dry_run is True
+    assert report.deleted == 1
+    assert report.force_required is True
+    assert {a.article_code for a in repo.rows.values()} == {"1", "2"}  # ничего не удалено
 
 
 def test_root_deletion_requires_force() -> None:
@@ -1360,12 +1387,14 @@ class TemplateIngestService:
         parsed: ParseResult = self._parser.parse(content)  # бросает TemplateValidationError
         existing = self._repository.load_existing()
         plan = compute_plan(parsed.rows, existing)
+        needs_force = requires_force(plan, existing_total=len(existing))
 
-        report = self._report(plan, parsed, dry_run=dry_run)
+        # force_required считаем всегда — чтобы dry-run честно предупреждал о боевом 409.
+        report = self._report(plan, parsed, dry_run=dry_run, force_required=needs_force)
         if dry_run:
             return report
 
-        if requires_force(plan, existing_total=len(existing)) and not force:
+        if needs_force and not force:
             roots = sum(1 for code in plan.delete_codes if "." not in code)
             raise DeletionGuardError(deleted=len(plan.delete_ids), roots_deleted=roots)
 
@@ -1373,7 +1402,9 @@ class TemplateIngestService:
         return report
 
     @staticmethod
-    def _report(plan: ImportPlan, parsed: ParseResult, *, dry_run: bool) -> ImportReport:
+    def _report(
+        plan: ImportPlan, parsed: ParseResult, *, dry_run: bool, force_required: bool
+    ) -> ImportReport:
         pending = len(plan.inserts) + len(plan.updates)
         return ImportReport(
             created=len(plan.inserts),
@@ -1383,6 +1414,7 @@ class TemplateIngestService:
             skipped=list(parsed.skipped),
             pending_embeddings=pending,
             dry_run=dry_run,
+            force_required=force_required,
         )
 ```
 
@@ -1479,6 +1511,8 @@ class SqlAlchemyArticleImportRepository(ArticleImportRepository):
             raise
 ```
 
+> **Примечание (производительность, не блокер):** на первом импорте это ~362 INSERT + ~362 UPDATE (резолв `parent_id`) в одной транзакции; к облачному Neon с per-statement round-trip это может занять секунды. Для разовой админ-операции приемлемо. Если импорт окажется заметно медленным — оптимизировать резолв `parent_id` (один UPDATE…FROM по карте кодов вместо построчного).
+
 - [ ] **Step 8: Прогнать весь набор тестов и линт**
 
 Run: `cd backend; uv run pytest; uv run ruff check .`
@@ -1518,6 +1552,7 @@ class ImportReportOut(BaseModel):
     skipped: list[str]
     pending_embeddings: int
     dry_run: bool
+    force_required: bool
 
     @classmethod
     def from_entity(cls, report: ImportReport) -> ImportReportOut:
@@ -1529,6 +1564,7 @@ class ImportReportOut(BaseModel):
             skipped=report.skipped,
             pending_embeddings=report.pending_embeddings,
             dry_run=report.dry_run,
+            force_required=report.force_required,
         )
 ```
 
@@ -1739,7 +1775,9 @@ git commit -m "feat(api): POST /api/articles/import (dry_run/force, 400/409, adm
 - Test: `backend/tests/test_article_service.py`, `backend/tests/test_authz_matrix.py` (расширить)
 
 **Interfaces:**
-- Produces: `ArticleRepository.has_descendant_codes(code: str) -> bool` (есть ли строки с `article_code LIKE code || '.%'`). `ArticleService.create` бросает `TemplateValidationError`, если код стал бы предком существующих узлов, и `DuplicateError`, если код уже есть.
+- Produces: `ArticleRepository.has_descendant_codes(code: str) -> bool` (есть ли строки с `article_code LIKE code || '.%'`). `ArticleService.create` бросает `TemplateValidationError`, если код стал бы предком существующих узлов или содержит нечисловой сегмент, и `DuplicateError`, если код уже есть.
+
+> **Примечание:** `DuplicateError` УЖЕ существует в [backend/app/domain/errors.py:10](../../../backend/app/domain/errors.py#L10) (заведён в auth-слое). Новый шаг для него не нужен — только импортировать. `TemplateValidationError` добавлен в Task 3, отдельный код не требуется.
 
 - [ ] **Step 1: Написать падающие тесты сервиса create**
 
@@ -1788,6 +1826,12 @@ def test_create_node_that_would_be_ancestor_raises() -> None:
     # "1.2" стал бы предком уже существующего "1.2.3" — это запрещено (импорт only)
     with pytest.raises(TemplateValidationError):
         svc.create(article_code="1.2", name="Промежуточный", parent_code="1")
+
+
+def test_create_rejects_non_numeric_code() -> None:
+    # нечисловой код уронил бы GET /api/articles (cast в int[]) — отвергаем на входе
+    with pytest.raises(TemplateValidationError):
+        ArticleService(FakeRepository()).create(article_code="1a", name="Кривой")
 ```
 
 - [ ] **Step 2: Добавить has_descendant_codes в фейк и порт**
@@ -1814,7 +1858,7 @@ Expected: FAIL — `create` не бросает `DuplicateError`/`TemplateValida
 
 - [ ] **Step 4: Добавить guard'ы в ArticleService.create**
 
-В [backend/app/services/article_service.py](../../../backend/app/services/article_service.py) обновить импорт и начало `create`:
+В [backend/app/services/article_service.py](../../../backend/app/services/article_service.py) обновить импорты (добавить `import re` в начало файла) и начало `create`:
 
 ```python
 from app.domain.errors import DuplicateError, TemplateValidationError
@@ -1823,6 +1867,10 @@ from app.domain.errors import DuplicateError, TemplateValidationError
     def create(
         self, article_code: str, name: str, parent_code: str | None = None
     ) -> TemplateArticle:
+        if re.fullmatch(r"\d+(\.\d+)*", article_code) is None:
+            raise TemplateValidationError(
+                f"Код {article_code} должен состоять из числовых сегментов (напр. 1.4.1)"
+            )
         if self._repository.get_by_code(article_code) is not None:
             raise DuplicateError(f"Статья с кодом {article_code} уже существует")
         if self._repository.has_descendant_codes(article_code):
@@ -2084,6 +2132,8 @@ class SqlAlchemyEmbeddingQueueRepository(EmbeddingQueueRepository):
         return result.rowcount > 0
 ```
 
+> **Примечание:** коммит здесь построчный (на каждый `save_embedding`), а не одной пачкой. Это намеренно: при падении воркера на середине уже записанные векторы сохраняются, остаток остаётся `IS NULL` и подберётся при следующем проходе. `run_once` ничего дополнительно не коммитит.
+
 - [ ] **Step 8: Реализовать CLI-скрипт воркера**
 
 Создать `backend/app/scripts/embed_worker.py`:
@@ -2217,7 +2267,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Запустить импорт реального файла**
 
 Run: `cd backend; $env:PYTHONIOENCODING="utf-8"; uv run python -m app.scripts.smoke_import ../temp/Шаблон.xlsx`
-Expected: `ImportReport(created=362, updated=0, deleted=0, unchanged=0, skipped=[], pending_embeddings=362, dry_run=False)`.
+Expected: `ImportReport(created=362, updated=0, deleted=0, unchanged=0, skipped=[], pending_embeddings=362, dry_run=False, force_required=False)`.
 
 - [ ] **Step 5: Запустить воркер на один проход**
 
