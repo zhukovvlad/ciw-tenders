@@ -22,7 +22,11 @@
 | `just install` | `uv sync` (бэк) + `npm install` (фронт) |
 | `just dev-back` | FastAPI на `:8260` (hot-reload) |
 | `just dev-front` | Vite на `:5173` (проксирует `/api` → `:8260`) |
-| `just lint` | ruff + eslint |
+| `just migrate` | `alembic upgrade head` (откат — `just migrate-down`) |
+| `just create-admin` | создать/повысить админа из `ADMIN_EMAIL`/`ADMIN_PASSWORD` (`backend/.env`) |
+| `just embed-worker [--once]` | посчитать эмбеддинги справочника (строки с `embedding IS NULL`) |
+| `just lint` | ruff + eslint + prettier `--check` |
+| `just fmt` | ruff `--fix`/`format` + prettier `--write` |
 | `just test` | pytest + vitest |
 | `just build` | production-сборка фронта |
 
@@ -39,7 +43,8 @@
 - [backend/app/services/](backend/app/services/) — сценарии (use cases): парсинг Excel, сопоставление, CRUD.
   Зависят только от портов.
 - [backend/app/infrastructure/](backend/app/infrastructure/) — адаптеры портов: БД (SQLAlchemy+pgvector),
-  Gemini, Anthropic. Здесь живут все внешние SDK.
+  OpenRouter (эмбеддинги, `gemini-embedding-2` через `httpx`), Anthropic (LLM-арбитр), JWT/argon2 (auth).
+  Здесь живут все внешние SDK/HTTP.
 - [backend/app/api/](backend/app/api/) — FastAPI: роуты, DTO-схемы, DI в [deps.py](backend/app/api/deps.py)
   (composition root). DTO ≠ доменные сущности — не смешивать.
 
@@ -51,6 +56,21 @@
   [matching_service.py](backend/app/services/matching_service.py).
 - **Auth-слой:** порты `UserRepository` / `PasswordHasher` / `TokenService` в `domain/ports.py`;
   роли `user` / `admin`; enforcement через `get_current_user` / `require_admin` в `api/deps.py`.
+- **Эмбеддинги справочника — асинхронно:** при импорте/добавлении статья получает `embedding_input`
+  и `embedding=NULL`; вектор дозаполняет воркер `just embed-worker` (CAS по `embedding_input`).
+  Поиск исключает строки с `embedding IS NULL`. Воркер пока ручной — см. [docs/TECH_DEBT.md](docs/TECH_DEBT.md).
+
+## Фронтенд
+
+- Реальный API-слой — `frontend/src/lib/api/`: `client.ts` (единый `ApiError`, Bearer-токен из
+  `sessionStorage` по ключу `ciw.auth.token`, колбэк `onUnauthorized`, multipart-загрузка) + модули
+  `auth` / `articles`. `client.ts` — единственный, кто читает токен из стораджа.
+- Аутентификация — `lib/auth/AuthContext` (JWT в `sessionStorage`, **не** localStorage); хук `useAuth`
+  вынесен в отдельный `lib/auth/useAuth.ts` (требование `react-refresh`). Гейтинг по роли на клиенте —
+  косметика; реальный enforcement на бэке (`require_admin`).
+- Справочник СМР (`pages/ArticlesPage` + `components/articles/*`: таблица, ручное добавление, загрузка
+  шаблона, полная очистка) ходит в **реальный** бэкенд. Поток смет (`pages/estimate/`) пока на **моках**
+  (`lib/mock/`) — не трогать его и `Candidate`/`MOCK_*` при работе со справочником.
 
 ## БД
 
@@ -75,8 +95,11 @@
 
 - **Бэкенд:** ruff (line-length 100, `target py311`), type hints обязательны, `from __future__ import annotations`.
   Запускать `uv run ruff check .` перед коммитом.
-- **Фронтенд:** eslint строгий. shadcn-компоненты в `src/components/ui/` — вендорные, не править.
-  Импорты через alias `@/`. Иконки — `lucide-react`.
+- **Фронтенд:** eslint строгий + Prettier (`printWidth 80`, `endOfLine lf`) — `just lint` гоняет
+  `prettier --check`, `just fmt` форматирует. shadcn-компоненты в `src/components/ui/` — вендорные, не править.
+  Импорты через alias `@/`. Иконки — `lucide-react`. TypeScript strict; `npm run typecheck` = `tsc -b`
+  (корневой `tsconfig.json` — solution-файл со ссылками на `tsconfig.app.json`/`tsconfig.node.json`;
+  `tsc --noEmit` без `-b` ничего не проверит). `erasableSyntaxOnly` включён — без parameter properties/enum.
 - Зависимости бэка — только через `uv add` (не редактировать `pyproject.toml` руками без нужды).
 
 ## Критические ограничения
@@ -91,7 +114,8 @@
 - `uv` установлен в `~/.local/bin` — если `uv: command not found`, перезапустить терминал (PATH).
 - Кириллица в stdout Python падает с `UnicodeEncodeError` (cp1252) — ставить `PYTHONIOENCODING=utf-8`.
 - Бэкенд на порту **8260** (не 8000 — машина общая, 8000 занят другим пользователем).
-- `google.generativeai` выдаёт `FutureWarning` (deprecated) — пакет из ТЗ, оставлен намеренно.
+- Переводы строк: `.gitattributes` форсит **LF** (перекрывает `core.autocrlf=true` на Windows) —
+  согласовано с `.prettierrc` (`endOfLine: lf`). Держать файлы в LF.
 
 ## Документация
 

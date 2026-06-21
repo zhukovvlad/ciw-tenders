@@ -8,19 +8,6 @@
 
 ---
 
-## 🔴 ORM `TemplateArticleModel` расходится со схемой (иерархия)
-
-- **Что:** [models.py](../backend/app/infrastructure/db/models.py) для `template_articles` всё ещё на
-  `section_name` и без `parent_id`, а Alembic-ревизия `0001` создаёт таблицу с `parent_id`
-  (иерархия разделов) и **без** `section_name`.
-- **Почему отложено:** иерархию схемы ввели отдельно от переработки матчинга; сознательно решили
-  «решать по мере поступления» (см. [devlog 2026-06-19-auth](devlog/2026-06-19-auth-authorization.md)).
-- **Последствия:** запросы к `template_articles` через ORM упадут на реальной схеме; `--autogenerate`
-  выдаст ложный diff (add `section_name` / drop `parent_id`). Поиск/матчинг и `article_service`
-  (эмбеддинг строит из `section_name`) надо переписать под дерево (`parent_id` / рекурсивный CTE).
-- **Как чинить:** привести `TemplateArticleModel`, `TemplateArticle` (entity), репозиторий,
-  `article_service`, `anthropic_matcher`, DTO к иерархии; решить, откуда брать «раздел» (JOIN/CTE).
-
 ## 🟡 Alembic autogenerate шумит на `Vector`/HNSW
 
 - **Что:** при будущих `just makemigration` автогенерация некорректно интроспектит тип `Vector` и
@@ -28,6 +15,34 @@
 - **Как чинить:** добавить `include_object`/`include_name`-фильтр в
   [alembic/env.py](../backend/alembic/env.py) при первой реальной автогенерации. Для `0001` неактуально
   (написана руками).
+
+## 🟡 Воркер эмбеддингов запускается только вручную
+
+- **Что:** воркер эмбеддингов ([embed_worker.py](../backend/app/scripts/embed_worker.py),
+  очередь = `template_articles` с `embedding IS NULL`) — отдельный CLI, поднимается только
+  руками (`just embed-worker [--once] [--batch-size N]`). Бэкенд (`just dev-back` = uvicorn)
+  его не стартует; в [main.py](../backend/app/main.py) нет ни startup-хука, ни фоновой
+  задачи/потока.
+- **Почему отложено:** прогон дёргает платный эмбеддер (OpenRouter) и ходит в сеть, поэтому
+  на этапе template-ingestion сознательно оставили ручным, чтобы не жечь токены на каждый
+  старт/импорт. Но после загрузки/изменения справочника новые строки висят с `embedding IS NULL`,
+  пока кто-то не вспомнит запустить воркер — это легко забыть (см. смоук catalog-admin-ui:
+  импорт прошёл, а матчинг бы молча работал по неполному индексу).
+- **Последствия:** RAG-сопоставление смет идёт по справочнику без свежих эмбеддингов до
+  ручного прогона. На отображение справочника и сам импорт не влияет.
+- **Как чинить (выбрать подход):**
+  - **По расписанию:** периодический прогон `run_once` (cron / APScheduler / системный таймер)
+    — просто, но есть лаг и пустые проходы (хотя `run_once` дёшев, если очередь пуста:
+    `fetch_pending` вернёт `[]` и эмбеддер не вызывается).
+  - **По событию обновления таблицы:** триггерить дозаполнение при изменении `template_articles`
+    (insert/update со сбросом `embedding=NULL`). Варианты: после `import_template`/manual-create
+    в сервисе ставить задачу в очередь (FastAPI BackgroundTasks / отдельный воркер-процесс,
+    читающий из БД-очереди); либо PG `LISTEN/NOTIFY` на изменение таблицы → воркер реагирует.
+    Учесть: эмбеддинг должен оставаться вне HTTP-запроса (платный + долгий), идемпотентным и
+    переживать сбой (как сейчас — CAS-апдейт по `id AND embedding_input`).
+  - В любом варианте сохранить ручной `--once` для бэкофилла/отладки.
+- **Связано:** [embedding_worker.py](../backend/app/services/embedding_worker.py) (`run_once`,
+  батч 100), [embedding_queue_repository.py](../backend/app/infrastructure/db/embedding_queue_repository.py).
 
 ## 🟢 `GET /api/articles` — мягкий потолок `limit=1000`
 
@@ -68,4 +83,6 @@
 
 ## Погашено
 
-_(пусто)_
+- **🔴 ORM `TemplateArticleModel` расходился со схемой (иерархия)** — закрыто фичей template-ingestion
+  (PR #3). `models.py` теперь на дереве: `parent_id` (self-FK), `embedding_input`, `embedding` (VECTOR);
+  `section_name` удалён везде. `article_service`/матчинг/репозиторий/DTO переведены на дерево.

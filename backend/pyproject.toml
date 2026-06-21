@@ -1,7 +1,7 @@
 [project]
 name = "ciw-backend"
 version = "0.1.0"
-description = "Автоматизатор строительных смет — бэкенд (RAG: pgvector + Gemini + Anthropic)"
+description = "Автоматизатор строительных смет — бэкенд (RAG: pgvector + OpenRouter + Anthropic)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
