@@ -23,6 +23,7 @@ export function WipeCatalog({ onWiped }: { onWiped: () => void }) {
       onWiped()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось очистить справочник")
+      setWord("")
     } finally {
       setBusy(false)
     }
