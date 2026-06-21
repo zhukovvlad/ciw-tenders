@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ArticleTable } from "@/components/articles/ArticleTable"
 import { ManualAddForm } from "@/components/articles/ManualAddForm"
+import { TemplateUpload } from "@/components/articles/TemplateUpload"
 import { listArticles, deleteArticle } from "@/lib/api/articles"
 import { ApiError } from "@/lib/api/client"
 import { useAuth } from "@/lib/auth/AuthContext"
@@ -58,9 +59,7 @@ export function ArticlesPage() {
       {isAdmin && (
         <div className="mb-6 rounded-md border border-[var(--ds-hairline)] p-4">
           <h3 className="mb-2 text-sm font-medium">Загрузить шаблон</h3>
-          <p className="text-xs text-muted-foreground">
-            Доступно в следующих задачах плана (Task 8).
-          </p>
+          <TemplateUpload onApplied={() => void reload()} />
           <div className="mt-4 border-t border-[var(--ds-hairline)] pt-4">
             <h3 className="mb-2 text-sm font-medium">Добавить статью вручную</h3>
             <ManualAddForm onCreated={() => void reload()} />
