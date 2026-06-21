@@ -24,11 +24,12 @@ class Role(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class TemplateArticle:
-    """Эталонная статья справочника СМР."""
+    """Эталонная статья справочника СМР (узел дерева через parent_id)."""
 
     article_code: str
     name: str
-    section_name: str
+    embedding_input: str
+    parent_id: int | None = None
     id: int | None = None
     embedding: list[float] | None = None
 

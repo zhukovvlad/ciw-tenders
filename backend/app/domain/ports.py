@@ -18,6 +18,9 @@ class ArticleRepository(ABC):
     def add(self, article: TemplateArticle) -> TemplateArticle: ...
 
     @abstractmethod
+    def get_by_code(self, code: str) -> TemplateArticle | None: ...
+
+    @abstractmethod
     def list_all(self, limit: int = 100, offset: int = 0) -> list[TemplateArticle]: ...
 
     @abstractmethod

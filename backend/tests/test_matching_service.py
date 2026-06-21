@@ -8,7 +8,9 @@ from tests.fakes import FakeEmbedder, FakeLLMMatcher, FakeRepository
 
 
 def _article(code: str) -> TemplateArticle:
-    return TemplateArticle(id=1, article_code=code, name=f"Работа {code}", section_name="Раздел")
+    return TemplateArticle(
+        id=1, article_code=code, name=f"Работа {code}", embedding_input=f"Раздел. Работа {code}"
+    )
 
 
 def test_confident_match_when_score_above_threshold() -> None:

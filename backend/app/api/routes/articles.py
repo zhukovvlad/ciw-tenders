@@ -13,7 +13,7 @@ router = APIRouter(prefix="/articles", tags=["articles"], dependencies=[Depends(
 
 @router.get("", response_model=list[ArticleOut])
 def list_articles(
-    limit: int = 100,
+    limit: int = 1000,
     offset: int = 0,
     service: ArticleService = Depends(get_article_service),
 ) -> list[ArticleOut]:
@@ -29,7 +29,7 @@ def create_article(
     article = service.create(
         article_code=payload.article_code,
         name=payload.name,
-        section_name=payload.section_name,
+        parent_code=payload.parent_code,
     )
     return ArticleOut.from_entity(article)
 

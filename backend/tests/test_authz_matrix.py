@@ -14,7 +14,6 @@ from app.domain.entities import Role, User
 from app.main import app
 from app.services.article_service import ArticleService
 from tests.fakes import (
-    FakeEmbedder,
     FakePasswordHasher,
     FakeRepository,
     FakeTokenService,
@@ -31,7 +30,7 @@ def _wire() -> None:
     app.dependency_overrides[get_token_service] = FakeTokenService
     app.dependency_overrides[get_password_hasher] = FakePasswordHasher
     app.dependency_overrides[get_article_service] = lambda: ArticleService(
-        repository=FakeRepository(), embedder=FakeEmbedder()
+        repository=FakeRepository()
     )
 
 
@@ -58,7 +57,7 @@ def test_articles_write_forbidden_for_user() -> None:
     resp = client.post(
         "/api/articles",
         headers={"Authorization": "Bearer token::2"},
-        json={"article_code": "X", "name": "n", "section_name": "s"},
+        json={"article_code": "1", "name": "n"},
     )
     assert resp.status_code == 403
 
@@ -69,6 +68,6 @@ def test_articles_write_allowed_for_admin() -> None:
     resp = client.post(
         "/api/articles",
         headers={"Authorization": "Bearer token::1"},
-        json={"article_code": "X", "name": "n", "section_name": "s"},
+        json={"article_code": "1", "name": "n"},
     )
     assert resp.status_code == 201

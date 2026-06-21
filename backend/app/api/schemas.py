@@ -44,16 +44,18 @@ class UserOut(BaseModel):
 
 
 class ArticleCreate(BaseModel):
-    article_code: str = Field(..., examples=["СМР-01-001"])
-    name: str = Field(..., examples=["Устройство монолитных бетонных фундаментов"])
-    section_name: str = Field(..., examples=["Бетонные работы"])
+    # код — только числовые сегменты через точку: list_all сортирует через cast в int[],
+    # нечисловой код уронил бы GET /api/articles (см. Task 7).
+    article_code: str = Field(..., pattern=r"^\d+(\.\d+)*$", examples=["1.4.1"])
+    name: str = Field(..., min_length=1, examples=["Мокап фасада"])
+    parent_code: str | None = Field(default=None, pattern=r"^\d+(\.\d+)*$", examples=["1.4"])
 
 
 class ArticleOut(BaseModel):
     id: int
     article_code: str
     name: str
-    section_name: str
+    parent_id: int | None
 
     @classmethod
     def from_entity(cls, entity: TemplateArticle) -> ArticleOut:
@@ -61,14 +63,13 @@ class ArticleOut(BaseModel):
             id=entity.id or 0,
             article_code=entity.article_code,
             name=entity.name,
-            section_name=entity.section_name,
+            parent_id=entity.parent_id,
         )
 
 
 class CandidateOut(BaseModel):
     article_code: str
     name: str
-    section_name: str
     score: float
 
 
@@ -94,7 +95,6 @@ class MatchResultOut(BaseModel):
                 CandidateOut(
                     article_code=c.article.article_code,
                     name=c.article.name,
-                    section_name=c.article.section_name,
                     score=round(c.score, 4),
                 )
                 for c in result.candidates

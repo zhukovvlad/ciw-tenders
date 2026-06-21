@@ -33,7 +33,7 @@ class AnthropicLLMMatcher(LLMMatcher):
             return None
 
         listing = "\n".join(
-            f"{i + 1}. [{c.article.article_code}] {c.article.section_name} — {c.article.name}"
+            f"{i + 1}. [{c.article.article_code}] {c.article.name}"
             for i, c in enumerate(candidates)
         )
         user_prompt = f'Работа из сметы: "{query}"\n\nКандидаты:\n{listing}'

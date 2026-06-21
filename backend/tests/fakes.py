@@ -32,13 +32,17 @@ class FakeRepository(ArticleRepository):
     def add(self, article: TemplateArticle) -> TemplateArticle:
         stored = TemplateArticle(
             id=len(self._store) + 1,
+            parent_id=article.parent_id,
             article_code=article.article_code,
             name=article.name,
-            section_name=article.section_name,
+            embedding_input=article.embedding_input,
             embedding=article.embedding,
         )
         self._store.append(stored)
         return stored
+
+    def get_by_code(self, code: str) -> TemplateArticle | None:
+        return next((a for a in self._store if a.article_code == code), None)
 
     def list_all(self, limit: int = 100, offset: int = 0) -> list[TemplateArticle]:
         return self._store[offset : offset + limit]

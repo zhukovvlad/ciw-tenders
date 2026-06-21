@@ -122,9 +122,8 @@ def get_parser() -> ExcelEstimateParser:
 
 def get_article_service(
     repository: ArticleRepository = Depends(get_repository),
-    embedder: Embedder = Depends(get_embedder),
 ) -> ArticleService:
-    return ArticleService(repository=repository, embedder=embedder)
+    return ArticleService(repository=repository)
 
 
 def get_matching_service(
