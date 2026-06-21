@@ -13,19 +13,28 @@ export function ArticlesPage() {
   const [status, setStatus] = useState<"loading" | "error" | "ready">("loading")
   const [actionError, setActionError] = useState<string | null>(null)
 
-  const reload = useCallback(async () => {
+  const [reloadKey, setReloadKey] = useState(0)
+  const reload = useCallback(() => {
     setStatus("loading")
-    try {
-      setArticles(await listArticles())
-      setStatus("ready")
-    } catch {
-      setStatus("error")
-    }
+    setReloadKey((k) => k + 1)
   }, [])
 
   useEffect(() => {
-    void reload()
-  }, [reload])
+    let cancelled = false
+    listArticles()
+      .then((data) => {
+        if (!cancelled) {
+          setArticles(data)
+          setStatus("ready")
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStatus("error")
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [reloadKey])
 
   async function handleDelete(id: number) {
     if (!window.confirm("Удалить статью?")) return
