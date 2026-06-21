@@ -127,3 +127,11 @@ class ImportReport:
     pending_embeddings: int
     dry_run: bool
     force_required: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PendingEmbedding:
+    """Строка справочника, ожидающая векторизации."""
+
+    id: int
+    embedding_input: str
