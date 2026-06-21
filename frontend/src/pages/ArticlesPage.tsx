@@ -41,7 +41,7 @@ export function ArticlesPage() {
     setActionError(null)
     try {
       await deleteArticle(id)
-      await reload()
+      reload()
     } catch (err) {
       // никаких тихих провалов — показываем ошибку удаления
       setActionError(err instanceof ApiError ? err.message : "Не удалось удалить статью")
