@@ -1,11 +1,10 @@
 export const AUTH_TOKEN_KEY = "ciw.auth.token"
 
 export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string
-  ) {
+  status: number
+  constructor(status: number, message: string) {
     super(message)
+    this.status = status
     this.name = "ApiError"
   }
 }
