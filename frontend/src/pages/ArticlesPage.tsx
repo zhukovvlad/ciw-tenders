@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ArticleTable } from "@/components/articles/ArticleTable"
 import { ManualAddForm } from "@/components/articles/ManualAddForm"
+import { WipeCatalog } from "@/components/articles/WipeCatalog"
 import { TemplateUpload } from "@/components/articles/TemplateUpload"
 import { listArticles, deleteArticle } from "@/lib/api/articles"
 import { ApiError } from "@/lib/api/client"
@@ -63,6 +64,10 @@ export function ArticlesPage() {
           <div className="mt-4 border-t border-[var(--ds-hairline)] pt-4">
             <h3 className="mb-2 text-sm font-medium">Добавить статью вручную</h3>
             <ManualAddForm onCreated={() => void reload()} />
+          </div>
+          <div className="mt-4 border-t border-[var(--ds-hairline)] pt-4">
+            <h3 className="mb-2 text-sm font-medium">Опасная зона</h3>
+            <WipeCatalog onWiped={() => void reload()} />
           </div>
         </div>
       )}
