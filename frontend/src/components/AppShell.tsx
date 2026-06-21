@@ -1,6 +1,6 @@
 // frontend/src/components/AppShell.tsx
 import { FileSpreadsheet, Library } from "lucide-react"
-import { logout } from "@/lib/mock/auth"
+import { useAuth } from "@/lib/auth/AuthContext"
 import { clearReview } from "@/lib/session"
 
 interface AppShellProps {
@@ -10,6 +10,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ tab, onTab, children }: AppShellProps) {
+  const { user, role, logout } = useAuth()
   const link = (
     key: "estimate" | "articles",
     label: string,
@@ -38,16 +39,22 @@ export function AppShell({ tab, onTab, children }: AppShellProps) {
           {link("estimate", "Смета", FileSpreadsheet)}
           {link("articles", "Справочник", Library)}
         </nav>
-        <button
-          onClick={() => {
-            clearReview()
-            logout()
-            location.reload()
-          }}
-          className="ml-auto text-xs text-muted-foreground hover:text-foreground"
-        >
-          Выйти
-        </button>
+        <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+          {user && (
+            <span>
+              {user.email} · {role === "admin" ? "админ" : "пользователь"}
+            </span>
+          )}
+          <button
+            onClick={() => {
+              clearReview()
+              logout()
+            }}
+            className="hover:text-foreground"
+          >
+            Выйти
+          </button>
+        </div>
       </header>
       <main>{children}</main>
     </div>

@@ -1,28 +1,28 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { login } from "@/lib/mock/auth"
+import { ApiError } from "@/lib/api/client"
+import { useAuth } from "@/lib/auth/AuthContext"
 
-interface LoginScreenProps {
-  onSuccess: () => void
-}
-
-export function LoginScreen({ onSuccess }: LoginScreenProps) {
+export function LoginScreen() {
+  const { login } = useAuth()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [error, setError] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
-    setError(false)
+    setError(null)
     try {
-      const ok = await login(email, password)
-      if (ok) onSuccess()
-      else setError(true)
-    } catch {
-      setError(true)
+      await login(email, password)
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.status === 401
+          ? "Неверный логин или пароль"
+          : "Не удалось войти, попробуйте позже",
+      )
     } finally {
       setBusy(false)
     }
@@ -33,17 +33,11 @@ export function LoginScreen({ onSuccess }: LoginScreenProps) {
       <div className="font-display text-2xl">
         MR <span className="text-[var(--ds-accent-hover)]">·</span> Сметы
       </div>
-      <div className="mb-5 text-xs text-muted-foreground">
-        Автоматизатор строительных смет
-      </div>
+      <div className="mb-5 text-xs text-muted-foreground">Автоматизатор строительных смет</div>
       <form onSubmit={submit} className="flex w-60 flex-col gap-3">
         <label className="text-xs text-[var(--ds-text-2)]">
           Логин
-          <Input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="mt-1"
-          />
+          <Input value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1" />
         </label>
         <label className="text-xs text-[var(--ds-text-2)]">
           Пароль
@@ -54,9 +48,7 @@ export function LoginScreen({ onSuccess }: LoginScreenProps) {
             className="mt-1"
           />
         </label>
-        {error && (
-          <p className="text-xs text-destructive">Неверный логин или пароль</p>
-        )}
+        {error && <p className="text-xs text-destructive">{error}</p>}
         <Button type="submit" disabled={busy}>
           Войти
         </Button>

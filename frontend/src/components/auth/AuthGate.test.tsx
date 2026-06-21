@@ -1,22 +1,43 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
-import { AuthGate } from "@/components/auth/AuthGate"
-import { logout } from "@/lib/mock/auth"
+import { AUTH_TOKEN_KEY } from "@/lib/api/client"
+import * as authApi from "@/lib/api/auth"
+import { AuthProvider } from "@/lib/auth/AuthContext"
+import { AuthGate } from "./AuthGate"
 
-afterEach(() => logout())
+afterEach(() => {
+  sessionStorage.clear()
+  vi.restoreAllMocks()
+})
 
 describe("AuthGate", () => {
-  it("показывает вход, затем контент после логина", async () => {
+  it("без токена показывает форму входа, не контент", async () => {
     render(
-      <AuthGate>
-        <div>Секретный контент</div>
-      </AuthGate>
+      <AuthProvider>
+        <AuthGate>
+          <div>Секрет</div>
+        </AuthGate>
+      </AuthProvider>,
     )
-    expect(screen.queryByText("Секретный контент")).not.toBeInTheDocument()
-    await userEvent.type(screen.getByLabelText(/логин/i), "operator")
-    await userEvent.type(screen.getByLabelText(/пароль/i), "secret")
-    await userEvent.click(screen.getByRole("button", { name: /Войти/ }))
-    expect(await screen.findByText("Секретный контент")).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: /Войти/ })).toBeInTheDocument()
+    expect(screen.queryByText("Секрет")).not.toBeInTheDocument()
+  })
+
+  it("с валидным токеном показывает контент", async () => {
+    sessionStorage.setItem(AUTH_TOKEN_KEY, "tok")
+    vi.spyOn(authApi, "me").mockResolvedValue({
+      id: 1,
+      email: "a@mr.kz",
+      role: "admin",
+      is_active: true,
+    })
+    render(
+      <AuthProvider>
+        <AuthGate>
+          <div>Секрет</div>
+        </AuthGate>
+      </AuthProvider>,
+    )
+    expect(await screen.findByText("Секрет")).toBeInTheDocument()
   })
 })

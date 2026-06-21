@@ -1,22 +1,30 @@
 // frontend/src/App.test.tsx
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { App } from "@/App"
-import { AUTH_KEY } from "@/lib/mock/auth"
+import { AUTH_TOKEN_KEY } from "@/lib/api/client"
+import * as authApi from "@/lib/api/auth"
 import { clearReview } from "@/lib/session"
 
 afterEach(() => {
-  localStorage.clear()
+  sessionStorage.clear()
+  vi.restoreAllMocks()
   clearReview()
 })
 
 describe("App", () => {
   it("после входа показывает поток сметы и переключает на справочник", async () => {
-    localStorage.setItem(AUTH_KEY, "mock-token") // считаем, что уже вошли
+    sessionStorage.setItem(AUTH_TOKEN_KEY, "tok")
+    vi.spyOn(authApi, "me").mockResolvedValue({
+      id: 1,
+      email: "a@mr.kz",
+      role: "admin",
+      is_active: true,
+    })
     render(<App />)
     // поток сметы стартует с dropzone
-    expect(screen.getByLabelText(/файл сметы/i)).toBeInTheDocument()
+    expect(await screen.findByLabelText(/файл сметы/i)).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: /Справочник/ }))
     expect(screen.getByText(/Новая статья справочника/i)).toBeInTheDocument()
   })
