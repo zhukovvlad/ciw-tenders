@@ -10,7 +10,7 @@ from app.api.deps import (
     get_template_ingest_service,
     require_admin,
 )
-from app.api.schemas import ArticleCreate, ArticleOut, ImportReportOut
+from app.api.schemas import ArticleCreate, ArticleOut, DeleteAllResponse, ImportReportOut
 from app.domain.errors import DeletionGuardError, DuplicateError, TemplateValidationError
 from app.services.article_service import ArticleService
 from app.services.template_ingest_service import TemplateIngestService
@@ -44,6 +44,13 @@ def create_article(
     except TemplateValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return ArticleOut.from_entity(article)
+
+
+@router.delete("", response_model=DeleteAllResponse, dependencies=[Depends(require_admin)])
+def delete_all_articles(
+    service: ArticleService = Depends(get_article_service),
+) -> DeleteAllResponse:
+    return DeleteAllResponse(deleted=service.delete_all())
 
 
 @router.delete("/{article_id}", status_code=status.HTTP_204_NO_CONTENT,

@@ -67,6 +67,10 @@ class ArticleOut(BaseModel):
         )
 
 
+class DeleteAllResponse(BaseModel):
+    deleted: int
+
+
 class ImportReportOut(BaseModel):
     created: int
     updated: int

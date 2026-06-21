@@ -52,3 +52,13 @@ def test_create_missing_parent_raises_validation() -> None:
     # несуществующий parent_code — ошибка ввода (маппится в 400), а не 500
     with pytest.raises(TemplateValidationError):
         ArticleService(FakeRepository()).create(article_code="1.1", name="Лист", parent_code="9")
+
+
+def test_delete_all_clears_and_returns_count() -> None:
+    repo = FakeRepository()
+    svc = ArticleService(repo)
+    svc.create(article_code="1", name="Раздел")
+    svc.create(article_code="2", name="Второй")
+    assert svc.delete_all() == 2
+    assert svc.list() == []
+    assert svc.delete_all() == 0  # повторно — пусто, не ошибка

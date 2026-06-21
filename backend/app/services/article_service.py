@@ -49,3 +49,6 @@ class ArticleService:
 
     def delete(self, article_id: int) -> None:
         self._repository.delete(article_id)
+
+    def delete_all(self) -> int:
+        return self._repository.delete_all()

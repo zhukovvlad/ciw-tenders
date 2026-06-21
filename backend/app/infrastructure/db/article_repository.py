@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Integer, cast, func, select
+from sqlalchemy import Integer, cast, delete, func, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
 
@@ -60,6 +60,11 @@ class SqlAlchemyArticleRepository(ArticleRepository):
         if model is not None:
             self._session.delete(model)
             self._session.commit()
+
+    def delete_all(self) -> int:
+        result = self._session.execute(delete(TemplateArticleModel))
+        self._session.commit()
+        return int(result.rowcount or 0)
 
     def has_descendant_codes(self, code: str) -> bool:
         prefix = code.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + ".%"
