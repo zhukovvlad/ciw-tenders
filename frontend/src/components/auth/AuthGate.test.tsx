@@ -17,9 +17,11 @@ describe("AuthGate", () => {
         <AuthGate>
           <div>Секрет</div>
         </AuthGate>
-      </AuthProvider>,
+      </AuthProvider>
     )
-    expect(await screen.findByRole("button", { name: /Войти/ })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("button", { name: /Войти/ })
+    ).toBeInTheDocument()
     expect(screen.queryByText("Секрет")).not.toBeInTheDocument()
   })
 
@@ -36,7 +38,7 @@ describe("AuthGate", () => {
         <AuthGate>
           <div>Секрет</div>
         </AuthGate>
-      </AuthProvider>,
+      </AuthProvider>
     )
     expect(await screen.findByText("Секрет")).toBeInTheDocument()
   })

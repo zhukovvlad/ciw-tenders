@@ -18,15 +18,17 @@ export function deleteArticle(id: number): Promise<void> {
 }
 
 export function deleteAllArticles(): Promise<number> {
-  return apiSend<{ deleted: number }>("DELETE", "/articles").then((r) => r.deleted)
+  return apiSend<{ deleted: number }>("DELETE", "/articles").then(
+    (r) => r.deleted
+  )
 }
 
 export function importTemplate(
   file: File,
-  opts: { dryRun: boolean; force: boolean },
+  opts: { dryRun: boolean; force: boolean }
 ): Promise<ImportReport> {
   return apiUpload<ImportReport>(
     `/articles/import?dry_run=${opts.dryRun}&force=${opts.force}`,
-    file,
+    file
   )
 }

@@ -27,7 +27,9 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
     try {
       setPreview(await importTemplate(f, { dryRun: true, force: false }))
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Не удалось прочитать файл")
+      setError(
+        err instanceof ApiError ? err.message : "Не удалось прочитать файл"
+      )
     } finally {
       setBusy(false)
     }
@@ -41,10 +43,13 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
     setBusy(true)
     setError(null)
     try {
-      const res = await importTemplate(file, { dryRun: false, force: needsForce })
+      const res = await importTemplate(file, {
+        dryRun: false,
+        force: needsForce,
+      })
       setDoneMsg(
         `Готово: создано ${res.created}, обновлено ${res.updated}, удалено ${res.deleted}, ` +
-          `без изменений ${res.unchanged}, ожидают эмбеддинга ${res.pending_embeddings}.`,
+          `без изменений ${res.unchanged}, ожидают эмбеддинга ${res.pending_embeddings}.`
       )
       setPreview(null)
       setConsent(false)
@@ -57,7 +62,9 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
         setConflict(true)
         setConsent(false)
       }
-      setError(err instanceof ApiError ? err.message : "Не удалось применить импорт")
+      setError(
+        err instanceof ApiError ? err.message : "Не удалось применить импорт"
+      )
     } finally {
       setBusy(false)
     }
@@ -82,8 +89,9 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
       {preview && (
         <div className="mt-3 rounded-md border border-[var(--ds-hairline)] p-3">
           <p>
-            Создано {preview.created}, обновлено {preview.updated}, удалено {preview.deleted}, без
-            изменений {preview.unchanged}, ожидают эмбеддинга {preview.pending_embeddings}.
+            Создано {preview.created}, обновлено {preview.updated}, удалено{" "}
+            {preview.deleted}, без изменений {preview.unchanged}, ожидают
+            эмбеддинга {preview.pending_embeddings}.
           </p>
           {preview.skipped.length > 0 && (
             <details className="mt-2">
@@ -114,7 +122,11 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
               </label>
             </div>
           )}
-          <Button onClick={() => void apply()} disabled={applyDisabled} className="mt-3">
+          <Button
+            onClick={() => void apply()}
+            disabled={applyDisabled}
+            className="mt-3"
+          >
             Применить
           </Button>
         </div>

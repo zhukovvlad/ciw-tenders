@@ -42,6 +42,9 @@ describe("articles api", () => {
     const spy = vi.spyOn(client, "apiUpload").mockResolvedValue({} as never)
     const file = new File(["x"], "t.xlsx")
     await importTemplate(file, { dryRun: true, force: false })
-    expect(spy).toHaveBeenCalledWith("/articles/import?dry_run=true&force=false", file)
+    expect(spy).toHaveBeenCalledWith(
+      "/articles/import?dry_run=true&force=false",
+      file
+    )
   })
 })

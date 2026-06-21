@@ -21,7 +21,7 @@ export function LoginScreen() {
       setError(
         err instanceof ApiError && err.status === 401
           ? "Неверный логин или пароль"
-          : "Не удалось войти, попробуйте позже",
+          : "Не удалось войти, попробуйте позже"
       )
     } finally {
       setBusy(false)
@@ -33,11 +33,17 @@ export function LoginScreen() {
       <div className="font-display text-2xl">
         MR <span className="text-[var(--ds-accent-hover)]">·</span> Сметы
       </div>
-      <div className="mb-5 text-xs text-muted-foreground">Автоматизатор строительных смет</div>
+      <div className="mb-5 text-xs text-muted-foreground">
+        Автоматизатор строительных смет
+      </div>
       <form onSubmit={submit} className="flex w-60 flex-col gap-3">
         <label className="text-xs text-[var(--ds-text-2)]">
           Логин
-          <Input value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1" />
+          <Input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="mt-1"
+          />
         </label>
         <label className="text-xs text-[var(--ds-text-2)]">
           Пароль

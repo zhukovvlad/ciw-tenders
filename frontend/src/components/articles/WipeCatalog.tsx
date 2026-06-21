@@ -22,7 +22,9 @@ export function WipeCatalog({ onWiped }: { onWiped: () => void }) {
       setWord("")
       onWiped()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Не удалось очистить справочник")
+      setError(
+        err instanceof ApiError ? err.message : "Не удалось очистить справочник"
+      )
       setWord("")
     } finally {
       setBusy(false)
@@ -32,7 +34,8 @@ export function WipeCatalog({ onWiped }: { onWiped: () => void }) {
   return (
     <div className="text-sm">
       <p className="mb-2 text-xs text-muted-foreground">
-        Полностью удалит все статьи. Введите «{CONFIRM_WORD}», чтобы подтвердить.
+        Полностью удалит все статьи. Введите «{CONFIRM_WORD}», чтобы
+        подтвердить.
       </p>
       <div className="flex items-center gap-2">
         <label className="sr-only" htmlFor="wipe-confirm">

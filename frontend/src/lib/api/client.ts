@@ -3,7 +3,7 @@ export const AUTH_TOKEN_KEY = "ciw.auth.token"
 export class ApiError extends Error {
   constructor(
     public status: number,
-    message: string,
+    message: string
   ) {
     super(message)
     this.name = "ApiError"
@@ -33,13 +33,17 @@ async function request(path: string, init: RequestInit): Promise<Response> {
       const body = (await res.json()) as { detail?: unknown }
       const detail = body?.detail
       if (typeof detail === "string") message = detail
-      else if (detail && typeof (detail as { message?: unknown }).message === "string")
+      else if (
+        detail &&
+        typeof (detail as { message?: unknown }).message === "string"
+      )
         message = (detail as { message: string }).message
     } catch {
       // тело не JSON — оставляем statusText
     }
     // 401 = протухшая сессия → разлогин; но неверный логин (/auth/login) — НЕ сессия, не разлогиниваем
-    if (res.status === 401 && !path.startsWith("/auth/login")) onUnauthorized?.()
+    if (res.status === 401 && !path.startsWith("/auth/login"))
+      onUnauthorized?.()
     throw new ApiError(res.status, message)
   }
   return res
@@ -50,7 +54,11 @@ export async function apiGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export async function apiSend<T>(method: string, path: string, body?: unknown): Promise<T> {
+export async function apiSend<T>(
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<T> {
   const res = await request(path, {
     method,
     headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -64,6 +72,10 @@ export async function apiUpload<T>(path: string, file: File): Promise<T> {
   const form = new FormData()
   form.append("file", file)
   // Content-Type НЕ ставим — браузер сам выставит multipart boundary.
-  const res = await request(path, { method: "POST", headers: { ...authHeaders() }, body: form })
+  const res = await request(path, {
+    method: "POST",
+    headers: { ...authHeaders() },
+    body: form,
+  })
   return res.json() as Promise<T>
 }

@@ -26,14 +26,19 @@ export function ManualAddForm({ onCreated }: { onCreated: () => void }) {
       setForm(EMPTY)
       onCreated()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Не удалось добавить статью")
+      setError(
+        err instanceof ApiError ? err.message : "Не удалось добавить статью"
+      )
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <form onSubmit={submit} className="grid gap-3 sm:grid-cols-[160px_1fr_160px_auto]">
+    <form
+      onSubmit={submit}
+      className="grid gap-3 sm:grid-cols-[160px_1fr_160px_auto]"
+    >
       <label className="text-xs text-[var(--ds-text-2)]">
         Код
         <Input
@@ -62,7 +67,9 @@ export function ManualAddForm({ onCreated }: { onCreated: () => void }) {
         <Plus className="size-4" />
         Добавить
       </Button>
-      {error && <p className="text-xs text-destructive sm:col-span-4">{error}</p>}
+      {error && (
+        <p className="text-xs text-destructive sm:col-span-4">{error}</p>
+      )}
     </form>
   )
 }

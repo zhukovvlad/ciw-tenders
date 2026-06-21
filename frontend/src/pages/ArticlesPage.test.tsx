@@ -5,8 +5,18 @@ import * as articlesApi from "@/lib/api/articles"
 import * as authCtx from "@/lib/auth/useAuth"
 import { ArticlesPage } from "./ArticlesPage"
 
-const USER: AuthUser = { id: 2, email: "u@mr.kz", role: "user", is_active: true }
-const ADMIN: AuthUser = { id: 1, email: "a@mr.kz", role: "admin", is_active: true }
+const USER: AuthUser = {
+  id: 2,
+  email: "u@mr.kz",
+  role: "user",
+  is_active: true,
+}
+const ADMIN: AuthUser = {
+  id: 1,
+  email: "a@mr.kz",
+  role: "admin",
+  is_active: true,
+}
 
 function mockAuth(user: AuthUser) {
   vi.spyOn(authCtx, "useAuth").mockReturnValue({
@@ -43,7 +53,9 @@ describe("ArticlesPage", () => {
     vi.spyOn(articlesApi, "listArticles").mockRejectedValue(new Error("fail"))
     render(<ArticlesPage />)
     expect(await screen.findByText(/не удалось загрузить/i)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /повторить/i })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /повторить/i })
+    ).toBeInTheDocument()
   })
 
   it("не-админ не видит admin-секций (загрузка шаблона)", async () => {

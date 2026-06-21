@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { ApiError, apiGet, apiSend, apiUpload, AUTH_TOKEN_KEY, setOnUnauthorized } from "./client"
+import {
+  ApiError,
+  apiGet,
+  apiSend,
+  apiUpload,
+  AUTH_TOKEN_KEY,
+  setOnUnauthorized,
+} from "./client"
 
 function mockFetch(status: number, body: unknown, ok = status < 400) {
   return vi.fn().mockResolvedValue({
@@ -25,7 +32,9 @@ describe("api client", () => {
     expect(out).toEqual([{ id: 1 }])
     const [url, init] = f.mock.calls[0]
     expect(url).toBe("/api/articles")
-    expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok" })
+    expect((init as RequestInit).headers).toMatchObject({
+      Authorization: "Bearer tok",
+    })
   })
 
   it("на 401 зовёт onUnauthorized и бросает ApiError", async () => {
@@ -37,8 +46,14 @@ describe("api client", () => {
   })
 
   it("вытягивает detail.message из тела 409", async () => {
-    vi.stubGlobal("fetch", mockFetch(409, { detail: { message: "конфликт", deleted: 3 } }, false))
-    await expect(apiSend("POST", "/x", {})).rejects.toMatchObject({ status: 409, message: "конфликт" })
+    vi.stubGlobal(
+      "fetch",
+      mockFetch(409, { detail: { message: "конфликт", deleted: 3 } }, false)
+    )
+    await expect(apiSend("POST", "/x", {})).rejects.toMatchObject({
+      status: 409,
+      message: "конфликт",
+    })
   })
 
   it("сетевой сбой → ApiError(0)", async () => {
@@ -49,7 +64,10 @@ describe("api client", () => {
   it("apiUpload шлёт FormData без ручного Content-Type", async () => {
     const f = mockFetch(200, { created: 1 })
     vi.stubGlobal("fetch", f)
-    await apiUpload("/articles/import?dry_run=true&force=false", new File(["x"], "t.xlsx"))
+    await apiUpload(
+      "/articles/import?dry_run=true&force=false",
+      new File(["x"], "t.xlsx")
+    )
     const [, init] = f.mock.calls[0]
     const headers = (init as RequestInit).headers as Record<string, string>
     expect(headers["Content-Type"]).toBeUndefined()

@@ -21,7 +21,10 @@ function report(over: Partial<ImportReport> = {}): ImportReport {
 }
 
 function pick(name = "Шаблон.xlsx") {
-  return userEvent.upload(screen.getByLabelText(/файл шаблона/i), new File(["x"], name))
+  return userEvent.upload(
+    screen.getByLabelText(/файл шаблона/i),
+    new File(["x"], name)
+  )
 }
 
 afterEach(() => vi.restoreAllMocks())
@@ -31,19 +34,25 @@ describe("TemplateUpload", () => {
     const spy = vi
       .spyOn(articlesApi, "importTemplate")
       .mockResolvedValueOnce(report({ created: 362, pending_embeddings: 362 }))
-      .mockResolvedValueOnce(report({ created: 362, dry_run: false, pending_embeddings: 362 }))
+      .mockResolvedValueOnce(
+        report({ created: 362, dry_run: false, pending_embeddings: 362 })
+      )
     render(<TemplateUpload onApplied={vi.fn()} />)
     await pick()
     expect(await screen.findByText(/создано/i)).toBeInTheDocument()
     expect(spy.mock.calls[0][1]).toEqual({ dryRun: true, force: false })
     await userEvent.click(screen.getByRole("button", { name: /применить/i }))
-    await waitFor(() => expect(spy.mock.calls[1][1]).toEqual({ dryRun: false, force: false }))
+    await waitFor(() =>
+      expect(spy.mock.calls[1][1]).toEqual({ dryRun: false, force: false })
+    )
   })
 
   it("force_required: «Применить» заблокирована до чекбокса, затем шлёт force:true", async () => {
     vi.spyOn(articlesApi, "importTemplate")
       .mockResolvedValueOnce(report({ deleted: 5, force_required: true }))
-      .mockResolvedValueOnce(report({ deleted: 5, dry_run: false, force_required: true }))
+      .mockResolvedValueOnce(
+        report({ deleted: 5, dry_run: false, force_required: true })
+      )
     render(<TemplateUpload onApplied={vi.fn()} />)
     await pick()
     await screen.findByText(/удалит/i)
@@ -54,8 +63,12 @@ describe("TemplateUpload", () => {
     await userEvent.click(apply)
     await waitFor(() =>
       expect(
-        (articlesApi.importTemplate as unknown as { mock: { calls: unknown[][] } }).mock.calls[1][1],
-      ).toEqual({ dryRun: false, force: true }),
+        (
+          articlesApi.importTemplate as unknown as {
+            mock: { calls: unknown[][] }
+          }
+        ).mock.calls[1][1]
+      ).toEqual({ dryRun: false, force: true })
     )
   })
 
@@ -63,7 +76,9 @@ describe("TemplateUpload", () => {
     vi.spyOn(articlesApi, "importTemplate")
       .mockResolvedValueOnce(report({ force_required: false })) // dry-run: force не нужен
       .mockRejectedValueOnce(new ApiError(409, "состояние изменилось")) // apply без force → 409
-      .mockResolvedValueOnce(report({ deleted: 3, dry_run: false, force_required: false }))
+      .mockResolvedValueOnce(
+        report({ deleted: 3, dry_run: false, force_required: false })
+      )
     render(<TemplateUpload onApplied={vi.fn()} />)
     await pick()
     const apply = await screen.findByRole("button", { name: /применить/i })
@@ -76,15 +91,19 @@ describe("TemplateUpload", () => {
     await userEvent.click(screen.getByRole("button", { name: /применить/i }))
     await waitFor(() =>
       expect(
-        (articlesApi.importTemplate as unknown as { mock: { calls: unknown[][] } }).mock.calls[2][1],
-      ).toEqual({ dryRun: false, force: true }),
+        (
+          articlesApi.importTemplate as unknown as {
+            mock: { calls: unknown[][] }
+          }
+        ).mock.calls[2][1]
+      ).toEqual({ dryRun: false, force: true })
     )
   })
 
   it("смена файла сбрасывает согласие и заново снимает превью", async () => {
     // оба файла требуют force → проверяем, что согласие сбрасывается при смене файла
     vi.spyOn(articlesApi, "importTemplate").mockResolvedValue(
-      report({ deleted: 5, force_required: true }),
+      report({ deleted: 5, force_required: true })
     )
     render(<TemplateUpload onApplied={vi.fn()} />)
     await pick("a.xlsx")
@@ -99,7 +118,9 @@ describe("TemplateUpload", () => {
   })
 
   it("показывает 400-ошибку файла", async () => {
-    vi.spyOn(articlesApi, "importTemplate").mockRejectedValue(new ApiError(400, "плохой файл"))
+    vi.spyOn(articlesApi, "importTemplate").mockRejectedValue(
+      new ApiError(400, "плохой файл")
+    )
     render(<TemplateUpload onApplied={vi.fn()} />)
     await pick()
     expect(await screen.findByText(/плохой файл/i)).toBeInTheDocument()

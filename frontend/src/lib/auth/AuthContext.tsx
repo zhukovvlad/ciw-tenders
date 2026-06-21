@@ -6,7 +6,9 @@ import { AuthContext } from "@/lib/auth/useAuth"
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
-  const [loading, setLoading] = useState(() => !!sessionStorage.getItem(AUTH_TOKEN_KEY))
+  const [loading, setLoading] = useState(
+    () => !!sessionStorage.getItem(AUTH_TOKEN_KEY)
+  )
   const [error, setError] = useState<string | null>(null)
 
   const logout = useCallback(() => {

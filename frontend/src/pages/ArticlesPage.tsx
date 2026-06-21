@@ -47,21 +47,27 @@ export function ArticlesPage() {
       reload()
     } catch (err) {
       // никаких тихих провалов — показываем ошибку удаления
-      setActionError(err instanceof ApiError ? err.message : "Не удалось удалить статью")
+      setActionError(
+        err instanceof ApiError ? err.message : "Не удалось удалить статью"
+      )
     }
   }
 
   return (
     <div className="mx-auto max-w-5xl p-6">
       <h2 className="mb-1 font-display text-lg">Справочник СМР</h2>
-      <p className="mb-4 text-sm text-muted-foreground">Эталонные статьи строительных работ.</p>
+      <p className="mb-4 text-sm text-muted-foreground">
+        Эталонные статьи строительных работ.
+      </p>
 
       {isAdmin && (
         <div className="mb-6 rounded-md border border-[var(--ds-hairline)] p-4">
           <h3 className="mb-2 text-sm font-medium">Загрузить шаблон</h3>
           <TemplateUpload onApplied={() => void reload()} />
           <div className="mt-4 border-t border-[var(--ds-hairline)] pt-4">
-            <h3 className="mb-2 text-sm font-medium">Добавить статью вручную</h3>
+            <h3 className="mb-2 text-sm font-medium">
+              Добавить статью вручную
+            </h3>
             <ManualAddForm onCreated={() => void reload()} />
           </div>
           <div className="mt-4 border-t border-[var(--ds-hairline)] pt-4">
@@ -71,10 +77,14 @@ export function ArticlesPage() {
         </div>
       )}
 
-      {status === "loading" && <p className="text-sm text-muted-foreground">Загрузка…</p>}
+      {status === "loading" && (
+        <p className="text-sm text-muted-foreground">Загрузка…</p>
+      )}
       {status === "error" && (
         <div className="text-sm">
-          <p className="mb-2 text-destructive">Не удалось загрузить справочник.</p>
+          <p className="mb-2 text-destructive">
+            Не удалось загрузить справочник.
+          </p>
           <Button onClick={() => void reload()}>Повторить</Button>
         </div>
       )}
@@ -83,9 +93,15 @@ export function ArticlesPage() {
           Справочник пуст{isAdmin ? " — загрузите шаблон." : "."}
         </p>
       )}
-      {actionError && <p className="mb-3 text-sm text-destructive">{actionError}</p>}
+      {actionError && (
+        <p className="mb-3 text-sm text-destructive">{actionError}</p>
+      )}
       {status === "ready" && articles.length > 0 && (
-        <ArticleTable articles={articles} isAdmin={isAdmin} onDelete={handleDelete} />
+        <ArticleTable
+          articles={articles}
+          isAdmin={isAdmin}
+          onDelete={handleDelete}
+        />
       )}
     </div>
   )

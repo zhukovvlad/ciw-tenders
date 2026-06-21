@@ -9,13 +9,19 @@ interface ArticleTableProps {
   onDelete?: (id: number) => void
 }
 
-export function ArticleTable({ articles, isAdmin, onDelete }: ArticleTableProps) {
+export function ArticleTable({
+  articles,
+  isAdmin,
+  onDelete,
+}: ArticleTableProps) {
   const [query, setQuery] = useState("")
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return articles
     return articles.filter(
-      (a) => a.article_code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q),
+      (a) =>
+        a.article_code.toLowerCase().includes(q) ||
+        a.name.toLowerCase().includes(q)
     )
   }, [articles, query])
 
@@ -40,13 +46,21 @@ export function ArticleTable({ articles, isAdmin, onDelete }: ArticleTableProps)
             const depth = a.article_code.split(".").length - 1
             return (
               <tr key={a.id} className="border-t border-[var(--ds-hairline)]">
-                <td className="px-4 py-2 font-mono text-xs">{a.article_code}</td>
-                <td className="px-4 py-2" style={{ paddingLeft: `${1 + depth * 1.25}rem` }}>
+                <td className="px-4 py-2 font-mono text-xs">
+                  {a.article_code}
+                </td>
+                <td
+                  className="px-4 py-2"
+                  style={{ paddingLeft: `${1 + depth * 1.25}rem` }}
+                >
                   {a.name}
                 </td>
                 {isAdmin && (
                   <td className="px-4 py-2">
-                    <button aria-label="Удалить" onClick={() => onDelete?.(a.id)}>
+                    <button
+                      aria-label="Удалить"
+                      onClick={() => onDelete?.(a.id)}
+                    >
                       <Trash2 className="size-4 text-destructive" />
                     </button>
                   </td>

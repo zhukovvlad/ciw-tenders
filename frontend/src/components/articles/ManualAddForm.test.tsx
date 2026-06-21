@@ -10,20 +10,29 @@ afterEach(() => vi.restoreAllMocks())
 describe("ManualAddForm", () => {
   it("создаёт статью и зовёт onCreated", async () => {
     const onCreated = vi.fn()
-    const spy = vi
-      .spyOn(articlesApi, "createArticle")
-      .mockResolvedValue({ id: 1, article_code: "1", name: "Раздел", parent_id: null })
+    const spy = vi.spyOn(articlesApi, "createArticle").mockResolvedValue({
+      id: 1,
+      article_code: "1",
+      name: "Раздел",
+      parent_id: null,
+    })
     render(<ManualAddForm onCreated={onCreated} />)
     // /^Код$/ — иначе матчит и «Код родителя» (multiple elements)
     await userEvent.type(screen.getByLabelText(/^Код$/i), "1")
     await userEvent.type(screen.getByLabelText(/наименование/i), "Раздел")
     await userEvent.click(screen.getByRole("button", { name: /добавить/i }))
-    expect(spy).toHaveBeenCalledWith({ article_code: "1", name: "Раздел", parent_code: null })
+    expect(spy).toHaveBeenCalledWith({
+      article_code: "1",
+      name: "Раздел",
+      parent_code: null,
+    })
     expect(onCreated).toHaveBeenCalledOnce()
   })
 
   it("показывает ошибку бэкенда (409 дубликат)", async () => {
-    vi.spyOn(articlesApi, "createArticle").mockRejectedValue(new ApiError(409, "уже существует"))
+    vi.spyOn(articlesApi, "createArticle").mockRejectedValue(
+      new ApiError(409, "уже существует")
+    )
     render(<ManualAddForm onCreated={vi.fn()} />)
     await userEvent.type(screen.getByLabelText(/^Код$/i), "1")
     await userEvent.type(screen.getByLabelText(/наименование/i), "Дубль")
