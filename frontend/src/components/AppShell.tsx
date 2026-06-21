@@ -1,6 +1,6 @@
 // frontend/src/components/AppShell.tsx
 import { FileSpreadsheet, Library } from "lucide-react"
-import { useAuth } from "@/lib/auth/AuthContext"
+import { useAuth } from "@/lib/auth/useAuth"
 import { clearReview } from "@/lib/session"
 
 interface AppShellProps {

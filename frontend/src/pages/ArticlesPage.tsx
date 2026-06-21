@@ -6,7 +6,7 @@ import { WipeCatalog } from "@/components/articles/WipeCatalog"
 import { TemplateUpload } from "@/components/articles/TemplateUpload"
 import { listArticles, deleteArticle } from "@/lib/api/articles"
 import { ApiError } from "@/lib/api/client"
-import { useAuth } from "@/lib/auth/AuthContext"
+import { useAuth } from "@/lib/auth/useAuth"
 import type { Article } from "@/lib/types"
 
 export function ArticlesPage() {
@@ -56,7 +56,6 @@ export function ArticlesPage() {
       <h2 className="mb-1 font-display text-lg">Справочник СМР</h2>
       <p className="mb-4 text-sm text-muted-foreground">Эталонные статьи строительных работ.</p>
 
-      {/* Admin-секции загрузки/добавления/очистки добавляются в Task 7-9 */}
       {isAdmin && (
         <div className="mb-6 rounded-md border border-[var(--ds-hairline)] p-4">
           <h3 className="mb-2 text-sm font-medium">Загрузить шаблон</h3>

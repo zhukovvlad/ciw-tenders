@@ -1,4 +1,4 @@
-import { useAuth } from "@/lib/auth/AuthContext"
+import { useAuth } from "@/lib/auth/useAuth"
 import { LoginScreen } from "@/components/auth/LoginScreen"
 
 export function AuthGate({ children }: { children: React.ReactNode }) {

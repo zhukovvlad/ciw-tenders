@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { ApiError, apiGet, apiSend, apiUpload, AUTH_TOKEN_KEY, setOnUnauthorized } from "./client"
 
 function mockFetch(status: number, body: unknown, ok = status < 400) {

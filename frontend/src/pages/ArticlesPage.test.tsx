@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import type { AuthUser } from "@/lib/types"
 import * as articlesApi from "@/lib/api/articles"
-import * as authCtx from "@/lib/auth/AuthContext"
+import * as authCtx from "@/lib/auth/useAuth"
 import { ArticlesPage } from "./ArticlesPage"
 
 const USER: AuthUser = { id: 2, email: "u@mr.kz", role: "user", is_active: true }

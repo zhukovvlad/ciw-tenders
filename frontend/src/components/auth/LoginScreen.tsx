@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ApiError } from "@/lib/api/client"
-import { useAuth } from "@/lib/auth/AuthContext"
+import { useAuth } from "@/lib/auth/useAuth"
 
 export function LoginScreen() {
   const { login } = useAuth()

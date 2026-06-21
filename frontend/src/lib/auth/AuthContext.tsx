@@ -1,22 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { ApiError, AUTH_TOKEN_KEY, setOnUnauthorized } from "@/lib/api/client"
 import * as authApi from "@/lib/api/auth"
 import type { AuthUser } from "@/lib/types"
-
-interface AuthContextValue {
-  user: AuthUser | null
-  role: "user" | "admin" | null
-  loading: boolean
-  error: string | null
-  login: (email: string, password: string) => Promise<void>
-  logout: () => void
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null)
+import { AuthContext } from "@/lib/auth/useAuth"
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => !!sessionStorage.getItem(AUTH_TOKEN_KEY))
   const [error, setError] = useState<string | null>(null)
 
   const logout = useCallback(() => {
@@ -31,10 +21,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const token = sessionStorage.getItem(AUTH_TOKEN_KEY)
-    if (!token) {
-      setLoading(false)
-      return
-    }
+    if (!token) return
     let cancelled = false
     authApi
       .me()
@@ -68,10 +55,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       {children}
     </AuthContext.Provider>
   )
-}
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error("useAuth вызван вне AuthProvider")
-  return ctx
 }

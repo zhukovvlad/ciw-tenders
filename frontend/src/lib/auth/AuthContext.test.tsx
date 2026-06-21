@@ -3,7 +3,8 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ApiError, AUTH_TOKEN_KEY } from "@/lib/api/client"
 import * as authApi from "@/lib/api/auth"
-import { AuthProvider, useAuth } from "./AuthContext"
+import { AuthProvider } from "./AuthContext"
+import { useAuth } from "./useAuth"
 
 const ADMIN = { id: 1, email: "a@mr.kz", role: "admin" as const, is_active: true }
 
