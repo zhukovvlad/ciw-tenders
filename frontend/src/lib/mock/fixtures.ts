@@ -1,0 +1,282 @@
+import type { Candidate, MatchRow } from "@/lib/types"
+
+export const MOCK_ARTICLES: Candidate[] = [
+  {
+    article_code: "СМР-01-001",
+    name: "Подготовительные работы и содержание площадки",
+    section_name: "Подготовка",
+    score: 0,
+  },
+  {
+    article_code: "СМР-02-010",
+    name: "Разработка грунта котлована",
+    section_name: "Земляные работы",
+    score: 0,
+  },
+  {
+    article_code: "СМР-02-014",
+    name: "Устройство котлована с креплением стенок",
+    section_name: "Земляные работы",
+    score: 0,
+  },
+  {
+    article_code: "СМР-03-021",
+    name: "Гидроизоляция подземной части (обмазочная)",
+    section_name: "Изоляция",
+    score: 0,
+  },
+  {
+    article_code: "СМР-03-022",
+    name: "Гидроизоляция оклеечная рулонная",
+    section_name: "Изоляция",
+    score: 0,
+  },
+  {
+    article_code: "СМР-04-031",
+    name: "Возведение монолитных несущих конструкций",
+    section_name: "Бетонные работы",
+    score: 0,
+  },
+  {
+    article_code: "СМР-04-033",
+    name: "Монтаж сборных ж/б конструкций",
+    section_name: "Бетонные работы",
+    score: 0,
+  },
+  {
+    article_code: "СМР-05-040",
+    name: "Кладка перегородок и стен",
+    section_name: "Каменные работы",
+    score: 0,
+  },
+  {
+    article_code: "СМР-06-050",
+    name: "Устройство навесных фасадов",
+    section_name: "Фасады",
+    score: 0,
+  },
+  {
+    article_code: "СМР-06-052",
+    name: "Штукатурные фасады (мокрый фасад)",
+    section_name: "Фасады",
+    score: 0,
+  },
+  {
+    article_code: "СМР-07-060",
+    name: "Устройство кровли",
+    section_name: "Кровля",
+    score: 0,
+  },
+  {
+    article_code: "СМР-08-070",
+    name: "Отделка МОП и технических помещений",
+    section_name: "Отделка",
+    score: 0,
+  },
+  {
+    article_code: "СМР-09-080",
+    name: "Монтаж лифтов и подъёмников",
+    section_name: "Инженерия",
+    score: 0,
+  },
+  {
+    article_code: "СМР-10-090",
+    name: "Инженерные системы (ОВ, ВК, ЭОМ)",
+    section_name: "Инженерия",
+    score: 0,
+  },
+  {
+    article_code: "СМР-11-100",
+    name: "Благоустройство и наружное освещение",
+    section_name: "Благоустройство",
+    score: 0,
+  },
+  {
+    article_code: "СМР-12-110",
+    name: "Технологические решения автостоянки",
+    section_name: "Технология",
+    score: 0,
+  },
+]
+
+function cand(code: string, score: number): Candidate {
+  const a = MOCK_ARTICLES.find((x) => x.article_code === code)!
+  return { ...a, score }
+}
+
+export const MOCK_ROWS: MatchRow[] = [
+  {
+    row_number: 2,
+    source_name:
+      "Подготовительные работы и содержание площадки (включая содержание прилегающей территории)",
+    status: "confident",
+    score: 0.96,
+    matched_code: "СМР-01-001",
+    matched_name: "Подготовительные работы и содержание площадки",
+    candidates: [cand("СМР-01-001", 0.96)],
+    rationale: null,
+  },
+  {
+    row_number: 3,
+    source_name: "Устройство котлована",
+    status: "needs_review",
+    score: 0.83,
+    matched_code: "СМР-02-014",
+    matched_name: "Устройство котлована с креплением стенок",
+    candidates: [
+      cand("СМР-02-014", 0.83),
+      cand("СМР-02-010", 0.79),
+      cand("СМР-04-031", 0.55),
+    ],
+    rationale:
+      "Речь о выемке грунта под здание с креплением стенок, а не просто разработке грунта.",
+  },
+  {
+    row_number: 4,
+    source_name: "Устройство гидроизоляции подземной части здания",
+    status: "needs_review",
+    score: 0.81,
+    matched_code: "СМР-03-021",
+    matched_name: "Гидроизоляция подземной части (обмазочная)",
+    candidates: [
+      cand("СМР-03-021", 0.81),
+      cand("СМР-03-022", 0.77),
+      cand("СМР-04-031", 0.4),
+    ],
+    rationale:
+      "Подземная часть — обычно обмазочная гидроизоляция; оклеечная маловероятна по контексту.",
+  },
+  {
+    row_number: 5,
+    source_name: "Возведение несущих конструкций здания",
+    status: "confident",
+    score: 0.94,
+    matched_code: "СМР-04-031",
+    matched_name: "Возведение монолитных несущих конструкций",
+    candidates: [cand("СМР-04-031", 0.94)],
+    rationale: null,
+  },
+  {
+    row_number: 6,
+    source_name: "Общестроительные работы - перегородки и стены",
+    status: "confident",
+    score: 0.92,
+    matched_code: "СМР-05-040",
+    matched_name: "Кладка перегородок и стен",
+    candidates: [cand("СМР-05-040", 0.92)],
+    rationale: null,
+  },
+  {
+    row_number: 7,
+    source_name: "Устройство фасадов",
+    status: "needs_review",
+    score: 0.74,
+    matched_code: "СМР-06-050",
+    matched_name: "Устройство навесных фасадов",
+    candidates: [
+      cand("СМР-06-050", 0.74),
+      cand("СМР-06-052", 0.71),
+      cand("СМР-07-060", 0.45),
+    ],
+    rationale:
+      "Тип фасада не указан; навесной — более частый для зданий такого класса.",
+  },
+  {
+    row_number: 8,
+    source_name: "Устройство кровли",
+    status: "confident",
+    score: 0.95,
+    matched_code: "СМР-07-060",
+    matched_name: "Устройство кровли",
+    candidates: [cand("СМР-07-060", 0.95)],
+    rationale: null,
+  },
+  {
+    row_number: 9,
+    source_name:
+      "Отделка паркинга, технических помещений, МОП, двери, ворота и шлагбаумы",
+    status: "confident",
+    score: 0.9,
+    matched_code: "СМР-08-070",
+    matched_name: "Отделка МОП и технических помещений",
+    candidates: [cand("СМР-08-070", 0.9)],
+    rationale: null,
+  },
+  {
+    row_number: 10,
+    source_name:
+      "Лифты и подъемники с использованием системы мониторинга и диспетчеризации",
+    status: "confident",
+    score: 0.93,
+    matched_code: "СМР-09-080",
+    matched_name: "Монтаж лифтов и подъёмников",
+    candidates: [cand("СМР-09-080", 0.93)],
+    rationale: null,
+  },
+  {
+    row_number: 11,
+    source_name: "Инженерные системы",
+    status: "confident",
+    score: 0.91,
+    matched_code: "СМР-10-090",
+    matched_name: "Инженерные системы (ОВ, ВК, ЭОМ)",
+    candidates: [cand("СМР-10-090", 0.91)],
+    rationale: null,
+  },
+  {
+    row_number: 12,
+    source_name: "Благоустройство и наружное освещение",
+    status: "confident",
+    score: 0.95,
+    matched_code: "СМР-11-100",
+    matched_name: "Благоустройство и наружное освещение",
+    candidates: [cand("СМР-11-100", 0.95)],
+    rationale: null,
+  },
+  {
+    row_number: 13,
+    source_name:
+      "Технологические решения автостоянки, комплекса и арендуемых помещений",
+    status: "needs_review",
+    score: 0.68,
+    matched_code: "СМР-12-110",
+    matched_name: "Технологические решения автостоянки",
+    candidates: [
+      cand("СМР-12-110", 0.68),
+      cand("СМР-10-090", 0.6),
+      cand("СМР-08-070", 0.41),
+    ],
+    rationale:
+      "Совпало частично — «технологические решения» шире статьи автостоянки; проверить вручную.",
+  },
+  {
+    row_number: 14,
+    source_name: "ЗИП",
+    status: "no_match",
+    score: 0.31,
+    matched_code: null,
+    matched_name: null,
+    candidates: [],
+    rationale: null,
+  },
+  {
+    row_number: 15,
+    source_name: "MR - SHELL & CORE",
+    status: "no_match",
+    score: 0.28,
+    matched_code: null,
+    matched_name: null,
+    candidates: [],
+    rationale: null,
+  },
+  {
+    row_number: 16,
+    source_name: "Работы по реконструкции и реставрации",
+    status: "no_match",
+    score: 0.35,
+    matched_code: null,
+    matched_name: null,
+    candidates: [],
+    rationale: null,
+  },
+]
