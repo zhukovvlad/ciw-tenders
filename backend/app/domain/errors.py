@@ -13,3 +13,7 @@ class DuplicateError(Exception):
 
 class TokenError(Exception):
     """Токен невалиден, повреждён или просрочен."""
+
+
+class TemplateValidationError(Exception):
+    """Файл-шаблон структурно некорректен (дубликат кода, сирота-родитель)."""
