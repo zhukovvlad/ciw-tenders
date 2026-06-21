@@ -18,6 +18,7 @@ export function ArticlesPage() {
 
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => {
+    setActionError(null)
     setStatus("loading")
     setReloadKey((k) => k + 1)
   }, [])

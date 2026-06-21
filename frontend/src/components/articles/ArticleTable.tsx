@@ -28,6 +28,7 @@ export function ArticleTable({
   return (
     <div>
       <Input
+        aria-label="Поиск по коду или наименованию"
         placeholder="Поиск по коду или наименованию"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
@@ -58,6 +59,7 @@ export function ArticleTable({
                 {isAdmin && (
                   <td className="px-4 py-2">
                     <button
+                      type="button"
                       aria-label="Удалить"
                       onClick={() => onDelete?.(a.id)}
                     >

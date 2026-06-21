@@ -39,6 +39,7 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
   const needsForce = !!preview && (preview.force_required || conflict)
 
   async function apply() {
+    if (busy) return
     if (!file || !preview) return
     setBusy(true)
     setError(null)

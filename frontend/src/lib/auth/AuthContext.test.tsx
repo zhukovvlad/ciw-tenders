@@ -26,7 +26,9 @@ function Probe() {
               ? `err:${error}`
               : "anon"}
       </span>
-      <button onClick={() => login("a@mr.kz", "pw")}>login</button>
+      <button onClick={() => void login("a@mr.kz", "pw").catch(() => {})}>
+        login
+      </button>
       <button onClick={logout}>logout</button>
     </div>
   )
@@ -93,6 +95,24 @@ describe("AuthContext", () => {
       expect(screen.getByTestId("state")).toHaveTextContent("err:")
     )
     expect(sessionStorage.getItem(AUTH_TOKEN_KEY)).toBe("good")
+  })
+
+  it("login чистит токен если me() упал после сохранения", async () => {
+    vi.spyOn(authApi, "login").mockResolvedValue("tok")
+    vi.spyOn(authApi, "me").mockRejectedValue(new ApiError(503, "down"))
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("state")).toHaveTextContent("anon")
+    )
+    await userEvent.click(screen.getByText("login"))
+    await waitFor(() =>
+      expect(screen.getByTestId("state")).not.toHaveTextContent("loading")
+    )
+    expect(sessionStorage.getItem(AUTH_TOKEN_KEY)).toBeNull()
   })
 
   it("logout чистит токен и user", async () => {

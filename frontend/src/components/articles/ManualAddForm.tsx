@@ -14,6 +14,7 @@ export function ManualAddForm({ onCreated }: { onCreated: () => void }) {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
+    if (busy) return
     if (!form.article_code.trim() || !form.name.trim()) return
     setBusy(true)
     setError(null)

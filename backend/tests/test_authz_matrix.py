@@ -85,4 +85,4 @@ def test_delete_all_articles_allowed_for_admin() -> None:
     client = TestClient(app)
     resp = client.delete("/api/articles", headers={"Authorization": "Bearer token::1"})
     assert resp.status_code == 200
-    assert "deleted" in resp.json()
+    assert resp.json() == {"deleted": 0}

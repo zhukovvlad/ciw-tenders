@@ -47,7 +47,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setError(null)
     const token = await authApi.login(email, password)
     sessionStorage.setItem(AUTH_TOKEN_KEY, token)
-    setUser(await authApi.me())
+    try {
+      setUser(await authApi.me())
+    } catch (e) {
+      sessionStorage.removeItem(AUTH_TOKEN_KEY)
+      throw e
+    }
   }, [])
 
   return (
