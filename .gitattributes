@@ -1,0 +1,16 @@
+# Нормализуем переводы строк: в репозитории — всегда LF, в рабочем дереве — тоже
+# LF (перекрывает core.autocrlf=true на Windows). Согласовано с .prettierrc
+# (endOfLine: "lf") и ruff — чтобы prettier --check / гейт не падали из-за CRLF.
+* text=auto eol=lf
+
+# Бинарные файлы git определит сам (text=auto), но перечислим явно на всякий случай.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.xlsx binary
+*.pdf binary
+*.woff binary
+*.woff2 binary

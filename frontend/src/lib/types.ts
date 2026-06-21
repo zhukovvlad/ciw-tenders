@@ -29,3 +29,28 @@ export interface ReviewState {
   decisions: Record<number, Decision>
   filter: "all" | "review" | "no_match"
 }
+
+export interface Article {
+  id: number
+  article_code: string
+  name: string
+  parent_id: number | null
+}
+
+export interface AuthUser {
+  id: number
+  email: string
+  role: "user" | "admin"
+  is_active: boolean
+}
+
+export interface ImportReport {
+  created: number
+  updated: number
+  deleted: number
+  unchanged: number
+  skipped: string[]
+  pending_embeddings: number
+  dry_run: boolean
+  force_required: boolean
+}

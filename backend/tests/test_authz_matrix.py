@@ -71,3 +71,18 @@ def test_articles_write_allowed_for_admin() -> None:
         json={"article_code": "1", "name": "n"},
     )
     assert resp.status_code == 201
+
+
+def test_delete_all_articles_forbidden_for_user() -> None:
+    _wire()
+    client = TestClient(app)
+    resp = client.delete("/api/articles", headers={"Authorization": "Bearer token::2"})
+    assert resp.status_code == 403
+
+
+def test_delete_all_articles_allowed_for_admin() -> None:
+    _wire()
+    client = TestClient(app)
+    resp = client.delete("/api/articles", headers={"Authorization": "Bearer token::1"})
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 0}

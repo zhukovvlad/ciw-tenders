@@ -35,6 +35,9 @@ class ArticleRepository(ABC):
     def delete(self, article_id: int) -> None: ...
 
     @abstractmethod
+    def delete_all(self) -> int: ...
+
+    @abstractmethod
     def has_descendant_codes(self, code: str) -> bool:
         """Есть ли строки с article_code LIKE code || '.%'."""
         ...
