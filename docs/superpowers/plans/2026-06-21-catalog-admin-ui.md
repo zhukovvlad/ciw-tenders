@@ -311,7 +311,8 @@ async function request(path: string, init: RequestInit): Promise<Response> {
     } catch {
       // тело не JSON — оставляем statusText
     }
-    if (res.status === 401) onUnauthorized?.()
+    // 401 = протухшая сессия → разлогин; но неверный логин (/auth/login) — НЕ сессия, не разлогиниваем
+    if (res.status === 401 && !path.startsWith("/auth/login")) onUnauthorized?.()
     throw new ApiError(res.status, message)
   }
   return res
@@ -1157,6 +1158,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ArticleTable } from "@/components/articles/ArticleTable"
 import { listArticles, deleteArticle } from "@/lib/api/articles"
+import { ApiError } from "@/lib/api/client"
 import { useAuth } from "@/lib/auth/AuthContext"
 import type { Article } from "@/lib/types"
 
@@ -1165,6 +1167,7 @@ export function ArticlesPage() {
   const isAdmin = role === "admin"
   const [articles, setArticles] = useState<Article[]>([])
   const [status, setStatus] = useState<"loading" | "error" | "ready">("loading")
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     setStatus("loading")
@@ -1182,8 +1185,14 @@ export function ArticlesPage() {
 
   async function handleDelete(id: number) {
     if (!window.confirm("Удалить статью?")) return
-    await deleteArticle(id)
-    await reload()
+    setActionError(null)
+    try {
+      await deleteArticle(id)
+      await reload()
+    } catch (err) {
+      // никаких тихих провалов — показываем ошибку удаления
+      setActionError(err instanceof ApiError ? err.message : "Не удалось удалить статью")
+    }
   }
 
   return (
@@ -1213,6 +1222,7 @@ export function ArticlesPage() {
           Справочник пуст{isAdmin ? " — загрузите шаблон." : "."}
         </p>
       )}
+      {actionError && <p className="mb-3 text-sm text-destructive">{actionError}</p>}
       {status === "ready" && articles.length > 0 && (
         <ArticleTable articles={articles} isAdmin={isAdmin} onDelete={handleDelete} />
       )}
@@ -1271,7 +1281,8 @@ describe("ManualAddForm", () => {
       .spyOn(articlesApi, "createArticle")
       .mockResolvedValue({ id: 1, article_code: "1", name: "Раздел", parent_id: null })
     render(<ManualAddForm onCreated={onCreated} />)
-    await userEvent.type(screen.getByLabelText(/код/i), "1")
+    // /^Код$/ — иначе матчит и «Код родителя» (multiple elements)
+    await userEvent.type(screen.getByLabelText(/^Код$/i), "1")
     await userEvent.type(screen.getByLabelText(/наименование/i), "Раздел")
     await userEvent.click(screen.getByRole("button", { name: /добавить/i }))
     expect(spy).toHaveBeenCalledWith({ article_code: "1", name: "Раздел", parent_code: null })
@@ -1281,7 +1292,7 @@ describe("ManualAddForm", () => {
   it("показывает ошибку бэкенда (409 дубликат)", async () => {
     vi.spyOn(articlesApi, "createArticle").mockRejectedValue(new ApiError(409, "уже существует"))
     render(<ManualAddForm onCreated={vi.fn()} />)
-    await userEvent.type(screen.getByLabelText(/код/i), "1")
+    await userEvent.type(screen.getByLabelText(/^Код$/i), "1")
     await userEvent.type(screen.getByLabelText(/наименование/i), "Дубль")
     await userEvent.click(screen.getByRole("button", { name: /добавить/i }))
     expect(await screen.findByText(/уже существует/i)).toBeInTheDocument()
@@ -1471,6 +1482,28 @@ describe("TemplateUpload", () => {
     )
   })
 
+  it("на 409-дрейф поднимает чекбокс force, затем шлёт force:true", async () => {
+    vi.spyOn(articlesApi, "importTemplate")
+      .mockResolvedValueOnce(report({ force_required: false })) // dry-run: force не нужен
+      .mockRejectedValueOnce(new ApiError(409, "состояние изменилось")) // apply без force → 409
+      .mockResolvedValueOnce(report({ deleted: 3, dry_run: false, force_required: false }))
+    render(<TemplateUpload onApplied={vi.fn()} />)
+    await pick()
+    const apply = await screen.findByRole("button", { name: /применить/i })
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    await userEvent.click(apply)
+    // 409 → появился чекбокс согласия, кнопка снова заблокирована
+    expect(await screen.findByText(/принудительный режим/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /применить/i })).toBeDisabled()
+    await userEvent.click(screen.getByRole("checkbox"))
+    await userEvent.click(screen.getByRole("button", { name: /применить/i }))
+    await waitFor(() =>
+      expect(
+        (articlesApi.importTemplate as unknown as { mock: { calls: unknown[][] } }).mock.calls[2][1],
+      ).toEqual({ dryRun: false, force: true }),
+    )
+  })
+
   it("смена файла сбрасывает согласие и заново снимает превью", async () => {
     // оба файла требуют force → проверяем, что согласие сбрасывается при смене файла
     vi.spyOn(articlesApi, "importTemplate").mockResolvedValue(
@@ -1519,15 +1552,17 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<ImportReport | null>(null)
   const [consent, setConsent] = useState(false)
+  const [conflict, setConflict] = useState(false) // 409: состояние БД разошлось с превью
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [doneMsg, setDoneMsg] = useState<string | null>(null)
 
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] ?? null
-    // смена файла сбрасывает предыдущее превью и согласие
+    // смена файла сбрасывает предыдущее превью, согласие и флаг конфликта
     setPreview(null)
     setConsent(false)
+    setConflict(false)
     setError(null)
     setDoneMsg(null)
     setFile(f)
@@ -1542,27 +1577,37 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
     }
   }
 
+  // force требуется, если план превью просит его ИЛИ применение упёрлось в 409-дрейф
+  const needsForce = !!preview && (preview.force_required || conflict)
+
   async function apply() {
     if (!file || !preview) return
     setBusy(true)
     setError(null)
     try {
-      const res = await importTemplate(file, { dryRun: false, force: preview.force_required })
+      const res = await importTemplate(file, { dryRun: false, force: needsForce })
       setDoneMsg(
         `Готово: создано ${res.created}, обновлено ${res.updated}, удалено ${res.deleted}, ` +
           `без изменений ${res.unchanged}, ожидают эмбеддинга ${res.pending_embeddings}.`,
       )
       setPreview(null)
       setConsent(false)
+      setConflict(false)
       onApplied()
     } catch (err) {
+      // 409: состояние БД изменилось между превью и применением — поднимаем согласие на force,
+      // не оставляя пользователя в тупике с устаревшим force_required=false.
+      if (err instanceof ApiError && err.status === 409) {
+        setConflict(true)
+        setConsent(false)
+      }
       setError(err instanceof ApiError ? err.message : "Не удалось применить импорт")
     } finally {
       setBusy(false)
     }
   }
 
-  const applyDisabled = busy || !preview || (preview.force_required && !consent)
+  const applyDisabled = busy || !preview || (needsForce && !consent)
 
   return (
     <div className="text-sm">
@@ -1596,11 +1641,12 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
               </ul>
             </details>
           )}
-          {preview.force_required && (
+          {needsForce && (
             <div className="mt-2 rounded bg-destructive/10 p-2 text-destructive">
               <p className="text-xs">
-                Импорт удалит {preview.deleted} строк (снос корня или большой доли). Это
-                необратимо.
+                {conflict && !preview.force_required
+                  ? "Состояние справочника изменилось с момента превью — для применения нужен принудительный режим."
+                  : `Импорт удалит ${preview.deleted} строк (снос корня или большой доли). Это необратимо.`}
               </p>
               <label className="mt-1 flex items-center gap-2 text-xs">
                 <input
@@ -1828,3 +1874,5 @@ git commit -m "chore(web): зелёный гейт catalog-admin-ui (typecheck/l
 - Каждая фронт-задача: TDD-цикл, мок API-модулей через `vi.spyOn`/`vi.mock`, без реальной сети.
 - Команды фронта — из `frontend/`; для одиночного файла `npx vitest run <path>`, весь прогон `npx vitest run`.
 - Бэкенд — `uv run` из `backend/`; ORM/миграции не меняются (новый роут использует существующую модель).
+- `deleteArticle` (by id) идёт через существующий роут `DELETE /api/articles/{id}`, который отвечает **204 No Content** — `apiSend` обрабатывает 204 (возврат `undefined`, без `res.json()`), так что пустое тело безопасно. Новый `DELETE /api/articles` отвечает 200 + JSON `{deleted}`.
+- **403 обрабатывается обобщённо** (сознательное отступление от спеки): общий `catch` показывает сообщение бэкенда, без logout. Для одиночного админа 403 из UI почти недостижим (роль-гейтинг прячет действия); дружелюбный текст «Недостаточно прав» + рефреш `me()` — необязательная полировка на потом.
