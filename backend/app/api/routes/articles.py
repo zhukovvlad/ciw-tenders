@@ -11,7 +11,7 @@ from app.api.deps import (
     require_admin,
 )
 from app.api.schemas import ArticleCreate, ArticleOut, ImportReportOut
-from app.domain.errors import DeletionGuardError, TemplateValidationError
+from app.domain.errors import DeletionGuardError, DuplicateError, TemplateValidationError
 from app.services.article_service import ArticleService
 from app.services.template_ingest_service import TemplateIngestService
 
@@ -33,11 +33,16 @@ def create_article(
     payload: ArticleCreate,
     service: ArticleService = Depends(get_article_service),
 ) -> ArticleOut:
-    article = service.create(
-        article_code=payload.article_code,
-        name=payload.name,
-        parent_code=payload.parent_code,
-    )
+    try:
+        article = service.create(
+            article_code=payload.article_code,
+            name=payload.name,
+            parent_code=payload.parent_code,
+        )
+    except DuplicateError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except TemplateValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return ArticleOut.from_entity(article)
 
 

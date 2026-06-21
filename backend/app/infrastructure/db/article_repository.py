@@ -61,6 +61,13 @@ class SqlAlchemyArticleRepository(ArticleRepository):
             self._session.delete(model)
             self._session.commit()
 
+    def has_descendant_codes(self, code: str) -> bool:
+        prefix = code.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + ".%"
+        stmt = select(TemplateArticleModel.id).where(
+            TemplateArticleModel.article_code.like(prefix, escape="\\")
+        ).limit(1)
+        return self._session.scalars(stmt).first() is not None
+
     def search_similar(self, embedding: list[float], top_k: int = 3) -> list[ArticleCandidate]:
         distance = TemplateArticleModel.embedding.cosine_distance(embedding)
         stmt = (

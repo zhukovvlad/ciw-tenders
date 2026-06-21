@@ -34,6 +34,11 @@ class ArticleRepository(ABC):
     def delete(self, article_id: int) -> None: ...
 
     @abstractmethod
+    def has_descendant_codes(self, code: str) -> bool:
+        """Есть ли строки с article_code LIKE code || '.%'."""
+        ...
+
+    @abstractmethod
     def search_similar(
         self, embedding: list[float], top_k: int = 3
     ) -> list[ArticleCandidate]:

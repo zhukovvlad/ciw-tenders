@@ -58,6 +58,10 @@ class FakeRepository(ArticleRepository):
     def delete(self, article_id: int) -> None:
         self._store = [a for a in self._store if a.id != article_id]
 
+    def has_descendant_codes(self, code: str) -> bool:
+        prefix = f"{code}."
+        return any(a.article_code.startswith(prefix) for a in self._store)
+
     def search_similar(self, embedding: list[float], top_k: int = 3) -> list[ArticleCandidate]:
         return self._candidates[:top_k]
 
