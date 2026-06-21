@@ -39,10 +39,11 @@ dev-back:
 dev-front:
     cd {{frontend}}; npm run dev
 
-# Линтинг бэкенда (ruff) и фронтенда (eslint).
+# Линтинг бэкенда (ruff) и фронтенда (eslint + prettier --check).
 lint:
     cd {{backend}}; uv run ruff check .
     cd {{frontend}}; npm run lint
+    cd {{frontend}}; npm run format:check
 
 # Автоформатирование/исправление.
 fmt:
