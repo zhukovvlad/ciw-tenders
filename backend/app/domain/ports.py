@@ -8,7 +8,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from app.domain.entities import ArticleCandidate, TemplateArticle, TokenPayload, User
+from app.domain.entities import (
+    ArticleCandidate,
+    ExistingArticle,
+    ImportPlan,
+    TemplateArticle,
+    TokenPayload,
+    User,
+)
 
 
 class ArticleRepository(ABC):
@@ -84,3 +91,13 @@ class TokenService(ABC):
 
     @abstractmethod
     def decode(self, token: str) -> TokenPayload: ...
+
+
+class ArticleImportRepository(ABC):
+    """Снимок справочника и атомарное применение плана импорта."""
+
+    @abstractmethod
+    def load_existing(self) -> list[ExistingArticle]: ...
+
+    @abstractmethod
+    def apply_plan(self, plan: ImportPlan) -> None: ...

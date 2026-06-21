@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.domain.entities import ArticleCandidate, TemplateArticle, TokenPayload, User
+from app.domain.entities import (
+    ArticleCandidate,
+    ExistingArticle,
+    ImportPlan,
+    TemplateArticle,
+    TokenPayload,
+    User,
+)
 from app.domain.errors import TokenError
 from app.domain.ports import (
+    ArticleImportRepository,
     ArticleRepository,
     Embedder,
     LLMMatcher,
@@ -103,3 +111,60 @@ class FakeUserRepository(UserRepository):
         )
         self._store.append(stored)
         return stored
+
+
+class FakeImportRepository(ArticleImportRepository):
+    """In-memory справочник для тестов сервиса импорта.
+
+    rows: code -> TemplateArticle (с id, embedding, embedding_input, parent_id).
+    """
+
+    def __init__(self) -> None:
+        self.rows: dict[str, TemplateArticle] = {}
+        self._next_id = 1
+
+    def load_existing(self) -> list[ExistingArticle]:
+        return [
+            ExistingArticle(id=a.id, article_code=a.article_code, embedding_input=a.embedding_input)
+            for a in self.rows.values()
+        ]
+
+    def apply_plan(self, plan: ImportPlan) -> None:
+        for code in plan.delete_codes:
+            self.rows.pop(code, None)
+        for ins in plan.inserts:
+            self.rows[ins.article_code] = TemplateArticle(
+                id=self._next_id,
+                parent_id=None,
+                article_code=ins.article_code,
+                name=ins.name,
+                embedding_input=ins.embedding_input,
+                embedding=None,
+            )
+            self._next_id += 1
+        for upd in plan.updates:
+            self.rows[upd.article_code] = TemplateArticle(
+                id=upd.id,
+                parent_id=None,
+                article_code=upd.article_code,
+                name=upd.name,
+                embedding_input=upd.embedding_input,
+                embedding=(
+                    None if upd.invalidate_embedding else self.rows[upd.article_code].embedding
+                ),
+            )
+
+    # помощники для тестов
+    def set_embedding(self, code: str, vector: list[float]) -> None:
+        a = self.rows[code]
+        self.rows[code] = TemplateArticle(
+            id=a.id,
+            parent_id=a.parent_id,
+            article_code=a.article_code,
+            name=a.name,
+            embedding_input=a.embedding_input,
+            embedding=vector,
+        )
+
+    def get(self, code: str) -> TemplateArticle:
+        return self.rows[code]
