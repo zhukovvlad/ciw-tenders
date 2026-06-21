@@ -40,6 +40,10 @@ def compute_plan(
         if current.embedding_input == row.embedding_input:
             unchanged += 1
             continue
+        # invalidate_embedding сейчас всегда True по построению: в updates попадают только
+        # строки с изменившимся embedding_input. Поле явное, чтобы решение об инвалидации
+        # жило в compute_plan (политика), а apply_plan лишь исполнял намерение, не выводя
+        # политику заново. Инвариант закреплён test_update_invalidates_when_embedding_input_changed.
         updates.append(
             PlannedUpdate(
                 id=current.id,
