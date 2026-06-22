@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from "react"
+import { AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Alert, AlertTitle } from "@/components/ui/alert"
 import { ArticleTable } from "@/components/articles/ArticleTable"
 import { ManualAddForm } from "@/components/articles/ManualAddForm"
 import { WipeCatalog } from "@/components/articles/WipeCatalog"
@@ -62,30 +66,51 @@ export function ArticlesPage() {
       </p>
 
       {isAdmin && (
-        <div className="mb-6 rounded-md border border-[var(--ds-hairline)] p-4">
-          <h3 className="mb-2 text-sm font-medium">Загрузить шаблон</h3>
-          <TemplateUpload onApplied={() => void reload()} />
-          <div className="mt-4 border-t border-[var(--ds-hairline)] pt-4">
-            <h3 className="mb-2 text-sm font-medium">
-              Добавить статью вручную
-            </h3>
-            <ManualAddForm onCreated={() => void reload()} />
-          </div>
-          <div className="mt-4 border-t border-[var(--ds-hairline)] pt-4">
-            <h3 className="mb-2 text-sm font-medium">Опасная зона</h3>
-            <WipeCatalog onWiped={() => void reload()} />
-          </div>
+        <div className="mb-6 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">
+                Загрузить шаблон
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TemplateUpload onApplied={() => void reload()} />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">
+                Добавить статью вручную
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ManualAddForm onCreated={() => void reload()} />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Опасная зона</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <WipeCatalog onWiped={() => void reload()} />
+            </CardContent>
+          </Card>
         </div>
       )}
 
       {status === "loading" && (
-        <p className="text-sm text-muted-foreground">Загрузка…</p>
+        <div className="space-y-2" aria-label="Загрузка">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+        </div>
       )}
       {status === "error" && (
-        <div className="text-sm">
-          <p className="mb-2 text-destructive">
-            Не удалось загрузить справочник.
-          </p>
+        <div>
+          <Alert variant="destructive" className="mb-3">
+            <AlertCircle className="size-4" />
+            <AlertTitle>Не удалось загрузить справочник.</AlertTitle>
+          </Alert>
           <Button onClick={() => void reload()}>Повторить</Button>
         </div>
       )}
