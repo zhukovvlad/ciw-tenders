@@ -8,8 +8,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Dropzone } from "@/components/Dropzone"
 import { ApiError } from "@/lib/api/client"
 import { importTemplate } from "@/lib/api/articles"
 import type { ImportReport } from "@/lib/types"
@@ -21,14 +21,12 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
   const [conflict, setConflict] = useState(false) // 409: состояние БД разошлось с превью
   const [busy, setBusy] = useState(false)
 
-  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0] ?? null
+  async function onPick(f: File) {
     // смена файла сбрасывает предыдущее превью, согласие и флаг конфликта
     setPreview(null)
     setConsent(false)
     setConflict(false)
     setFile(f)
-    if (!f) return
     setBusy(true)
     try {
       setPreview(await importTemplate(f, { dryRun: true, force: false }))
@@ -79,16 +77,18 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
 
   return (
     <div className="text-sm">
-      <Label htmlFor="tpl-file" className="text-xs text-[var(--ds-text-2)]">
-        Файл шаблона (.xlsx)
-      </Label>
-      <Input
-        id="tpl-file"
-        type="file"
+      <Dropzone
+        onFile={onPick}
         accept=".xlsx"
-        onChange={onPick}
-        className="mt-1"
+        id="tpl-file"
+        ariaLabel="Файл шаблона"
+        idleText="Перетащите .xlsx-шаблон или выберите файл"
+        hint="XLSX-шаблон справочника"
+        disabled={busy}
       />
+      {file && (
+        <p className="mt-2 text-xs text-muted-foreground">Файл: {file.name}</p>
+      )}
 
       {busy && <p className="mt-2 text-muted-foreground">Обработка…</p>}
 
