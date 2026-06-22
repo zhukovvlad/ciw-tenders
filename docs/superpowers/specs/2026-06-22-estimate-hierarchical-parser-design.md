@@ -295,11 +295,11 @@ Golden-тест обязан проверять именно это отобра
 
 Порт `EstimateRepository` (domain/ports):
 
-```
+```text
 create(estimate: NewEstimate, nodes: list[EstimateNode]) -> Estimate
 list_for_owner(owner_id: int, *, is_admin: bool) -> list[EstimateSummary]
 get(estimate_id: int, requester_id: int, *, is_admin: bool) -> Estimate | None  # с узлами; владение
-delete(estimate_id: int, requester_id: int, *, is_admin: bool) -> bool
+delete(estimate_id: int, requester_id: int, *, is_admin: bool) -> str | None  # original_object_key (для чистки MinIO) или None
 ```
 
 Персистентные сущности (отдельно от парсинговых и от DTO): `Estimate` (агрегат: id, user_id,
@@ -322,7 +322,8 @@ MinIO, `signature_version="s3v4"`). Переиспользуем конфиг-п
 
 Конфиг ([config.py](../../../backend/app/core/config.py), значения — в `backend/.env`,
 не коммитим): `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET` (имена зеркалят
-UDP). Бакет создаётся при старте/первом обращении (`ensure_bucket`). MinIO — новая runtime-
+UDP). Бакет создаётся лениво при первом обращении к `put()` (`ensure_bucket`) — `__init__`
+адаптера сети не дёргает, импорт/DI без сайд-эффектов. MinIO — новая runtime-
 зависимость: локальный `minio server` или общий инстанс (совместимо с «без Docker»).
 
 ## Компонент 3: API
