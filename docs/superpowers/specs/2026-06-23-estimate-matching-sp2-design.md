@@ -110,12 +110,18 @@ def match_estimate(self, estimate_id: int) -> None:
             estimate_id, RUNNING,
             detail="восстановление после обрыва" if was_running else None,
         )
-        # 1) embed-шаг: идемпотентно, keyset-курсором, чанк-коммиты, CAS
+        # 1) embed-шаг: идемпотентно, keyset-курсором, чанк-коммиты, CAS.
+        #    Транзиент гасится инлайн в адаптере embed_batch (бюджет + hard-timeout);
+        #    финальный отказ батча → узлы остаются pending (не записаны), курсор идёт
+        #    дальше, агрегат увидит unfinished → partial_error (ре-триггер доберёт).
         last_id = 0
         while chunk := self._estimates.fetch_unembedded_nodes(estimate_id, after_id=last_id, limit=CHUNK):
-            vecs = self._embedder.embed_batch([n.embedding_input for n in chunk])  # строго len, по порядку
-            for n, v in zip(chunk, vecs, strict=True):
-                self._estimates.save_node_embedding(n.id, n.embedding_input, v)    # CAS-commit
+            try:
+                vecs = self._embedder.embed_batch([n.embedding_input for n in chunk])  # строго len, по порядку
+                for n, v in zip(chunk, vecs, strict=True):
+                    self._estimates.save_node_embedding(n.id, n.embedding_input, v)    # CAS-commit
+            except TransientError:
+                pass                                     # узлы остаются pending → unfinished → partial_error
             last_id = chunk[-1].id                       # курсор вперёд → тот же id не вернётся
         # 2) gate: усиленный (пустой справочник != готов)
         total, pending = self._articles.matching_readiness()
@@ -123,14 +129,16 @@ def match_estimate(self, estimate_id: int) -> None:
             self._estimates.set_status(estimate_id, BLOCKED,
                                        detail=f"справочник не готов: total={total} pending={pending}")
             return
-        # 3) match-шаг: только {pending, error, no_match} И embedding IS NOT NULL
+        # 3) match-шаг: только {pending, error, no_match} И embedding IS NOT NULL.
+        #    Транзиент гасится ИНЛАЙН в адаптерах (бюджет ретраев + hard-timeout per call),
+        #    на финальном отказе адаптер кидает TransientError → фиксируем узел error и идём
+        #    дальше. НЕ пробрасываем в задачу → нет whole-task retry → нет LLM-амплификации
+        #    и неатомарного снимка (см. «Ретраи»). Сервис чист от Celery (`self.request` нет).
         for node in self._estimates.fetch_matchable_nodes(estimate_id):
             try:
                 result = self._matcher.match_one(node.embedding, node.embedding_input)
-            except TransientError:                       # сеть/429/таймаут
-                if self._can_retry():                    # Celery retries не исчерпаны
-                    raise                                # → autoretry задачи, идемпотентный резюм
-                result = NodeMatch(ERROR, match_error="...")  # исчерпаны → фиксируем error, не валим смету
+            except TransientError as exc:                # адаптер исчерпал инлайн-бюджет
+                result = NodeMatch(ERROR, match_error=str(exc))
             self._estimates.save_node_match(node.id, result)  # перезаписывает весь снимок, match_error→NULL на успехе
         # 4) агрегат
         errors = self._estimates.count_node_errors(estimate_id)        # строго WHERE status='error'
@@ -181,6 +189,12 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
 - Улучшение vs старого кода: LLM-отказ → `no_match` (а не `needs_review` с `matched=None`).
   Поэтому `needs_review` всегда означает «есть выбранный кандидат» — упрощает SP3.
 - `match_row(EstimateRow)`/`match_rows` удаляются вместе со старым путём.
+- **Граница `choose_best`:** обязан вернуть **один из переданных** кандидатов или `None`;
+  ядро валидирует (`chosen in candidates`), иначе `score_of(chosen, …)` упадёт на
+  «придуманной» статье. Невалидный ответ → трактуем как `None` (→ `no_match`).
+- **`search_similar` фильтрует `embedding IS NOT NULL`** (вероятно уже так с SP1 —
+  подтвердить в плане): если импорт добавит статьи с `embedding=NULL` уже после gate, но
+  пока матч идёт, NULL-строки не должны попасть в кандидаты / сломать векторный поиск.
 
 ## Модель данных (миграция `0004`)
 
@@ -253,21 +267,42 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
 - Лок берётся/отпускается на **одном пиннутом коннекте**, release в `finally`.
 - **Session-level** (не `xact`-level): `xact`-лок отпустился бы на первом из
   инкрементальных коммитов embed-шага.
-- **Лок как детектор живости:** упал воркер → коннект отвалился → Postgres сам отпустил
-  лок → ре-триггер из `running` дозабирает работу; жив и пишет → лок держится → второй
-  `no-op`. Статус `running` — пользовательский lifecycle, не замок; крах не «залочивает»
-  навсегда.
+- **Лок как детектор живости — граница:** он детектит **смерть коннекта** (краш процесса
+  → Postgres отпускает лок → ре-триггер из `running` дозабирает), **не зависание**. Живой,
+  но **зависший** на сетевом вызове воркер держит коннект → лок держится → ре-триггер вечно
+  `no-op`, а на `--pool=solo` одно зависание блокирует весь dev-воркер. Поэтому история
+  живости истинна **только вместе с тайм-лимитами** (см. «Конфигурация»): они превращают
+  зависание в краш/ошибку, коннект рвётся, лок освобождается. Статус `running` —
+  пользовательский lifecycle, не замок.
+- **Singleton `embed_articles`:** у эмбеддинга справочника тоже advisory-lock на
+  **константном ключе** (`classid`=namespace «articles embed», `objid`=0). Двойной enqueue
+  (двойной клик; импорт + админский endpoint; concurrency>1) → второй `no-op`. CAS спасает
+  корректность, но без singleton оба дёрнут эмбеддер на одних текстах (двойная стоимость +
+  гонка). Альтернатива на проде — отдельная очередь эмбеддинга с `concurrency=1`.
 
 ## Ретраи и ошибки
 
-- Транзиентные сбои (сеть/429/таймаут) при embed/LLM → проброс → **Celery autoretry +
-  экспоненциальный backoff** (конечное число попыток). Идемпотентный резюм: embed-шаг
-  пропускает заэмбедженное (keyset-курсор + CAS), match-шаг — терминальные кроме
-  `no_match`. Пока ретраи не исчерпаны — задача перезапускается целиком (а не валит узел).
-- **Исчерпание ретраев** (retry-count-aware: `self.request.retries >= max_retries`) →
-  затронутый узел фиксируется `error` (+ `match_error`), цикл продолжается на остальных,
-  смета → `partial_error`. Один устойчиво-плохой узел не валит смету и не зацикливает её.
-  `error`-узлы доберёт следующий ре-триггер (matchable включает `error`).
+**Транзиент гасится ИНЛАЙН в адаптерах, НЕ через whole-task Celery-retry.** Это осознанно
+заменяет ранее обсуждавшийся «Celery autoretry на узел»: whole-task retry × «`no_match`
+ре-матчабелен» давал бы повторный LLM-арбитраж всех `no_match`-узлов на каждом ретрае
+(амплификация стоимости) и неатомарный снимок (узел мог бы флипнуть `no_match→confident`
+между ретраями одного прогона). Поэтому:
+
+- **Адаптеры `Embedder`/`LLMMatcher`** держат **hard per-call timeout** + малый инлайн-бюджет
+  ретраев на транзиент (сеть/429/таймаут); на финальном отказе кидают доменный
+  `TransientError`. Бюджет/таймаут — инжектируемая конфигурация (тестируется фейком, который
+  кидает `TransientError` N раз).
+- **Match-шаг** ловит `TransientError` поузлово → фиксирует узел `error` (+ `match_error`),
+  **продолжает** на остальных. Никакого проброса в задачу → нет амплификации, снимок прогона
+  атомарен. Один устойчиво-плохой узел не валит смету; `error`-узлы доберёт следующий
+  ре-триггер (matchable включает `error`).
+- **Embed-шаг** ловит `TransientError` по-батчево → узлы остаются `pending` (вектор не
+  записан), курсор идёт дальше; агрегат → `partial_error` (`unfinished>0`), ре-триггер
+  доберёт. Идемпотентность гарантируется keyset-курсором + CAS.
+- **Whole-task Celery-retry НЕ используется** для матчинга (recovery — ре-триггер +
+  тайм-лимиты). Системный сбой до match-шага (БД/брокер недоступны, gate-запрос упал) →
+  задача падает → ручной ре-триггер (как и enqueue-after-commit edge ниже). Сервис **чист
+  от Celery** — `self.request`/`retries` в доменном сервисе нет (была дыра в ранней версии).
 - `count_node_errors` считает **строго `WHERE status='error'`** (не по `match_error`), а
   `save_node_match` на успехе перезаписывает `match_error → NULL` — иначе ре-матч
   `partial_error` дал бы залипший статус (стейл `match_error`).
@@ -278,15 +313,27 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
   **разрешён из `{pending, blocked, partial_error, running}`** (в т.ч. `running` — это
   закрывает «воркер умер посреди матча» политикой ре-триггера, без реапера). Владение
   как в SP1 (owner-or-admin; чужая/нет → 404). Идемпотентность гарантирует, что повтор
-  домётчивает только незавершённое.
+  домётчивает только незавершённое. **Честный ответ по статусу:** при `running` эндпоинт
+  отвечает «уже выполняется» (задача-дубль в воркере возьмёт `no-op`, если держатель лока
+  жив; если зависла/умерла — дозаберёт), а не «перезапущено» — API не знает, жив ли
+  держатель, поэтому не обещает рестарт.
 - **`POST /api/articles/embed`** — админский (require_admin). Ставит `embed_articles()`.
   Замена ручному `just embed-worker`.
 - Снимается **`POST /estimates/match`** (синхронный stateless-матч). Реальный поток теперь
   — upload (SP1) → авто-enqueue `match_estimate` + ре-триггер по требованию.
 
-**Проводка триггеров:** `EstimateService.ingest` (SP1) получает зависимость `TaskQueue`
-и в конце успешного ingest зовёт `enqueue_match(estimate_id)`; пути импорта/добавления
-справочника зовут `enqueue_articles_embed()`.
+**Проводка триггеров (порядок критичен):** `EstimateService.ingest` (SP1) получает
+`TaskQueue` и зовёт `enqueue_match(estimate_id)` **строго ПОСЛЕ коммита** ingest-транзакции.
+Иначе классический enqueue-before-commit: воркер (Redis быстр, result backend нет)
+подхватит `match_estimate` раньше, чем строки видимы → возьмёт лок, `fetch_unembedded_nodes`
+пусто, gate, матчить нечего → `ready` на «пустой» смете. Реализация: enqueue в
+`after_commit`-хуке сессии либо явно после `commit()`. Пути импорта/добавления справочника
+зовут `enqueue_articles_embed()` так же — после коммита.
+
+**Обратный край:** commit прошёл, а enqueue упал (Redis недоступен) — смета молча остаётся
+`pending` без авто-ретрая. Терпимо (есть ручной ре-триггер), но пользователь после загрузки
+видит «ничего не происходит»; UI/ответ загрузки стоит это учитывать (вне объёма бэкенда SP2,
+но отмечаем для SP3-фронта).
 
 ## Снятие старого пути
 
@@ -303,9 +350,18 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
 
 - `backend/.env`: `CELERY_BROKER_URL` (или `REDIS_URL`) — managed Redis на Timeweb;
   секреты не коммитим. Result backend **не задаётся**.
-- `Settings` (`core/config.py`): поля брокера.
+- `Settings` (`core/config.py`): поля брокера + тайм-лимиты/таймауты (ниже).
 - `justfile`: рецепт запуска воркера (dev `--pool=solo`); снятие `embed-worker`.
 - Без Docker: Redis удалённый, Celery-воркер — обычный python-процесс через `uv run`.
+- **Тайм-лимиты — обязательны (от них зависит истинность семантики `running`):**
+  - **`task_soft_time_limit` / `task_time_limit`** на Celery — потолок на задачу. Зависший
+    воркер → SIGKILL/исключение → коннект рвётся → Postgres отпускает advisory-lock →
+    ре-триггер из `running` дозабирает. Без этого зависание держит лок вечно (на `solo` —
+    блокирует весь воркер), и заявленная история живости неверна.
+  - **Hard per-call timeout** на HTTP-клиентах `Embedder`/`LLMMatcher` (httpx) — чтобы один
+    повисший вызов не съел весь `task_time_limit`; на таймаут → `TransientError` → инлайн-
+    бюджет → `error`/`pending`.
+  - Значения вынести в `Settings` (конфигурируемо), осмысленные дефолты — в плане.
 
 ## Тесты
 
@@ -320,6 +376,15 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
   no_match→confident, иммутабельность confident/needs_review), `count_node_errors` по
   статусу, обнуление `match_error` на успехе, advisory-lock дедуп (фейк-лок),
   стейл-`running` → detail «восстановление».
+- **Инлайн-ретрай → error:** фейк `Embedder`/`LLMMatcher` кидает `TransientError` сверх
+  бюджета → узел `error`, смета `partial_error`; и обратное — кидает `TransientError`
+  меньше бюджета → успех (узел терминален). Тестируется **без** Celery (бюджет в адаптере).
+- **Singleton `embed_articles`:** второй параллельный вызов при занятом константном
+  advisory-lock → `no-op` (фейк-лок); эмбеддер не дёргается повторно.
+- **`choose_best` граница:** «придуманная» статья (не из кандидатов) → трактуется как
+  `None` → `no_match` (а не падение `score_of`).
+- **enqueue-after-commit:** `EstimateService.ingest` зовёт `TaskQueue.enqueue_match` только
+  после коммита (фейк-кью фиксирует, что вызов был, и что строки уже видимы).
 
 ## Безопасность миграции / стык с SP1
 
@@ -353,3 +418,14 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
     фильтром `embedding IS NOT NULL` в matchable.
 11. **`match_error` обнуляется на успехе; `count_node_errors` по `status='error'`** — иначе
     залипший `partial_error` при ре-матче.
+12. **Транзиент-ретрай инлайн в адаптерах, НЕ whole-task Celery-retry.** Whole-task retry ×
+    ре-матчабельный `no_match` дал бы LLM-амплификацию и неатомарный снимок; инлайн-бюджет
+    в `Embedder`/`LLMMatcher` (+ `TransientError`) этого избегает и держит сервис чистым от
+    Celery (`self.request` в домене нет).
+13. **Тайм-лимиты обязательны.** `task_(soft_)time_limit` + per-call HTTP-таймауты делают
+    «лок-как-детектор-живости» истинным: зависание → краш → release лока → ре-триггер. Без
+    них зависший воркер держит лок вечно (на `solo` — намертво).
+14. **Singleton `embed_articles`** (advisory-lock на константном ключе) — против двойного
+    enqueue и двойной стоимости эмбеддера.
+15. **`enqueue_match` строго после коммита ingest** — против enqueue-before-commit (иначе
+    `ready` на «пустой» смете).
