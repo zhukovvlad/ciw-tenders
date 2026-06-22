@@ -118,6 +118,7 @@ def match_estimate(self, estimate_id: int) -> None:
                     self._estimates.save_node_embedding(n.id, n.embedding_input, v)    # CAS-commit
             except TransientError:
                 pass                                     # узлы остаются pending → unfinished → partial_error
+            self._estimates.touch(estimate_id)           # heartbeat: бамп updated_at (живость для UI)
             last_id = chunk[-1].id                       # курсор вперёд → тот же id не вернётся
         # 2) gate: усиленный (пустой справочник != готов). Сервис НЕ ставит blocked сам —
         #    кидает доменный DictionaryNotReadyError; обёртка решает retry-vs-blocked.
@@ -135,6 +136,7 @@ def match_estimate(self, estimate_id: int) -> None:
             except TransientError as exc:                # адаптер исчерпал инлайн-бюджет
                 result = NodeMatch(ERROR, match_error=str(exc))
             self._estimates.save_node_match(node.id, result)  # перезаписывает весь снимок, match_error→NULL на успехе
+            # + периодический heartbeat: self._estimates.touch(estimate_id) раз в K узлов (живость для UI)
         # 4) агрегат
         errors = self._estimates.count_node_errors(estimate_id)        # строго WHERE status='error'
         unfinished = self._estimates.count_unfinished_nodes(estimate_id)  # status='pending' (вектор не записался)
@@ -177,11 +179,20 @@ def match_estimate(self, estimate_id):
   near-free (keyset/CAS пропустят заэмбедженное).
 - `blocked` достигается **только** при исчерпании ретраев (честный таймаут «ждали и не
   дождались»), а не мгновенно. `total==0` тоже идёт в retry (админ может наполнять справочник
-  параллельно).
+  параллельно). *Fast-path-опция* (если захочется): `total==0 → blocked` сразу, отличая
+  «пусто, ждать нечего» от «частично эмбеддится» — осознанно НЕ берём (при первичной настройке
+  `total` идёт `0→N`, fast-fail заблокировал бы юзера, пока справочник вот-вот появится).
 - Это **не** whole-task-retry матча (LLM-амплификации нет — gate до match-шага). Запрет
   whole-task-retry из «Ретраи» относится к match-шагу; gate-ожидание — отдельная ветка.
+- **`mark_blocked` — единственный писатель статуса ВНЕ лока, поэтому сам берёт `try_lock`:**
+  занят (активный матчер B) → `no-op`; под локом, если статус уже терминально-матченный
+  (`ready`/`partial_error`) → `no-op` (B успел сматчить между границей ретраев — **не**
+  затираем реальный результат в `blocked`); иначе → `set_status(BLOCKED, detail)`. Без этого
+  гонка «B сматчил → A.mark_blocked клоббит `ready`→`blocked`». Узкий edge «gate дозрел в
+  окне, но никто не матчил» сводится к обычному blocked-UX (ре-триггер) — приемлемо.
 - Домен/сервис тестируются без Celery: gate-не-готов → `match_estimate` бросает
-  `DictionaryNotReadyError`; путь blocked — отдельный метод `mark_blocked`.
+  `DictionaryNotReadyError`; путь blocked — `mark_blocked` (под фейк-локом + проверка
+  терминального статуса).
 
 ## Ядро `match_one(embedding, query_text)` (рефактор `MatchingService`)
 
@@ -355,11 +366,16 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
   отвечает «уже выполняется» (задача-дубль в воркере возьмёт `no-op`, если держатель лока
   жив; если зависла/умерла — дозаберёт), а не «перезапущено» — API не знает, жив ли
   держатель, поэтому не обещает рестарт.
-  - **UI-контракт (для SP3-фронта):** `set_status` бампает `updated_at` (явным `=now()` либо
-    ORM-`onupdate`, без миграции). Фронт на `running` обычно блокирует кнопку — чтобы смета
-    не висла визуально навсегда при крахе/зависании воркера, кнопку «Перезапустить»
-    разрешать для `running`, если `now - updated_at > порог` (напр. 10 мин). Лёгкая замена
-    реаперу зависших (реапер — тех-долг); сам ре-триггер из `running` уже разрешён.
+  - **UI-контракт (для SP3-фронта) + heartbeat:** `set_status` бампает `updated_at`, **и**
+    задача бампает его **по ходу работы** (heartbeat): на каждом чанк-коммите embed и
+    периодически в match-цикле — чтобы `updated_at` отражал реальный прогресс, а не только
+    старт. Иначе большая смета/медленный эмбеддер заморозили бы таймстамп и UI счёл бы живую
+    задачу «зависшей». В gate-ожидании свежесть держит **каждый gate-retry** (его повторный
+    `set_status(RUNNING)` бампает `updated_at`), поэтому достаточно `порог > макс. интервал
+    backoff между ретраями` (не всё окно ожидания). Фронт на `running` блокирует кнопку, но
+    даёт «Перезапустить», если `now - updated_at > порог` — лёгкая замена реаперу зависших
+    (реапер — тех-долг); сам ре-триггер из `running` уже разрешён, а ложный рестарт живой
+    задачи безвреден (`try_lock` держателя → `no-op`, честный «уже выполняется»).
 - **`POST /api/articles/embed`** — админский (require_admin). Ставит `embed_articles()`.
   Замена ручному `just embed-worker`.
 - Снимается **`POST /estimates/match`** (синхронный stateless-матч). Реальный поток теперь
@@ -424,6 +440,10 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
 - **Gate-retry → blocked:** gate-не-готов → сервис бросает `DictionaryNotReadyError` (без
   Celery); обёртка ретраит и при исчерпании зовёт `mark_blocked` (тест обёртки —
   `task_always_eager` + `max_retries=0` форсит blocked-путь).
+- **`mark_blocked` не клоббит результат:** при занятом локе → `no-op`; при статусе уже
+  `ready`/`partial_error` → `no-op` (не перезаписывает реальный матч в `blocked`).
+- **Heartbeat:** `updated_at` бампается на чанк-коммите embed и в match-цикле (а не только на
+  старте) — фейк-репо фиксирует рост таймстампа по ходу.
 - **Инлайн-ретрай → error:** фейк `Embedder`/`LLMMatcher` кидает `TransientError` сверх
   бюджета → узел `error`, смета `partial_error`; и обратное — кидает `TransientError`
   меньше бюджета → успех (узел терминален). Тестируется **без** Celery (бюджет в адаптере).
@@ -485,3 +505,9 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
     enqueue и двойной стоимости эмбеддера.
 15. **`enqueue_match` строго после коммита ingest** — против enqueue-before-commit (иначе
     `ready` на «пустой» смете).
+16. **`mark_blocked` под `try_lock` + проверка терминального статуса** — единственный
+    писатель статуса вне залоченной секции; иначе гонка «B сматчил `ready` → A.mark_blocked
+    клоббит в `blocked`». Занят → `no-op`; статус уже `ready`/`partial_error` → `no-op`.
+17. **Heartbeat `updated_at`** (чанк-коммиты embed + периодически в match + каждый gate-retry)
+    — чтобы stale-`running` UI-эвристика не врала на долгом здоровом прогоне/gate-ожидании;
+    порог stale тогда `> макс. интервал backoff`, а не всё окно.
