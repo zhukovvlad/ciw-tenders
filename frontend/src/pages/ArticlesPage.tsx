@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { AlertCircle } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -18,11 +19,9 @@ export function ArticlesPage() {
   const isAdmin = role === "admin"
   const [articles, setArticles] = useState<Article[]>([])
   const [status, setStatus] = useState<"loading" | "error" | "ready">("loading")
-  const [actionError, setActionError] = useState<string | null>(null)
 
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => {
-    setActionError(null)
     setStatus("loading")
     setReloadKey((k) => k + 1)
   }, [])
@@ -45,14 +44,12 @@ export function ArticlesPage() {
   }, [reloadKey])
 
   async function handleDelete(id: number) {
-    if (!window.confirm("Удалить статью?")) return
-    setActionError(null)
     try {
       await deleteArticle(id)
+      toast.success("Статья удалена")
       reload()
     } catch (err) {
-      // никаких тихих провалов — показываем ошибку удаления
-      setActionError(
+      toast.error(
         err instanceof ApiError ? err.message : "Не удалось удалить статью"
       )
     }
@@ -118,9 +115,6 @@ export function ArticlesPage() {
         <p className="text-sm text-muted-foreground">
           Справочник пуст{isAdmin ? " — загрузите шаблон." : "."}
         </p>
-      )}
-      {actionError && (
-        <p className="mb-3 text-sm text-destructive">{actionError}</p>
       )}
       {status === "ready" && articles.length > 0 && (
         <ArticleTable
