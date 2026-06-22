@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { toast } from "sonner"
 import type { ImportReport } from "@/lib/types"
 import { ApiError } from "@/lib/api/client"
 import * as articlesApi from "@/lib/api/articles"
 import { TemplateUpload } from "./TemplateUpload"
+
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+  Toaster: () => null,
+}))
 
 function report(over: Partial<ImportReport> = {}): ImportReport {
   return {
@@ -74,8 +80,8 @@ describe("TemplateUpload", () => {
 
   it("на 409-дрейф поднимает чекбокс force, затем шлёт force:true", async () => {
     vi.spyOn(articlesApi, "importTemplate")
-      .mockResolvedValueOnce(report({ force_required: false })) // dry-run: force не нужен
-      .mockRejectedValueOnce(new ApiError(409, "состояние изменилось")) // apply без force → 409
+      .mockResolvedValueOnce(report({ force_required: false }))
+      .mockRejectedValueOnce(new ApiError(409, "состояние изменилось"))
       .mockResolvedValueOnce(
         report({ deleted: 3, dry_run: false, force_required: false })
       )
@@ -84,7 +90,6 @@ describe("TemplateUpload", () => {
     const apply = await screen.findByRole("button", { name: /применить/i })
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
     await userEvent.click(apply)
-    // 409 → появился чекбокс согласия, кнопка снова заблокирована
     expect(await screen.findByText(/принудительный режим/i)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /применить/i })).toBeDisabled()
     await userEvent.click(screen.getByRole("checkbox"))
@@ -101,7 +106,6 @@ describe("TemplateUpload", () => {
   })
 
   it("смена файла сбрасывает согласие и заново снимает превью", async () => {
-    // оба файла требуют force → проверяем, что согласие сбрасывается при смене файла
     vi.spyOn(articlesApi, "importTemplate").mockResolvedValue(
       report({ deleted: 5, force_required: true })
     )
@@ -110,19 +114,22 @@ describe("TemplateUpload", () => {
     await screen.findByText(/удалит/i)
     await userEvent.click(screen.getByRole("checkbox"))
     expect(screen.getByRole("checkbox")).toBeChecked()
-    await pick("b.xlsx") // смена файла
+    await pick("b.xlsx")
     await screen.findByText(/удалит/i)
-    // согласие сброшено, dry-run перезапущен (2 вызова)
     expect(screen.getByRole("checkbox")).not.toBeChecked()
     expect(articlesApi.importTemplate).toHaveBeenCalledTimes(2)
   })
 
-  it("показывает 400-ошибку файла", async () => {
+  it("на 400-ошибке файла шлёт тост", async () => {
     vi.spyOn(articlesApi, "importTemplate").mockRejectedValue(
       new ApiError(400, "плохой файл")
     )
     render(<TemplateUpload onApplied={vi.fn()} />)
     await pick()
-    expect(await screen.findByText(/плохой файл/i)).toBeInTheDocument()
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringMatching(/плохой файл/i)
+      )
+    )
   })
 })
