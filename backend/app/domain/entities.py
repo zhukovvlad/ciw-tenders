@@ -171,3 +171,49 @@ class ParsedEstimate:
     nodes: list[EstimateNode]
     positions: list[EstimatePosition]
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class NewEstimate:
+    """Данные для создания сметы (до записи)."""
+
+    user_id: int
+    filename: str
+    original_object_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class StoredEstimateRow:
+    """Сохранённый узел сметы."""
+
+    id: int
+    code: str
+    name: str
+    parent_code: str | None
+    section_type: str | None
+    depth: int
+    embedding_input: str
+    source_index: int
+    status: str
+    has_embedding: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Estimate:
+    """Агрегат сохранённой сметы (без original_object_key — наружу не отдаём)."""
+
+    id: int
+    user_id: int
+    filename: str
+    status: str
+    created_at: datetime
+    rows: list[StoredEstimateRow] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class EstimateSummary:
+    id: int
+    filename: str
+    status: str
+    nodes_count: int
+    created_at: datetime

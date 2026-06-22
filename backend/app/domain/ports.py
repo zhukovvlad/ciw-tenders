@@ -10,8 +10,12 @@ from abc import ABC, abstractmethod
 
 from app.domain.entities import (
     ArticleCandidate,
+    Estimate,
+    EstimateNode,
+    EstimateSummary,
     ExistingArticle,
     ImportPlan,
+    NewEstimate,
     PendingEmbedding,
     TemplateArticle,
     TokenPayload,
@@ -122,3 +126,35 @@ class EmbeddingQueueRepository(ABC):
     def save_embedding(self, article_id: int, embedding_input: str, vector: list[float]) -> bool:
         """Compare-and-swap: пишет вектор только если embedding_input не изменился."""
         ...
+
+
+class EstimateRepository(ABC):
+    """Хранилище смет: создание (смета + узлы), список/чтение/удаление с владением."""
+
+    @abstractmethod
+    def create(self, new: NewEstimate, nodes: list[EstimateNode]) -> Estimate: ...
+
+    @abstractmethod
+    def list_for_owner(self, owner_id: int, *, is_admin: bool) -> list[EstimateSummary]: ...
+
+    @abstractmethod
+    def get(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> Estimate | None: ...
+
+    @abstractmethod
+    def delete(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> str | None:
+        """Удаляет смету (каскад строк). Возвращает original_object_key или None
+        (не найдена/чужая)."""
+        ...
+
+
+class ObjectStorage(ABC):
+    """Объектное хранилище (MinIO/S3) для исходных файлов."""
+
+    @abstractmethod
+    def put(self, key: str, data: bytes, content_type: str) -> None: ...
+
+    @abstractmethod
+    def get(self, key: str) -> bytes: ...
+
+    @abstractmethod
+    def delete(self, key: str) -> None: ...

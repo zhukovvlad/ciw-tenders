@@ -19,6 +19,10 @@ class TemplateValidationError(Exception):
     """Файл-шаблон структурно некорректен (дубликат кода, сирота-родитель)."""
 
 
+class StorageError(Exception):
+    """Сбой объектного хранилища (MinIO/S3 недоступно или ошибка операции)."""
+
+
 class DeletionGuardError(Exception):
     """Импорт удалил бы слишком много (порог) без явного force."""
 
