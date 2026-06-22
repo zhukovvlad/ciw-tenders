@@ -11,7 +11,9 @@ vi.mock("sonner", () => ({
   Toaster: () => null,
 }))
 
-beforeEach(() => { vi.clearAllMocks(); })
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 afterEach(() => vi.restoreAllMocks())
 
 async function openDialog() {
@@ -29,7 +31,10 @@ describe("WipeCatalog", () => {
       name: /очистить справочник/i,
     })
     expect(confirm).toBeDisabled()
-    await userEvent.type(within(dialog).getByLabelText(/подтверждени/i), "УДАЛИТЬ")
+    await userEvent.type(
+      within(dialog).getByLabelText(/подтверждени/i),
+      "УДАЛИТЬ"
+    )
     expect(confirm).toBeEnabled()
   })
 
@@ -38,7 +43,10 @@ describe("WipeCatalog", () => {
     vi.spyOn(articlesApi, "deleteAllArticles").mockResolvedValue(362)
     render(<WipeCatalog onWiped={onWiped} />)
     const dialog = await openDialog()
-    await userEvent.type(within(dialog).getByLabelText(/подтверждени/i), "УДАЛИТЬ")
+    await userEvent.type(
+      within(dialog).getByLabelText(/подтверждени/i),
+      "УДАЛИТЬ"
+    )
     await userEvent.click(
       within(dialog).getByRole("button", { name: /очистить справочник/i })
     )

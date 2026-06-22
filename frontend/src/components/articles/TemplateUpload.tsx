@@ -121,13 +121,16 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
                     ? "Состояние справочника изменилось с момента превью — для применения нужен принудительный режим."
                     : `Импорт удалит ${preview.deleted} строк (снос корня или большой доли). Это необратимо.`}
                 </span>
-                <label className="mt-1 flex items-center gap-2 text-xs">
+                <div className="mt-1 flex items-center gap-2 text-xs">
                   <Checkbox
+                    id="force-consent"
                     checked={consent}
                     onCheckedChange={(c) => setConsent(c === true)}
                   />
-                  Да, применить принудительно
-                </label>
+                  <Label htmlFor="force-consent">
+                    Да, применить принудительно
+                  </Label>
+                </div>
               </AlertDescription>
             </Alert>
           )}

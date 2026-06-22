@@ -86,7 +86,9 @@ export function ArticlesPage() {
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm font-medium">Опасная зона</CardTitle>
+              <CardTitle className="text-sm font-medium">
+                Опасная зона
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <WipeCatalog onWiped={() => void reload()} />

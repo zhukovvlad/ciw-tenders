@@ -6,7 +6,12 @@ import * as authCtx from "@/lib/auth/useAuth"
 import * as session from "@/lib/session"
 import { AppShell } from "./AppShell"
 
-const USER: AuthUser = { id: 1, email: "a@mr.kz", role: "admin", is_active: true }
+const USER: AuthUser = {
+  id: 1,
+  email: "a@mr.kz",
+  role: "admin",
+  is_active: true,
+}
 const logout = vi.fn()
 
 function mockAuth() {
@@ -20,7 +25,10 @@ function mockAuth() {
   })
 }
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  logout.mockClear()
+})
 
 describe("AppShell", () => {
   it("клик по вкладке зовёт onTab", async () => {

@@ -33,7 +33,9 @@ function pick(name = "Шаблон.xlsx") {
   )
 }
 
-beforeEach(() => { vi.clearAllMocks(); })
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 afterEach(() => vi.restoreAllMocks())
 
 describe("TemplateUpload", () => {

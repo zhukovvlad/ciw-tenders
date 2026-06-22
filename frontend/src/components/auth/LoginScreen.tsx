@@ -37,7 +37,9 @@ export function LoginScreen() {
     } catch (err) {
       const is401 = err instanceof ApiError && err.status === 401
       toast.error(
-        is401 ? "Неверный логин или пароль" : "Не удалось войти, попробуйте позже"
+        is401
+          ? "Неверный логин или пароль"
+          : "Не удалось войти, попробуйте позже"
       )
     }
   }

@@ -35,7 +35,9 @@ describe("ArticleTable", () => {
     render(<ArticleTable articles={ARTS} isAdmin onDelete={onDelete} />)
     await userEvent.click(screen.getAllByLabelText(/удалить/i)[0])
     const dialog = await screen.findByRole("alertdialog")
-    await userEvent.click(within(dialog).getByRole("button", { name: /удалить/i }))
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /удалить/i })
+    )
     expect(onDelete).toHaveBeenCalledWith(1)
   })
 })

@@ -29,7 +29,7 @@ export function AppShell({ tab, onTab, children }: AppShellProps) {
         <Tabs
           value={tab}
           onValueChange={(v) => {
-            if (v === "estimate" || v === "articles") onTab(v);
+            if (v === "estimate" || v === "articles") onTab(v)
           }}
         >
           <TabsList>
