@@ -17,8 +17,8 @@ import { ApiError } from "@/lib/api/client"
 import { createArticle } from "@/lib/api/articles"
 
 const schema = z.object({
-  article_code: z.string().min(1, "Введите код статьи"),
-  name: z.string().min(1, "Введите наименование"),
+  article_code: z.string().trim().min(1, "Введите код статьи"),
+  name: z.string().trim().min(1, "Введите наименование"),
   parent_code: z.string().optional(),
 })
 

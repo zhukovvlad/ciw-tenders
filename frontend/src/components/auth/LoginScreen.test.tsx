@@ -67,21 +67,17 @@ describe("LoginScreen", () => {
     renderLogin()
     await userEvent.click(screen.getByRole("button", { name: /Войти/ }))
     await waitFor(() => expect(spy).not.toHaveBeenCalled())
+    expect(await screen.findByText(/введите логин/i)).toBeInTheDocument()
+    expect(await screen.findByText(/введите пароль/i)).toBeInTheDocument()
   })
 
   it("кнопка деактивирована во время запроса", async () => {
-    let resolve!: (v: string) => void
-    vi.spyOn(authApi, "login").mockReturnValue(
-      new Promise((r) => {
-        resolve = r
-      })
-    )
+    vi.spyOn(authApi, "login").mockReturnValue(new Promise(() => {}))
     renderLogin()
     await userEvent.type(screen.getByLabelText(/логин/i), "a@mr.kz")
     await userEvent.type(screen.getByLabelText(/пароль/i), "pass")
     await userEvent.click(screen.getByRole("button", { name: /Войти/ }))
     expect(screen.getByRole("button", { name: /Войти/ })).toBeDisabled()
-    resolve("fake-token")
   })
 
   it("успешный вход не показывает toast.error", async () => {

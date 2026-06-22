@@ -86,6 +86,8 @@ describe("ManualAddForm", () => {
     render(<ManualAddForm onCreated={vi.fn()} />)
     await userEvent.click(screen.getByRole("button", { name: /добавить/i }))
     await waitFor(() => expect(spy).not.toHaveBeenCalled())
+    expect(await screen.findByText(/введите код статьи/i)).toBeInTheDocument()
+    expect(await screen.findByText(/введите наименование/i)).toBeInTheDocument()
   })
 
   it("parent_code пустой → передаётся как null", async () => {
