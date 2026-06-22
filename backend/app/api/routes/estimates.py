@@ -48,7 +48,7 @@ async def match_estimate(
         rows = parser.parse(content)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
 
     results = matching.match_rows(rows)
@@ -63,10 +63,10 @@ async def upload_estimate(
     settings: Settings = Depends(get_settings),
 ) -> EstimateUploadResponse:
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Ожидается файл .xlsx")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Ожидается файл .xlsx")
     max_bytes = int(settings.estimate_max_upload_mb * 1024 * 1024)
     too_large = HTTPException(
-        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        status.HTTP_413_CONTENT_TOO_LARGE,
         f"Файл больше {settings.estimate_max_upload_mb} МБ",
     )
     if file.size is not None and file.size > max_bytes:  # быстрый путь, если size заполнен
@@ -75,12 +75,12 @@ async def upload_estimate(
     if len(content) > max_bytes:  # авторитетный бэкстоп — не зависит от версии Starlette
         raise too_large
     if not content.startswith(_XLSX_SIGNATURE):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Файл не является .xlsx (ZIP)")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Файл не является .xlsx (ZIP)")
 
     try:
         result = service.ingest(content, file.filename, owner_id=user.id or 0)
     except ValueError as exc:  # нет обязательных колонок — до put в MinIO
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     except StorageError as exc:  # ТОЛЬКО сбой MinIO → 503; прочее (БД и т.п.) → 500
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Хранилище недоступно") from exc
 
