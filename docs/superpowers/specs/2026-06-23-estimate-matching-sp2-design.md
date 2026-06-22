@@ -105,11 +105,7 @@ def match_estimate(self, estimate_id: int) -> None:
     if not self._estimates.try_matching_lock(estimate_id):
         return                                          # конкурент владеет → no-op
     try:
-        was_running = self._estimates.status_is_running(estimate_id)
-        self._estimates.set_status(                     # COMMIT до embed-шага
-            estimate_id, RUNNING,
-            detail="восстановление после обрыва" if was_running else None,
-        )
+        self._estimates.set_status(estimate_id, RUNNING)  # COMMIT до embed-шага (бампает updated_at)
         # 1) embed-шаг: идемпотентно, keyset-курсором, чанк-коммиты, CAS.
         #    Транзиент гасится инлайн в адаптере embed_batch (бюджет + hard-timeout);
         #    финальный отказ батча → узлы остаются pending (не записаны), курсор идёт
@@ -123,12 +119,11 @@ def match_estimate(self, estimate_id: int) -> None:
             except TransientError:
                 pass                                     # узлы остаются pending → unfinished → partial_error
             last_id = chunk[-1].id                       # курсор вперёд → тот же id не вернётся
-        # 2) gate: усиленный (пустой справочник != готов)
+        # 2) gate: усиленный (пустой справочник != готов). Сервис НЕ ставит blocked сам —
+        #    кидает доменный DictionaryNotReadyError; обёртка решает retry-vs-blocked.
         total, pending = self._articles.matching_readiness()
         if total == 0 or pending > 0:
-            self._estimates.set_status(estimate_id, BLOCKED,
-                                       detail=f"справочник не готов: total={total} pending={pending}")
-            return
+            raise DictionaryNotReadyError(total=total, pending=pending)
         # 3) match-шаг: только {pending, error, no_match} И embedding IS NOT NULL.
         #    Транзиент гасится ИНЛАЙН в адаптерах (бюджет ретраев + hard-timeout per call),
         #    на финальном отказе адаптер кидает TransientError → фиксируем узел error и идём
@@ -160,6 +155,33 @@ def match_estimate(self, estimate_id: int) -> None:
 3. `fetch_matchable_nodes` фильтрует `embedding IS NOT NULL`: узел, которому вектор молча
    не записался (CAS-`False`/рассинхрон), остаётся `pending` без вектора и **не** попадёт в
    `match_one(None, …)`; его доберёт следующий ре-триггер.
+
+**Gate-неготовность: bounded retry в обёртке, не в сервисе.** Сервис кидает доменный
+`DictionaryNotReadyError(total, pending)` (живёт в `domain/errors`) — он **не** знает про
+Celery/таймеры. Тонкая Celery-обёртка владеет ожиданием:
+
+```python
+@app.task(bind=True, max_retries=N, default_retry_delay=BACKOFF)
+def match_estimate(self, estimate_id):
+    try:
+        service.match_estimate(estimate_id)         # сессия → сервис из портов → commit
+    except DictionaryNotReadyError as exc:
+        try:
+            self.retry(exc=exc, countdown=backoff(self.request.retries))  # задача вышла → лок отпущен
+        except MaxRetriesExceededError:
+            service.mark_blocked(estimate_id, detail=f"timeout ждали справочник: {exc}")
+```
+
+- Между ретраями задача **полностью выходит** (advisory-lock отпущен в `finally`),
+  перенэкьюивается через backoff — воркер/лок не держатся. На следующей итерации embed-шаг
+  near-free (keyset/CAS пропустят заэмбедженное).
+- `blocked` достигается **только** при исчерпании ретраев (честный таймаут «ждали и не
+  дождались»), а не мгновенно. `total==0` тоже идёт в retry (админ может наполнять справочник
+  параллельно).
+- Это **не** whole-task-retry матча (LLM-амплификации нет — gate до match-шага). Запрет
+  whole-task-retry из «Ретраи» относится к match-шагу; gate-ожидание — отдельная ветка.
+- Домен/сервис тестируются без Celery: gate-не-готов → `match_estimate` бросает
+  `DictionaryNotReadyError`; путь blocked — отдельный метод `mark_blocked`.
 
 ## Ядро `match_one(embedding, query_text)` (рефактор `MatchingService`)
 
@@ -227,7 +249,7 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
 
 | Колонка | Тип | Смысл |
 |---|---|---|
-| `status_detail` | `TEXT NULL` | причина `blocked` / сводка `partial_error` / «восстановление после обрыва» |
+| `status_detail` | `TEXT NULL` | причина `blocked` (timeout ожидания справочника) / сводка `partial_error` (errors/unfinished) |
 
 `estimates.status` уже `VARCHAR(32)` (0003) — держит `partial_error`(13).
 
@@ -243,11 +265,12 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
 | from | событие | to |
 |---|---|---|
 | — | ingest (SP1) | `pending` |
-| pending / blocked / partial_error / running | `match_estimate` взял try-lock | `running` (коммит до embed; если был `running` → detail «восстановление после обрыва») |
-| running | gate: `total==0` или `pending>0` | `blocked` (+detail) |
+| pending / blocked / partial_error / running | `match_estimate` взял try-lock | `running` (коммит до embed; бампает `updated_at`) |
+| running | gate не готов (`total==0` или `pending>0`) → `DictionaryNotReadyError` | остаётся `running`, обёртка `self.retry(countdown=backoff)` |
+| running | gate-retry исчерпал `max_retries` | `blocked` (+detail «timeout ждали справочник») |
 | running | обработка завершена, errors>0 ИЛИ остались `pending`-узлы без вектора | `partial_error` (+detail) |
 | running | все узлы терминальны (errors==0, unfinished==0) | `ready` (может содержать no_match/needs_review) |
-| running | крах воркера (PG отпустил лок при обрыве) | остаётся `running` → восстановление ре-триггером |
+| running | крах/зависание воркера (PG отпустил лок) | остаётся `running`; UI даёт «Перезапустить» по `updated_at`-таймауту → ре-триггер |
 | partial_error | успешный ре-матч, все `error`-строки доведены без `error` | `ready` |
 | partial_error | устойчивый транзиент на `error`-строках | остаётся `partial_error` — **терминально до SP3-ревью** |
 
@@ -382,6 +405,9 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
     повисший вызов не съел весь `task_time_limit`; на таймаут → `TransientError` → инлайн-
     бюджет → `error`/`pending`.
   - Значения вынести в `Settings` (конфигурируемо), осмысленные дефолты — в плане.
+- **Gate-retry:** `max_retries` + backoff для ожидания готовности справочника (через
+  `DictionaryNotReadyError` → `self.retry`) — в `Settings`. Подобрать так, чтобы суммарное
+  окно ожидания покрывало типичный эмбеддинг справочника; исчерпание → `blocked`.
 
 ## Тесты
 
@@ -394,8 +420,10 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
 - Покрыть: идемпотентность embed (повторный прогон не дублирует), gate (пустой/неполный
   справочник → blocked), все переходы Row (включая LLM-отказ→no_match, ре-матч
   no_match→confident, иммутабельность confident/needs_review), `count_node_errors` по
-  статусу, обнуление `match_error` на успехе, advisory-lock дедуп (фейк-лок),
-  стейл-`running` → detail «восстановление».
+  статусу, обнуление `match_error` на успехе, advisory-lock дедуп (фейк-лок).
+- **Gate-retry → blocked:** gate-не-готов → сервис бросает `DictionaryNotReadyError` (без
+  Celery); обёртка ретраит и при исчерпании зовёт `mark_blocked` (тест обёртки —
+  `task_always_eager` + `max_retries=0` форсит blocked-путь).
 - **Инлайн-ретрай → error:** фейк `Embedder`/`LLMMatcher` кидает `TransientError` сверх
   бюджета → узел `error`, смета `partial_error`; и обратное — кидает `TransientError`
   меньше бюджета → успех (узел терминален). Тестируется **без** Celery (бюджет в адаптере).
@@ -428,7 +456,12 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
    (идемпотентная), а не отдельная enqueue-able задача → нет двойного эмбеддинга.
 4. **Матчинг требует полной готовности обоих эмбеддингов.** Частичный справочник →
    неверный top-K → врущий score. Gate: `total>0 AND pending==0`.
-5. **`blocked` + ручной ре-триггер** (не авто-резюм) при неготовом справочнике.
+5. **Неготовый справочник → bounded gate-retry, потом `blocked`** (не мгновенный blocked,
+   не авто-резюм). Сервис кидает `DictionaryNotReadyError`; обёртка `self.retry(countdown)`
+   N раз (задача выходит, лок отпущен — без LLM-амплификации, gate до match-шага), при
+   исчерпании → `mark_blocked`. Частый случай (справочник доварится за минуты) разрешается
+   сам; домен чист от Celery. Авто-резюм по событию готовности отклонён (кросс-поток +
+   thundering-herd) — отложен.
 6. **Снимок иммутабелен; ре-матч только `{pending, error, no_match}`.** `confident/
    needs_review` — решения, защищены; `no_match` — пустой снимок, перезапись допустима.
 7. **Честный score = similarity выбранного кандидата.** LLM выбирает кандидата, не меняет
