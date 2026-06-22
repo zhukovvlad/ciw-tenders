@@ -135,3 +135,39 @@ class PendingEmbedding:
 
     id: int
     embedding_input: str
+
+
+class EstimateRowKind(StrEnum):
+    """Тип строки сметы при разборе."""
+
+    NODE = "node"          # нумерованная строка (раздел/подраздел) — матчится
+    POSITION = "position"  # строка с №=NaN (листовая позиция) — контекст
+
+
+@dataclass(frozen=True, slots=True)
+class EstimateNode:
+    """Нумерованный узел сметы (раздел/подраздел) — единица матчинга."""
+
+    code: str
+    name: str
+    parent_code: str | None
+    section_type: str | None
+    embedding_input: str
+    source_index: int
+    depth: int
+
+
+@dataclass(frozen=True, slots=True)
+class EstimatePosition:
+    """Листовая позиция (№=NaN), привязана к ближайшему узлу сверху."""
+
+    name: str
+    parent_code: str | None
+    source_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedEstimate:
+    nodes: list[EstimateNode]
+    positions: list[EstimatePosition]
+    warnings: list[str] = field(default_factory=list)
