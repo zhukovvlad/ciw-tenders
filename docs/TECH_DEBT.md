@@ -68,7 +68,7 @@
   который сканирует MinIO bucket и удаляет объекты, чьи ключи отсутствуют в `estimates.original_object_key`.
   Альтернатива — хранить tombstone (`deleted_at`) и удалять объект из MinIO синхронно
   после успешного мягкого удаления из БД, затем физически чистить по расписанию.
-- **Связано:** `EstimateService.delete_estimate` (Task 5), `S3ObjectStorage.delete`,
+- **Связано:** `EstimateService.delete` (Task 5), `S3ObjectStorage.delete`,
   `SqlAlchemyEstimateRepository.delete`.
 
 ## 🟢 Полировка из финального ревью авторизации
