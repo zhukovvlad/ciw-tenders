@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { Article } from "@/lib/types"
 import { ArticleTable } from "./ArticleTable"
@@ -30,10 +30,14 @@ describe("ArticleTable", () => {
     expect(screen.queryByLabelText(/удалить/i)).not.toBeInTheDocument()
   })
 
-  it("у админа клик по удалению зовёт onDelete с id", async () => {
+  it("у админа подтверждение в диалоге зовёт onDelete с id", async () => {
     const onDelete = vi.fn()
     render(<ArticleTable articles={ARTS} isAdmin onDelete={onDelete} />)
     await userEvent.click(screen.getAllByLabelText(/удалить/i)[0])
+    const dialog = await screen.findByRole("alertdialog")
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /удалить/i })
+    )
     expect(onDelete).toHaveBeenCalledWith(1)
   })
 })

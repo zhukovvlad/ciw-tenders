@@ -1,30 +1,46 @@
-import { useState } from "react"
+import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { z } from "zod"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form"
 import { ApiError } from "@/lib/api/client"
 import { useAuth } from "@/lib/auth/useAuth"
 
+const schema = z.object({
+  email: z.string().trim().min(1, "Введите логин"),
+  password: z.string().min(1, "Введите пароль"),
+})
+
+type FormValues = z.infer<typeof schema>
+
 export function LoginScreen() {
   const { login } = useAuth()
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault()
-    setBusy(true)
-    setError(null)
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: { email: "", password: "" },
+  })
+
+  async function onSubmit(values: FormValues) {
     try {
-      await login(email, password)
+      await login(values.email, values.password)
     } catch (err) {
-      setError(
-        err instanceof ApiError && err.status === 401
+      const is401 = err instanceof ApiError && err.status === 401
+      toast.error(
+        is401
           ? "Неверный логин или пароль"
           : "Не удалось войти, попробуйте позже"
       )
-    } finally {
-      setBusy(false)
     }
   }
 
@@ -36,29 +52,50 @@ export function LoginScreen() {
       <div className="mb-5 text-xs text-muted-foreground">
         Автоматизатор строительных смет
       </div>
-      <form onSubmit={submit} className="flex w-60 flex-col gap-3">
-        <label className="text-xs text-[var(--ds-text-2)]">
-          Логин
-          <Input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="mt-1"
-          />
-        </label>
-        <label className="text-xs text-[var(--ds-text-2)]">
-          Пароль
-          <Input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="mt-1"
-          />
-        </label>
-        {error && <p className="text-xs text-destructive">{error}</p>}
-        <Button type="submit" disabled={busy}>
-          Войти
-        </Button>
-      </form>
+      <Card>
+        <CardContent className="pt-6">
+          <Form {...form}>
+            <form
+              onSubmit={form.handleSubmit(onSubmit)}
+              className="flex w-60 flex-col gap-3"
+            >
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs text-[var(--ds-text-2)]">
+                      Логин
+                    </FormLabel>
+                    <FormControl>
+                      <Input className="mt-1" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs text-[var(--ds-text-2)]">
+                      Пароль
+                    </FormLabel>
+                    <FormControl>
+                      <Input type="password" className="mt-1" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                Войти
+              </Button>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
     </div>
   )
 }

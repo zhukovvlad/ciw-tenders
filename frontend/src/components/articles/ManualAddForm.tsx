@@ -1,76 +1,112 @@
-import { useState } from "react"
+import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { z } from "zod"
+import { toast } from "sonner"
 import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form"
 import { ApiError } from "@/lib/api/client"
 import { createArticle } from "@/lib/api/articles"
 
-const EMPTY = { article_code: "", name: "", parent_code: "" }
+const schema = z.object({
+  article_code: z.string().trim().min(1, "Введите код статьи"),
+  name: z.string().trim().min(1, "Введите наименование"),
+  parent_code: z.string().optional(),
+})
+
+type FormValues = z.infer<typeof schema>
 
 export function ManualAddForm({ onCreated }: { onCreated: () => void }) {
-  const [form, setForm] = useState(EMPTY)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: { article_code: "", name: "", parent_code: "" },
+  })
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault()
-    if (busy) return
-    if (!form.article_code.trim() || !form.name.trim()) return
-    setBusy(true)
-    setError(null)
+  async function onSubmit(values: FormValues) {
     try {
       await createArticle({
-        article_code: form.article_code.trim(),
-        name: form.name.trim(),
-        parent_code: form.parent_code.trim() || null,
+        article_code: values.article_code,
+        name: values.name,
+        parent_code: values.parent_code?.trim() || null,
       })
-      setForm(EMPTY)
+      toast.success(`Статья «${values.article_code}» добавлена`)
+      form.reset()
       onCreated()
     } catch (err) {
-      setError(
+      toast.error(
         err instanceof ApiError ? err.message : "Не удалось добавить статью"
       )
-    } finally {
-      setBusy(false)
     }
   }
 
   return (
-    <form
-      onSubmit={submit}
-      className="grid gap-3 sm:grid-cols-[160px_1fr_160px_auto]"
-    >
-      <label className="text-xs text-[var(--ds-text-2)]">
-        Код
-        <Input
-          value={form.article_code}
-          onChange={(e) => setForm({ ...form, article_code: e.target.value })}
-          className="mt-1"
+    <Form {...form}>
+      <form
+        onSubmit={form.handleSubmit(onSubmit)}
+        className="grid gap-3 sm:grid-cols-[160px_1fr_160px_auto]"
+      >
+        <FormField
+          control={form.control}
+          name="article_code"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-xs text-[var(--ds-text-2)]">
+                Код
+              </FormLabel>
+              <FormControl>
+                <Input className="mt-1" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </label>
-      <label className="text-xs text-[var(--ds-text-2)]">
-        Наименование
-        <Input
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          className="mt-1"
+        <FormField
+          control={form.control}
+          name="name"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-xs text-[var(--ds-text-2)]">
+                Наименование
+              </FormLabel>
+              <FormControl>
+                <Input className="mt-1" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </label>
-      <label className="text-xs text-[var(--ds-text-2)]">
-        Код родителя (необязательно)
-        <Input
-          value={form.parent_code}
-          onChange={(e) => setForm({ ...form, parent_code: e.target.value })}
-          className="mt-1"
+        <FormField
+          control={form.control}
+          name="parent_code"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-xs text-[var(--ds-text-2)]">
+                Код родителя (необязательно)
+              </FormLabel>
+              <FormControl>
+                <Input className="mt-1" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </label>
-      <Button type="submit" disabled={busy} className="self-end">
-        <Plus className="size-4" />
-        Добавить
-      </Button>
-      {error && (
-        <p className="text-xs text-destructive sm:col-span-4">{error}</p>
-      )}
-    </form>
+        <Button
+          type="submit"
+          disabled={form.formState.isSubmitting}
+          className="self-end"
+        >
+          <Plus className="size-4" />
+          Добавить
+        </Button>
+      </form>
+    </Form>
   )
 }

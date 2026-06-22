@@ -1,5 +1,15 @@
 import { useState } from "react"
+import { toast } from "sonner"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { Label } from "@/components/ui/label"
+import { Dropzone } from "@/components/Dropzone"
 import { ApiError } from "@/lib/api/client"
 import { importTemplate } from "@/lib/api/articles"
 import type { ImportReport } from "@/lib/types"
@@ -9,25 +19,19 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
   const [preview, setPreview] = useState<ImportReport | null>(null)
   const [consent, setConsent] = useState(false)
   const [conflict, setConflict] = useState(false) // 409: состояние БД разошлось с превью
-  const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [doneMsg, setDoneMsg] = useState<string | null>(null)
 
-  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0] ?? null
+  async function onPick(f: File) {
     // смена файла сбрасывает предыдущее превью, согласие и флаг конфликта
     setPreview(null)
     setConsent(false)
     setConflict(false)
-    setError(null)
-    setDoneMsg(null)
     setFile(f)
-    if (!f) return
     setBusy(true)
     try {
       setPreview(await importTemplate(f, { dryRun: true, force: false }))
     } catch (err) {
-      setError(
+      toast.error(
         err instanceof ApiError ? err.message : "Не удалось прочитать файл"
       )
     } finally {
@@ -42,13 +46,12 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
     if (busy) return
     if (!file || !preview) return
     setBusy(true)
-    setError(null)
     try {
       const res = await importTemplate(file, {
         dryRun: false,
         force: needsForce,
       })
-      setDoneMsg(
+      toast.success(
         `Готово: создано ${res.created}, обновлено ${res.updated}, удалено ${res.deleted}, ` +
           `без изменений ${res.unchanged}, ожидают эмбеддинга ${res.pending_embeddings}.`
       )
@@ -57,13 +60,12 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
       setConflict(false)
       onApplied()
     } catch (err) {
-      // 409: состояние БД изменилось между превью и применением — поднимаем согласие на force,
-      // не оставляя пользователя в тупике с устаревшим force_required=false.
+      // 409: состояние БД изменилось между превью и применением — поднимаем согласие на force.
       if (err instanceof ApiError && err.status === 409) {
         setConflict(true)
         setConsent(false)
       }
-      setError(
+      toast.error(
         err instanceof ApiError ? err.message : "Не удалось применить импорт"
       )
     } finally {
@@ -75,15 +77,18 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
 
   return (
     <div className="text-sm">
-      <label className="text-xs text-[var(--ds-text-2)]">
-        Файл шаблона (.xlsx)
-        <input
-          type="file"
-          accept=".xlsx"
-          onChange={onPick}
-          className="mt-1 block text-xs"
-        />
-      </label>
+      <Dropzone
+        onFile={onPick}
+        accept=".xlsx"
+        id="tpl-file"
+        ariaLabel="Файл шаблона"
+        idleText="Перетащите .xlsx-шаблон или выберите файл"
+        hint="XLSX-шаблон справочника"
+        disabled={busy}
+      />
+      {file && (
+        <p className="mt-2 text-xs text-muted-foreground">Файл: {file.name}</p>
+      )}
 
       {busy && <p className="mt-2 text-muted-foreground">Обработка…</p>}
 
@@ -95,33 +100,39 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
             эмбеддинга {preview.pending_embeddings}.
           </p>
           {preview.skipped.length > 0 && (
-            <details className="mt-2">
-              <summary className="cursor-pointer text-xs text-muted-foreground">
+            <Collapsible className="mt-2">
+              <CollapsibleTrigger className="cursor-pointer text-xs text-muted-foreground">
                 Пропущено строк: {preview.skipped.length}
-              </summary>
-              <ul className="mt-1 max-h-40 overflow-auto text-xs text-muted-foreground">
-                {preview.skipped.map((s, i) => (
-                  <li key={i}>{s}</li>
-                ))}
-              </ul>
-            </details>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <ul className="mt-1 max-h-40 overflow-auto text-xs text-muted-foreground">
+                  {preview.skipped.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+              </CollapsibleContent>
+            </Collapsible>
           )}
           {needsForce && (
-            <div className="mt-2 rounded bg-destructive/10 p-2 text-destructive">
-              <p className="text-xs">
-                {conflict && !preview.force_required
-                  ? "Состояние справочника изменилось с момента превью — для применения нужен принудительный режим."
-                  : `Импорт удалит ${preview.deleted} строк (снос корня или большой доли). Это необратимо.`}
-              </p>
-              <label className="mt-1 flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={consent}
-                  onChange={(e) => setConsent(e.target.checked)}
-                />
-                Да, применить принудительно
-              </label>
-            </div>
+            <Alert variant="destructive" className="mt-2">
+              <AlertDescription>
+                <span>
+                  {conflict && !preview.force_required
+                    ? "Состояние справочника изменилось с момента превью — для применения нужен принудительный режим."
+                    : `Импорт удалит ${preview.deleted} строк (снос корня или большой доли). Это необратимо.`}
+                </span>
+                <div className="mt-1 flex items-center gap-2 text-xs">
+                  <Checkbox
+                    id="force-consent"
+                    checked={consent}
+                    onCheckedChange={(c) => setConsent(c === true)}
+                  />
+                  <Label htmlFor="force-consent">
+                    Да, применить принудительно
+                  </Label>
+                </div>
+              </AlertDescription>
+            </Alert>
           )}
           <Button
             onClick={() => void apply()}
@@ -132,9 +143,6 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
           </Button>
         </div>
       )}
-
-      {doneMsg && <p className="mt-2 text-foreground">{doneMsg}</p>}
-      {error && <p className="mt-2 text-destructive">{error}</p>}
     </div>
   )
 }

@@ -1,5 +1,16 @@
 import { useMemo, useState } from "react"
 import { Trash2 } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import type { Article } from "@/lib/types"
 
@@ -58,13 +69,28 @@ export function ArticleTable({
                 </td>
                 {isAdmin && (
                   <td className="px-4 py-2">
-                    <button
-                      type="button"
-                      aria-label="Удалить"
-                      onClick={() => onDelete?.(a.id)}
-                    >
-                      <Trash2 className="size-4 text-destructive" />
-                    </button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <button type="button" aria-label="Удалить">
+                          <Trash2 className="size-4 text-destructive" />
+                        </button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Удалить статью?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            «{a.name}» ({a.article_code}) будет удалена.
+                            Действие необратимо.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Отмена</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => onDelete?.(a.id)}>
+                            Удалить
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </td>
                 )}
               </tr>

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { App } from "@/App"
+import { ThemeProvider } from "@/components/theme-provider"
 import { AUTH_TOKEN_KEY } from "@/lib/api/client"
 import * as authApi from "@/lib/api/auth"
 import * as articlesApi from "@/lib/api/articles"
@@ -24,10 +25,14 @@ describe("App", () => {
       is_active: true,
     })
     vi.spyOn(articlesApi, "listArticles").mockResolvedValue([])
-    render(<App />)
+    render(
+      <ThemeProvider defaultTheme="system">
+        <App />
+      </ThemeProvider>
+    )
     // поток сметы стартует с dropzone
     expect(await screen.findByLabelText(/файл сметы/i)).toBeInTheDocument()
-    await userEvent.click(screen.getByRole("button", { name: /Справочник/ }))
+    await userEvent.click(screen.getByRole("tab", { name: /Справочник/i }))
     expect(await screen.findByText(/Справочник СМР/i)).toBeInTheDocument()
   })
 })
