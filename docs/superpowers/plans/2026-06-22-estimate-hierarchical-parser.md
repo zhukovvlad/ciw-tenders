@@ -194,6 +194,9 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS estimates")
 ```
 
+> **Заметки:** `VECTOR(768)` опирается на расширение `vector`, которое создаёт ревизия `0001`
+> (`CREATE EXTENSION IF NOT EXISTS vector`, [0001:21](../../../backend/alembic/versions/0001_initial_schema.py#L21)) — `0003` после неё корректен. Паритет миграция↔ORM нигде не ассертится (тест проверяет лишь метаданные ORM) — в духе конвенций для `0001`; держать в уме при ручном `just migrate`.
+
 - [ ] **Step 2: Добавить ORM-модели**
 
 В конец `backend/app/infrastructure/db/models.py` добавить (использует уже импортированные `Vector`, `_EMBEDDING_DIM`, `ForeignKey`, и т.д.):
@@ -680,7 +683,16 @@ class EstimateSummary:
     created_at: datetime
 ```
 
-- [ ] **Step 2: Порты**
+- [ ] **Step 2: Доменная ошибка `StorageError`**
+
+В `backend/app/domain/errors.py` добавить:
+
+```python
+class StorageError(Exception):
+    """Сбой объектного хранилища (MinIO/S3 недоступно или ошибка операции)."""
+```
+
+- [ ] **Step 2b: Порты**
 
 В `backend/app/domain/ports.py` добавить импорты `EstimateNode, NewEstimate, Estimate, EstimateSummary` и классы:
 
@@ -719,7 +731,7 @@ class ObjectStorage(ABC):
 
 - [ ] **Step 3: Фейки в tests/fakes.py**
 
-Добавить импорты и классы:
+Добавить импорты и классы (`datetime, timezone` уже импортированы в шапке `fakes.py:5` — не дублировать):
 
 ```python
 from app.domain.entities import (
@@ -729,6 +741,7 @@ from app.domain.entities import (
     NewEstimate,
     StoredEstimateRow,
 )
+from app.domain.errors import StorageError
 from app.domain.ports import EstimateRepository, ObjectStorage
 
 
@@ -741,7 +754,7 @@ class FakeObjectStorage(ObjectStorage):
 
     def put(self, key: str, data: bytes, content_type: str) -> None:
         if self._fail:
-            raise RuntimeError("MinIO недоступен")
+            raise StorageError("MinIO недоступен")
         self.put_calls.append(key)
         self.store[key] = data
 
@@ -860,8 +873,8 @@ Expected: PASS, ruff чисто.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/app/domain/entities.py backend/app/domain/ports.py backend/tests/fakes.py backend/tests/test_estimate_service.py
-git commit -m "feat(estimates): порты EstimateRepository/ObjectStorage + персист-сущности + фейки"
+git add backend/app/domain/entities.py backend/app/domain/ports.py backend/app/domain/errors.py backend/tests/fakes.py backend/tests/test_estimate_service.py
+git commit -m "feat(estimates): порты EstimateRepository/ObjectStorage + StorageError + фейки"
 ```
 
 ---
@@ -919,9 +932,11 @@ def test_ingest_puts_file_then_saves_nodes_pending() -> None:
 
 
 def test_ingest_storage_failure_does_not_touch_db() -> None:
+    from app.domain.errors import StorageError
+
     storage = FakeObjectStorage(fail=True)
     service, repo = _service(storage)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(StorageError):
         service.ingest(_xlsx(), "смета.xlsx", owner_id=7)
     assert repo.create_calls == 0                 # порядок put→INSERT соблюдён
 
@@ -1114,6 +1129,9 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             ]
             self._session.add_all(row_models)
             self._session.commit()
+            # SessionLocal: expire_on_commit=False (session.py) — атрибуты не истекают после
+            # commit, поэтому _to_entity читает row_models из памяти БЕЗ перезагрузок (нет N+1
+            # на 809 строк). Единственный пост-коммит запрос — refresh(est) ради created_at.
             self._session.refresh(est)
             return self._to_entity(est, sorted(row_models, key=lambda r: r.source_index))
         except Exception:
@@ -1180,8 +1198,12 @@ from __future__ import annotations
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 
+from app.domain.errors import StorageError
 from app.domain.ports import ObjectStorage
+
+_S3_ERRORS = (BotoCoreError, ClientError)
 
 
 class S3ObjectStorage(ObjectStorage):
@@ -1212,13 +1234,24 @@ class S3ObjectStorage(ObjectStorage):
             self._client.create_bucket(Bucket=self._bucket)
 
     def put(self, key: str, data: bytes, content_type: str) -> None:
-        self._client.put_object(Bucket=self._bucket, Key=key, Body=data, ContentType=content_type)
+        try:
+            self._client.put_object(
+                Bucket=self._bucket, Key=key, Body=data, ContentType=content_type
+            )
+        except _S3_ERRORS as exc:  # граница: ошибки boto3 → доменный StorageError
+            raise StorageError(f"put {key}: {exc}") from exc
 
     def get(self, key: str) -> bytes:
-        return self._client.get_object(Bucket=self._bucket, Key=key)["Body"].read()
+        try:
+            return self._client.get_object(Bucket=self._bucket, Key=key)["Body"].read()
+        except _S3_ERRORS as exc:
+            raise StorageError(f"get {key}: {exc}") from exc
 
     def delete(self, key: str) -> None:
-        self._client.delete_object(Bucket=self._bucket, Key=key)
+        try:
+            self._client.delete_object(Bucket=self._bucket, Key=key)
+        except _S3_ERRORS as exc:
+            raise StorageError(f"delete {key}: {exc}") from exc
 ```
 
 - [ ] **Step 3: Тест маппинга репозитория (без БД)**
@@ -1419,6 +1452,7 @@ import io
 from collections.abc import Callable
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_current_user, get_estimate_service, get_settings
@@ -1430,6 +1464,14 @@ from app.services.estimate_service import EstimateService
 from tests.fakes import FakeEstimateRepository, FakeObjectStorage
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@pytest.fixture(autouse=True)
+def _clear_overrides():
+    # teardown-чистка: изоляция НЕ зависит от того, дошёл ли тест до конца
+    # (инлайн-clear после упавшего ассерта протекал бы в следующий тест).
+    yield
+    app.dependency_overrides.clear()
 
 
 def _xlsx() -> bytes:
@@ -1463,7 +1505,6 @@ def test_upload_creates_estimate() -> None:
     repo, storage = FakeEstimateRepository(), FakeObjectStorage()
     client = _client(repo, storage)
     resp = client.post("/api/estimates", files={"file": ("смета.xlsx", _xlsx(), _XLSX)})
-    app.dependency_overrides.clear()
     assert resp.status_code == 201
     body = resp.json()
     assert body["nodes_count"] == 2 and body["positions_count"] == 1
@@ -1474,7 +1515,6 @@ def test_upload_rejects_bad_extension_without_storage() -> None:
     repo, storage = FakeEstimateRepository(), FakeObjectStorage()
     client = _client(repo, storage)
     resp = client.post("/api/estimates", files={"file": ("смета.txt", b"PK\x03\x04xx", "text/plain")})
-    app.dependency_overrides.clear()
     assert resp.status_code == 422
     assert storage.put_calls == [] and repo.create_calls == 0
 
@@ -1483,7 +1523,6 @@ def test_upload_rejects_bad_signature() -> None:
     repo, storage = FakeEstimateRepository(), FakeObjectStorage()
     client = _client(repo, storage)
     resp = client.post("/api/estimates", files={"file": ("смета.xlsx", b"not a zip", _XLSX)})
-    app.dependency_overrides.clear()
     assert resp.status_code == 422
     assert storage.put_calls == []
 
@@ -1493,7 +1532,6 @@ def test_upload_rejects_oversize() -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(estimate_max_upload_mb=0.0001)
     client = _client(repo, storage)
     resp = client.post("/api/estimates", files={"file": ("смета.xlsx", _xlsx(), _XLSX)})
-    app.dependency_overrides.clear()
     assert resp.status_code == 413
     assert storage.put_calls == []
 
@@ -1504,7 +1542,6 @@ def test_upload_missing_column_422_without_storage() -> None:
     pd.DataFrame({"X": [1]}).to_excel(bad, index=False, engine="openpyxl")
     client = _client(repo, storage)
     resp = client.post("/api/estimates", files={"file": ("смета.xlsx", bad.getvalue(), _XLSX)})
-    app.dependency_overrides.clear()
     assert resp.status_code == 422
     assert storage.put_calls == []  # парс падает до put
 
@@ -1513,7 +1550,6 @@ def test_upload_storage_unavailable_503() -> None:
     repo, storage = FakeEstimateRepository(), FakeObjectStorage(fail=True)
     client = _client(repo, storage)
     resp = client.post("/api/estimates", files={"file": ("смета.xlsx", _xlsx(), _XLSX)})
-    app.dependency_overrides.clear()
     assert resp.status_code == 503
     assert repo.create_calls == 0
 
@@ -1525,7 +1561,6 @@ def test_list_and_get_ownership() -> None:
     assert len(client.get("/api/estimates").json()) == 1
     other = _client(repo, storage, user=_user(uid=9))  # чужой
     assert other.get("/api/estimates/1").status_code == 404
-    app.dependency_overrides.clear()
 
 
 def test_delete_removes_object() -> None:
@@ -1533,7 +1568,6 @@ def test_delete_removes_object() -> None:
     EstimateService(EstimateParser(), repo, storage).ingest(_xlsx(), "a.xlsx", owner_id=2)
     client = _client(repo, storage)
     resp = client.delete("/api/estimates/1")
-    app.dependency_overrides.clear()
     assert resp.status_code == 204
     assert storage.delete_calls  # объект MinIO удалён
 
@@ -1542,6 +1576,8 @@ def test_requires_auth() -> None:
     client = TestClient(app)
     assert client.get("/api/estimates").status_code == 401
 ```
+
+> **Изоляция тестов:** `app.dependency_overrides` чистит **autouse-фикстура** `_clear_overrides` в teardown — инлайн-`clear()` в телах НЕ используем (упавший ассерт до `clear()` протёк бы в следующий тест, особенно ломая `test_requires_auth`).
 
 - [ ] **Step 2: Запустить — падает**
 
@@ -1557,6 +1593,7 @@ from app.api.deps import get_current_user, get_estimate_service, get_settings
 from app.api.schemas import EstimateDetailOut, EstimateSummaryOut, EstimateUploadResponse
 from app.core.config import Settings
 from app.domain.entities import Role, User
+from app.domain.errors import StorageError
 from app.services.estimate_service import EstimateService
 
 _XLSX_SIGNATURE = b"PK\x03\x04"
@@ -1572,12 +1609,15 @@ async def upload_estimate(
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Ожидается файл .xlsx")
     max_bytes = int(settings.estimate_max_upload_mb * 1024 * 1024)
-    if file.size is not None and file.size > max_bytes:
-        raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            f"Файл больше {settings.estimate_max_upload_mb} МБ",
-        )
+    too_large = HTTPException(
+        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        f"Файл больше {settings.estimate_max_upload_mb} МБ",
+    )
+    if file.size is not None and file.size > max_bytes:  # быстрый путь, если size заполнен
+        raise too_large
     content = await file.read()
+    if len(content) > max_bytes:  # авторитетный бэкстоп — не зависит от версии Starlette
+        raise too_large
     if not content.startswith(_XLSX_SIGNATURE):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Файл не является .xlsx (ZIP)")
 
@@ -1585,10 +1625,8 @@ async def upload_estimate(
         result = service.ingest(content, file.filename, owner_id=user.id or 0)
     except ValueError as exc:  # нет обязательных колонок — до put в MinIO
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001 — недоступность MinIO и пр.
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE, "Хранилище недоступно"
-        ) from exc
+    except StorageError as exc:  # ТОЛЬКО сбой MinIO → 503; прочее (БД и т.п.) → 500
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Хранилище недоступно") from exc
 
     return EstimateUploadResponse(
         id=result.estimate.id,
@@ -1661,7 +1699,8 @@ git commit -m "feat(estimates): роуты upload/list/get/delete + пред-в�
 - Порты `EstimateRepository`/`ObjectStorage` → Task 4 ✓
 - MinIO/boto3 адаптер, конфиг S3_*/лимит → Task 1 + Task 6 ✓
 - Сервис ingest (put→INSERT), list/get/delete, чистка MinIO при delete → Task 5 ✓
-- API + пред-валидация (тип/сигнатура/размер → 422/413), 503 MinIO, 404 владение, 401 → Task 8 ✓
+- API + пред-валидация (тип/сигнатура/размер→422/413, бэкстоп по `len(content)`); `StorageError`→503 (только MinIO, прочее→500); 404 владение; 401; autouse-чистка overrides → Task 8 ✓
+- Типизированный `StorageError`: адаптер оборачивает boto3, роут ловит только его на 503 → Tasks 4, 6, 8 ✓
 - Тесты: golden (skipif), синтетика грязи, source_index-целостность, не-вызов хранилища при отказе → Tasks 3, 8 ✓
 - Вне объёма (матчинг, реапер сирот, обратная запись) → не реализуется (SP2/SP3) ✓
 
