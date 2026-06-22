@@ -36,15 +36,15 @@ describe("LoginScreen", () => {
     expect(screen.getByLabelText(/пароль/i)).toBeInTheDocument()
   })
 
-  it("на 401 показывает «Неверный логин или пароль» через FormMessage", async () => {
+  it("на 401 показывает «Неверный логин или пароль» через toast.error", async () => {
     vi.spyOn(authApi, "login").mockRejectedValue(new ApiError(401, "bad"))
     renderLogin()
     await userEvent.type(screen.getByLabelText(/логин/i), "a@mr.kz")
     await userEvent.type(screen.getByLabelText(/пароль/i), "x")
     await userEvent.click(screen.getByRole("button", { name: /Войти/ }))
-    expect(
-      await screen.findByText(/неверный логин или пароль/i)
-    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Неверный логин или пароль")
+    )
   })
 
   it("на другую ошибку показывает «Не удалось войти»", async () => {
@@ -55,7 +55,11 @@ describe("LoginScreen", () => {
     await userEvent.type(screen.getByLabelText(/логин/i), "a@mr.kz")
     await userEvent.type(screen.getByLabelText(/пароль/i), "x")
     await userEvent.click(screen.getByRole("button", { name: /Войти/ }))
-    expect(await screen.findByText(/не удалось войти/i)).toBeInTheDocument()
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining("Не удалось войти")
+      )
+    )
   })
 
   it("zod: пустой email показывает ошибку валидации без запроса к серверу", async () => {

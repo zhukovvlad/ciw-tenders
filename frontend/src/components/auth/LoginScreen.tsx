@@ -1,7 +1,9 @@
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import {
   Form,
@@ -11,6 +13,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
+import { ApiError } from "@/lib/api/client"
 import { useAuth } from "@/lib/auth/useAuth"
 
 const schema = z.object({
@@ -32,16 +35,10 @@ export function LoginScreen() {
     try {
       await login(values.email, values.password)
     } catch (err) {
-      const is401 =
-        err != null &&
-        typeof err === "object" &&
-        "status" in err &&
-        (err as { status: number }).status === 401
-      form.setError("root", {
-        message: is401
-          ? "Неверный логин или пароль"
-          : "Не удалось войти, попробуйте позже",
-      })
+      const is401 = err instanceof ApiError && err.status === 401
+      toast.error(
+        is401 ? "Неверный логин или пароль" : "Не удалось войти, попробуйте позже"
+      )
     }
   }
 
@@ -53,51 +50,50 @@ export function LoginScreen() {
       <div className="mb-5 text-xs text-muted-foreground">
         Автоматизатор строительных смет
       </div>
-      <Form {...form}>
-        <form
-          onSubmit={form.handleSubmit(onSubmit)}
-          className="flex w-60 flex-col gap-3"
-        >
-          <FormField
-            control={form.control}
-            name="email"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-xs text-[var(--ds-text-2)]">
-                  Логин
-                </FormLabel>
-                <FormControl>
-                  <Input className="mt-1" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="password"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-xs text-[var(--ds-text-2)]">
-                  Пароль
-                </FormLabel>
-                <FormControl>
-                  <Input type="password" className="mt-1" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          {form.formState.errors.root && (
-            <p className="text-xs text-destructive">
-              {form.formState.errors.root.message}
-            </p>
-          )}
-          <Button type="submit" disabled={form.formState.isSubmitting}>
-            Войти
-          </Button>
-        </form>
-      </Form>
+      <Card>
+        <CardContent className="pt-6">
+          <Form {...form}>
+            <form
+              onSubmit={form.handleSubmit(onSubmit)}
+              className="flex w-60 flex-col gap-3"
+            >
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs text-[var(--ds-text-2)]">
+                      Логин
+                    </FormLabel>
+                    <FormControl>
+                      <Input className="mt-1" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs text-[var(--ds-text-2)]">
+                      Пароль
+                    </FormLabel>
+                    <FormControl>
+                      <Input type="password" className="mt-1" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                Войти
+              </Button>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
     </div>
   )
 }
