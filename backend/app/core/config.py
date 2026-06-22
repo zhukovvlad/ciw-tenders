@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     admin_email: str = ""
     admin_password: str = ""
 
+    s3_endpoint: str = "http://localhost:9000"
+    s3_access_key: str = "minioadmin"
+    s3_secret_key: str = "minioadmin"
+    s3_bucket: str = "estimates"
+
+    estimate_max_upload_mb: float = 25.0
+
 
 @lru_cache
 def get_settings() -> Settings:

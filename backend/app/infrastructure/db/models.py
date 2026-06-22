@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -68,3 +69,42 @@ class UserModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class EstimateModel(Base):
+    __tablename__ = "estimates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    original_object_key: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class EstimateRowModel(Base):
+    __tablename__ = "estimate_rows"
+    __table_args__ = (
+        UniqueConstraint("estimate_id", "source_index", name="uq_estimate_rows_estimate_source"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    estimate_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("estimates.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    parent_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    section_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    depth: Mapped[int] = mapped_column(Integer, nullable=False)
+    embedding_input: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(_EMBEDDING_DIM), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="pending")

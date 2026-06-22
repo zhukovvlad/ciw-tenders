@@ -6,7 +6,16 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.domain.entities import ImportReport, MatchResult, Role, TemplateArticle, User
+from app.domain.entities import (
+    Estimate,
+    EstimateSummary,
+    ImportReport,
+    MatchResult,
+    Role,
+    StoredEstimateRow,
+    TemplateArticle,
+    User,
+)
 
 
 class LoginRequest(BaseModel):
@@ -92,6 +101,60 @@ class ImportReportOut(BaseModel):
             pending_embeddings=report.pending_embeddings,
             dry_run=report.dry_run,
             force_required=report.force_required,
+        )
+
+
+class EstimateUploadResponse(BaseModel):
+    id: int
+    status: str
+    nodes_count: int
+    positions_count: int
+    warnings: list[str]
+
+
+class EstimateSummaryOut(BaseModel):
+    id: int
+    filename: str
+    status: str
+    nodes_count: int
+    created_at: datetime
+
+    @classmethod
+    def from_entity(cls, s: EstimateSummary) -> EstimateSummaryOut:
+        return cls(
+            id=s.id, filename=s.filename, status=s.status,
+            nodes_count=s.nodes_count, created_at=s.created_at,
+        )
+
+
+class EstimateRowOut(BaseModel):
+    code: str
+    name: str
+    parent_code: str | None
+    section_type: str | None
+    depth: int
+    status: str
+
+    @classmethod
+    def from_entity(cls, r: StoredEstimateRow) -> EstimateRowOut:
+        return cls(
+            code=r.code, name=r.name, parent_code=r.parent_code,
+            section_type=r.section_type, depth=r.depth, status=r.status,
+        )
+
+
+class EstimateDetailOut(BaseModel):
+    id: int
+    filename: str
+    status: str
+    created_at: datetime
+    rows: list[EstimateRowOut]
+
+    @classmethod
+    def from_entity(cls, e: Estimate) -> EstimateDetailOut:
+        return cls(
+            id=e.id, filename=e.filename, status=e.status, created_at=e.created_at,
+            rows=[EstimateRowOut.from_entity(r) for r in e.rows],
         )
 
 

@@ -135,3 +135,85 @@ class PendingEmbedding:
 
     id: int
     embedding_input: str
+
+
+class EstimateRowKind(StrEnum):
+    """Тип строки сметы при разборе."""
+
+    NODE = "node"          # нумерованная строка (раздел/подраздел) — матчится
+    POSITION = "position"  # строка с №=NaN (листовая позиция) — контекст
+
+
+@dataclass(frozen=True, slots=True)
+class EstimateNode:
+    """Нумерованный узел сметы (раздел/подраздел) — единица матчинга."""
+
+    code: str
+    name: str
+    parent_code: str | None
+    section_type: str | None
+    embedding_input: str
+    source_index: int
+    depth: int
+
+
+@dataclass(frozen=True, slots=True)
+class EstimatePosition:
+    """Листовая позиция (№=NaN), привязана к ближайшему узлу сверху."""
+
+    name: str
+    parent_code: str | None
+    source_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedEstimate:
+    nodes: list[EstimateNode]
+    positions: list[EstimatePosition]
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class NewEstimate:
+    """Данные для создания сметы (до записи)."""
+
+    user_id: int
+    filename: str
+    original_object_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class StoredEstimateRow:
+    """Сохранённый узел сметы."""
+
+    id: int
+    code: str
+    name: str
+    parent_code: str | None
+    section_type: str | None
+    depth: int
+    embedding_input: str
+    source_index: int
+    status: str
+    has_embedding: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Estimate:
+    """Агрегат сохранённой сметы (без original_object_key — наружу не отдаём)."""
+
+    id: int
+    user_id: int
+    filename: str
+    status: str
+    created_at: datetime
+    rows: list[StoredEstimateRow] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class EstimateSummary:
+    id: int
+    filename: str
+    status: str
+    nodes_count: int
+    created_at: datetime

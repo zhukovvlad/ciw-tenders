@@ -6,18 +6,25 @@ from datetime import datetime, timezone
 
 from app.domain.entities import (
     ArticleCandidate,
+    Estimate,
+    EstimateNode,
+    EstimateSummary,
     ExistingArticle,
     ImportPlan,
+    NewEstimate,
+    StoredEstimateRow,
     TemplateArticle,
     TokenPayload,
     User,
 )
-from app.domain.errors import TokenError
+from app.domain.errors import StorageError, TokenError
 from app.domain.ports import (
     ArticleImportRepository,
     ArticleRepository,
     Embedder,
+    EstimateRepository,
     LLMMatcher,
+    ObjectStorage,
     PasswordHasher,
     TokenService,
     UserRepository,
@@ -196,3 +203,89 @@ class FakeImportRepository(ArticleImportRepository):
 
     def get(self, code: str) -> TemplateArticle:
         return self.rows[code]
+
+
+class FakeObjectStorage(ObjectStorage):
+    def __init__(self, *, fail: bool = False) -> None:
+        self.store: dict[str, bytes] = {}
+        self.put_calls: list[str] = []
+        self.delete_calls: list[str] = []
+        self._fail = fail
+
+    def put(self, key: str, data: bytes, content_type: str) -> None:
+        if self._fail:
+            raise StorageError("MinIO недоступен")
+        self.put_calls.append(key)
+        self.store[key] = data
+
+    def get(self, key: str) -> bytes:
+        return self.store[key]
+
+    def delete(self, key: str) -> None:
+        self.delete_calls.append(key)
+        self.store.pop(key, None)
+
+
+class FakeEstimateRepository(EstimateRepository):
+    def __init__(self) -> None:
+        self.estimates: dict[int, Estimate] = {}
+        self._keys: dict[int, str] = {}  # estimate_id -> object_key
+        self._next = 1
+        self.create_calls = 0
+
+    def create(self, new: NewEstimate, nodes: list[EstimateNode]) -> Estimate:
+        self.create_calls += 1
+        eid = self._next
+        self._next += 1
+        rows = [
+            StoredEstimateRow(
+                id=i + 1,
+                code=n.code,
+                name=n.name,
+                parent_code=n.parent_code,
+                section_type=n.section_type,
+                depth=n.depth,
+                embedding_input=n.embedding_input,
+                source_index=n.source_index,
+                status="pending",
+                has_embedding=False,
+            )
+            for i, n in enumerate(nodes)
+        ]
+        est = Estimate(
+            id=eid,
+            user_id=new.user_id,
+            filename=new.filename,
+            status="pending",
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),  # noqa: UP017
+            rows=rows,
+        )
+        self.estimates[eid] = est
+        self._keys[eid] = new.original_object_key
+        return est
+
+    def list_for_owner(self, owner_id: int, *, is_admin: bool) -> list[EstimateSummary]:
+        return [
+            EstimateSummary(
+                id=e.id,
+                filename=e.filename,
+                status=e.status,
+                nodes_count=len(e.rows),
+                created_at=e.created_at,
+            )
+            for e in self.estimates.values()
+            if is_admin or e.user_id == owner_id
+        ]
+
+    def get(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> Estimate | None:
+        est = self.estimates.get(estimate_id)
+        if est is None or (not is_admin and est.user_id != requester_id):
+            return None
+        return est
+
+    def delete(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> str | None:
+        est = self.estimates.get(estimate_id)
+        if est is None or (not is_admin and est.user_id != requester_id):
+            return None
+        self.estimates.pop(estimate_id)
+        return self._keys.pop(estimate_id)

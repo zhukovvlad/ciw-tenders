@@ -18,7 +18,9 @@ from app.domain.ports import (
     ArticleImportRepository,
     ArticleRepository,
     Embedder,
+    EstimateRepository,
     LLMMatcher,
+    ObjectStorage,
     PasswordHasher,
     TokenService,
     UserRepository,
@@ -28,11 +30,15 @@ from app.infrastructure.ai.openrouter_embedder import OpenRouterEmbedder
 from app.infrastructure.auth.jwt_token_service import JwtTokenService
 from app.infrastructure.auth.password_hasher import Argon2PasswordHasher
 from app.infrastructure.db.article_repository import SqlAlchemyArticleRepository
+from app.infrastructure.db.estimate_repository import SqlAlchemyEstimateRepository
 from app.infrastructure.db.import_repository import SqlAlchemyArticleImportRepository
 from app.infrastructure.db.session import get_session
 from app.infrastructure.db.user_repository import SqlAlchemyUserRepository
+from app.infrastructure.storage.s3_object_storage import S3ObjectStorage
 from app.services.article_service import ArticleService
 from app.services.auth_service import AuthService
+from app.services.estimate_parser import EstimateParser
+from app.services.estimate_service import EstimateService
 from app.services.excel_parser import ExcelEstimateParser
 from app.services.matching_service import MatchingService
 from app.services.template_ingest_service import TemplateIngestService
@@ -154,3 +160,30 @@ def get_matching_service(
         llm_matcher=llm_matcher,
         confidence_threshold=settings.confidence_threshold,
     )
+
+
+def get_estimate_parser() -> EstimateParser:
+    return EstimateParser()
+
+
+@lru_cache
+def get_object_storage() -> ObjectStorage:
+    settings = get_settings()
+    return S3ObjectStorage(
+        endpoint=settings.s3_endpoint,
+        access_key=settings.s3_access_key,
+        secret_key=settings.s3_secret_key,
+        bucket=settings.s3_bucket,
+    )
+
+
+def get_estimate_repository(session: Session = Depends(get_session)) -> EstimateRepository:
+    return SqlAlchemyEstimateRepository(session)
+
+
+def get_estimate_service(
+    parser: EstimateParser = Depends(get_estimate_parser),
+    repository: EstimateRepository = Depends(get_estimate_repository),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> EstimateService:
+    return EstimateService(parser=parser, repository=repository, storage=storage)
