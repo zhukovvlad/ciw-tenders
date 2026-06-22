@@ -32,7 +32,7 @@ describe("App", () => {
     )
     // поток сметы стартует с dropzone
     expect(await screen.findByLabelText(/файл сметы/i)).toBeInTheDocument()
-    await userEvent.click(screen.getByRole("button", { name: /Справочник/ }))
+    await userEvent.click(screen.getByRole("tab", { name: /Справочник/i }))
     expect(await screen.findByText(/Справочник СМР/i)).toBeInTheDocument()
   })
 })
