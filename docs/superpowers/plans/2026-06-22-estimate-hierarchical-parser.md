@@ -1207,16 +1207,11 @@ _S3_ERRORS = (BotoCoreError, ClientError)
 
 
 class S3ObjectStorage(ObjectStorage):
-    def __init__(
-        self,
-        endpoint: str,
-        access_key: str,
-        secret_key: str,
-        bucket: str,
-        *,
-        ensure_bucket: bool = True,
-    ) -> None:
+    def __init__(self, endpoint: str, access_key: str, secret_key: str, bucket: str) -> None:
+        # boto3.client сети НЕ дёргает — конструирование без обращения к MinIO, поэтому
+        # __init__ (вызывается в DI до try/except роута) не может уронить 500 на MinIO-down.
         self._bucket = bucket
+        self._bucket_ready = False
         self._client = boto3.client(
             "s3",
             endpoint_url=endpoint,
@@ -1224,17 +1219,22 @@ class S3ObjectStorage(ObjectStorage):
             aws_secret_access_key=secret_key,
             config=Config(signature_version="s3v4"),
         )
-        if ensure_bucket:
-            self._ensure_bucket()
 
     def _ensure_bucket(self) -> None:
+        # Лениво и идемпотентно; вызывается ВНУТРИ put (request-путь, под общим
+        # except _S3_ERRORS). head_bucket при обрыве соединения кидает EndpointConnectionError
+        # (BotoCoreError) — НЕ ловится тут, уходит в put → StorageError → 503 (а не 500 из DI).
+        if self._bucket_ready:
+            return
         try:
             self._client.head_bucket(Bucket=self._bucket)
-        except self._client.exceptions.ClientError:
+        except ClientError:  # бакета нет/нет доступа (НЕ обрыв соединения) → создаём
             self._client.create_bucket(Bucket=self._bucket)
+        self._bucket_ready = True
 
     def put(self, key: str, data: bytes, content_type: str) -> None:
         try:
+            self._ensure_bucket()  # ленивая проверка бакета — здесь, не в __init__
             self._client.put_object(
                 Bucket=self._bucket, Key=key, Body=data, ContentType=content_type
             )
@@ -1701,6 +1701,7 @@ git commit -m "feat(estimates): роуты upload/list/get/delete + пред-в�
 - Сервис ingest (put→INSERT), list/get/delete, чистка MinIO при delete → Task 5 ✓
 - API + пред-валидация (тип/сигнатура/размер→422/413, бэкстоп по `len(content)`); `StorageError`→503 (только MinIO, прочее→500); 404 владение; 401; autouse-чистка overrides → Task 8 ✓
 - Типизированный `StorageError`: адаптер оборачивает boto3, роут ловит только его на 503 → Tasks 4, 6, 8 ✓
+- Граница 503 держится и на холодном старте: `__init__` адаптера сети не дёргает, проверка бакета ленивая внутри `put` (под `except _S3_ERRORS`) — MinIO-down на первом запросе → 503, не 500 из DI → Task 6 ✓
 - Тесты: golden (skipif), синтетика грязи, source_index-целостность, не-вызов хранилища при отказе → Tasks 3, 8 ✓
 - Вне объёма (матчинг, реапер сирот, обратная запись) → не реализуется (SP2/SP3) ✓
 
