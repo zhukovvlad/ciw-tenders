@@ -49,6 +49,8 @@ export function WipeCatalog({ onWiped }: { onWiped: () => void }) {
       <AlertDialog
         open={open}
         onOpenChange={(next) => {
+          // не закрывать диалог, пока идёт очистка
+          if (!next && busy) return
           setOpen(next)
           if (!next) setWord("")
         }}

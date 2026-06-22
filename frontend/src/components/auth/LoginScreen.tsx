@@ -17,7 +17,7 @@ import { ApiError } from "@/lib/api/client"
 import { useAuth } from "@/lib/auth/useAuth"
 
 const schema = z.object({
-  email: z.string().min(1, "Введите логин"),
+  email: z.string().trim().min(1, "Введите логин"),
   password: z.string().min(1, "Введите пароль"),
 })
 

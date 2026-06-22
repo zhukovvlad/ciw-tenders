@@ -66,10 +66,14 @@ export function Dropzone({
         className
       )}
     >
-      <UploadCloud className="size-7 text-muted-foreground" />
-      <div className="text-foreground">{hot ? hotText : idleText}</div>
+      <UploadCloud className="pointer-events-none size-7 text-muted-foreground" />
+      <div className="pointer-events-none text-foreground">
+        {hot ? hotText : idleText}
+      </div>
       {hint && (
-        <div className="font-mono text-xs text-muted-foreground">{hint}</div>
+        <div className="pointer-events-none font-mono text-xs text-muted-foreground">
+          {hint}
+        </div>
       )}
       <input
         id={id}

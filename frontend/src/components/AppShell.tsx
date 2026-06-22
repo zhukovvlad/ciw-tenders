@@ -45,7 +45,7 @@ export function AppShell({ tab, onTab, children }: AppShellProps) {
         </Tabs>
         {user && (
           <DropdownMenu>
-            <DropdownMenuTrigger className="ml-auto flex items-center gap-1 text-xs text-muted-foreground outline-none hover:text-foreground">
+            <DropdownMenuTrigger className="ml-auto flex items-center gap-1 rounded-sm text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">
               {user.email}
               <ChevronDown className="size-3.5" />
             </DropdownMenuTrigger>
