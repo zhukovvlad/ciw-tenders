@@ -191,7 +191,12 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
 - `match_row(EstimateRow)`/`match_rows` удаляются вместе со старым путём.
 - **Граница `choose_best`:** обязан вернуть **один из переданных** кандидатов или `None`;
   ядро валидирует (`chosen in candidates`), иначе `score_of(chosen, …)` упадёт на
-  «придуманной» статье. Невалидный ответ → трактуем как `None` (→ `no_match`).
+  «придуманной» статье. Различаем источник сбоя:
+  - **сеть/429/таймаут** → `TransientError` (инлайн-бюджет ретраев);
+  - **структурный брак ответа LLM** (несуществующий id вне `candidates`, непарсимый JSON,
+    сломанная схема) → трактуем как `None` (отказ → `no_match`), **не** ретраим: повтор
+    того же промпта обычно повторит мусор, а в БД не должен попасть фейковый
+    `matched_article_id`.
 - **`search_similar` фильтрует `embedding IS NOT NULL`** (вероятно уже так с SP1 —
   подтвердить в плане): если импорт добавит статьи с `embedding=NULL` уже после gate, но
   пока матч идёт, NULL-строки не должны попасть в кандидаты / сломать векторный поиск.
@@ -212,6 +217,11 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
 | `match_error` | `TEXT NULL` | краткая причина при `status='error'`; на успехе перезаписывается в `NULL` |
 
 `estimate_rows.status` уже `VARCHAR(32)` (0003) — держит `needs_review`(12)/`no_match`(8).
+
+**Контракт для SP3 (следствие plain-int без FK):** при отдаче на фронт через `LEFT JOIN`
+к живому справочнику — если JOIN пуст (статья удалена/wipe), DTO-маппер обязан отдавать
+`matched_code`/`matched_name` из снимка `estimate_rows`, а **не** падать на отсутствии
+связи. Копии лежат ровно для этого; `matched_article_id` — лишь convenience-линк.
 
 **`estimates`:**
 
@@ -274,11 +284,16 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
   живости истинна **только вместе с тайм-лимитами** (см. «Конфигурация»): они превращают
   зависание в краш/ошибку, коннект рвётся, лок освобождается. Статус `running` —
   пользовательский lifecycle, не замок.
-- **Singleton `embed_articles`:** у эмбеддинга справочника тоже advisory-lock на
-  **константном ключе** (`classid`=namespace «articles embed», `objid`=0). Двойной enqueue
-  (двойной клик; импорт + админский endpoint; concurrency>1) → второй `no-op`. CAS спасает
-  корректность, но без singleton оба дёрнут эмбеддер на одних текстах (двойная стоимость +
-  гонка). Альтернатива на проде — отдельная очередь эмбеддинга с `concurrency=1`.
+- **Singleton `embed_articles`:** advisory-lock на **константном ключе** (`classid`=namespace
+  «articles embed», `objid`=0). Двойной enqueue (двойной клик; импорт-в-цикле; concurrency>1)
+  → второй `no-op`; убирает и лавину задач (одна само-достаивающаяся задача вместо N), и
+  двойную стоимость эмбеддера. Альтернатива на проде — отдельная очередь с `concurrency=1`.
+  - **Drain-to-zero (закрывает trailing-edge):** держатель лока перед релизом **перепроверяет
+    `count(embedding IS NULL)`**; если >0 (статьи добавились, пока он работал, и их триггеры
+    `no-op`-нулись) — **до-крутивается ещё раз** (повторный проход / self-re-enqueue). Без
+    этого статья, добавленная под конец прохода, осталась бы `embedding IS NULL` навсегда
+    (потерянное пробуждение) — а матчинг по ней ушёл бы в `blocked`. Redis-debounce на enqueue
+    отклонён: в Celery «висит ли уже задача» определяется ненадёжно; drain-recheck корректен.
 
 ## Ретраи и ошибки
 
@@ -317,6 +332,11 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
   отвечает «уже выполняется» (задача-дубль в воркере возьмёт `no-op`, если держатель лока
   жив; если зависла/умерла — дозаберёт), а не «перезапущено» — API не знает, жив ли
   держатель, поэтому не обещает рестарт.
+  - **UI-контракт (для SP3-фронта):** `set_status` бампает `updated_at` (явным `=now()` либо
+    ORM-`onupdate`, без миграции). Фронт на `running` обычно блокирует кнопку — чтобы смета
+    не висла визуально навсегда при крахе/зависании воркера, кнопку «Перезапустить»
+    разрешать для `running`, если `now - updated_at > порог` (напр. 10 мин). Лёгкая замена
+    реаперу зависших (реапер — тех-долг); сам ре-триггер из `running` уже разрешён.
 - **`POST /api/articles/embed`** — админский (require_admin). Ставит `embed_articles()`.
   Замена ручному `just embed-worker`.
 - Снимается **`POST /estimates/match`** (синхронный stateless-матч). Реальный поток теперь
@@ -385,6 +405,9 @@ def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
   `None` → `no_match` (а не падение `score_of`).
 - **enqueue-after-commit:** `EstimateService.ingest` зовёт `TaskQueue.enqueue_match` только
   после коммита (фейк-кью фиксирует, что вызов был, и что строки уже видимы).
+- **Drain-to-zero `embed_articles`:** статья, добавленная «во время» прохода (фейк-репо
+  отдаёт новый pending на втором витке), всё равно эмбеддится — задача дозабирает до нуля.
+- **`set_status` бампает `updated_at`:** транзишн меняет таймстамп (для stale-running UI).
 
 ## Безопасность миграции / стык с SP1
 
