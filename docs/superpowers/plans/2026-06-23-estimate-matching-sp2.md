@@ -574,7 +574,7 @@ git commit -m "refactor(matching): ядро match_one(embedding, query_text) б�
 
 - [ ] **Step 1: Расширить порты**
 
-В `backend/app/domain/ports.py` добавить импорты `EstimateRowStatus, EstimateStatus, MatchableNode, NodeMatch, PendingEmbedding` к существующим из `entities`, и классы/методы:
+В `backend/app/domain/ports.py` добавить импорты `EstimateRowStatus, EstimateStatus, MatchableNode, NodeMatch, PendingEmbedding` к существующим из `entities` (`PendingEmbedding` **уже существует** с SP1 — [entities.py](../../../backend/app/domain/entities.py), поля `id`/`embedding_input`; переиспользуем как generic «узел, ждущий вектор» — для строк сметы тоже подходит, новой сущности не нужно), и классы/методы:
 
 ```python
 class TaskQueue(ABC):
@@ -1181,8 +1181,10 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
     # ... существующие create/list_for_owner/get/delete без изменений ...
 
     def try_matching_lock(self, estimate_id: int) -> bool:
-        # session-level (не xact): держится через инкрементальные коммиты embed-шага на
-        # одном коннекте Session; release в finally + close возвращает коннект (лок снят).
+        # ИНВАРИАНТ: сессия ДОЛЖНА быть на пиннутом коннекте (SessionLocal(bind=conn) в Celery-
+        # обёртке) — иначе commit() в save_*/set_status вернёт коннект в пул, лок утечёт и потеряет
+        # эксклюзивность на prefork concurrency>1. Session-level (не xact): переживает коммиты на
+        # ОДНОМ коннекте; release_matching_lock + conn.close() в обёртке снимают лок.
         return bool(
             self._session.scalar(select(func.pg_try_advisory_lock(_NS_MATCH, estimate_id)))
         )
@@ -1308,16 +1310,60 @@ def test_match_values_overwrites_full_snapshot() -> None:
     assert nm["candidates"] is None and nm["score"] is None and nm["matched_article_id"] is None
 ```
 
-- [ ] **Step 4: Запустить — зелёный + ruff**
+- [ ] **Step 3b: Интеграционный тест эксклюзивности лока на реальной БД (skipif — фейк его НЕ ловит)**
 
-Run: `cd backend && uv run pytest tests/test_estimate_repository_mapping.py -v && uv run ruff check app/infrastructure/db/estimate_repository.py app/infrastructure/db/article_repository.py`
-Expected: PASS, ruff чисто.
+> Фейк-лок (`set[int]`) идеально эксклюзивен → юнит-тесты зелёные при сломанном проде. Поэтому
+> единственный осмысленный тест эксклюзивности — на реальном Postgres с ДВУМЯ коннектами; `skipif`,
+> как golden-тест SP1 (в чистом CI — SKIPPED).
+
+Create `backend/tests/test_estimate_lock_integration.py`:
+
+```python
+from __future__ import annotations
+
+import os
+
+import pytest
+from sqlalchemy import text
+
+from app.infrastructure.db.estimate_repository import SqlAlchemyEstimateRepository
+from app.infrastructure.db.session import SessionLocal, engine
+
+_REAL_DB = os.environ.get("DATABASE_URL", "").startswith(("postgresql", "postgres"))
+
+
+@pytest.mark.skipif(not _REAL_DB, reason="нужен реальный Postgres (advisory-lock не фейкается)")
+def test_advisory_lock_is_exclusive_across_connections() -> None:
+    c1, c2 = engine.connect(), engine.connect()
+    try:
+        r1 = SqlAlchemyEstimateRepository(SessionLocal(bind=c1))
+        r2 = SqlAlchemyEstimateRepository(SessionLocal(bind=c2))
+        assert r1.try_matching_lock(424242) is True
+        r1.touch(424242)  # коммит на c1 (UPDATE по несущ. строке тоже коммитит) НЕ должен снять лок
+        assert r2.try_matching_lock(424242) is False   # эксклюзивность держится ПОСЛЕ коммита
+        r1.release_matching_lock(424242)
+        assert r2.try_matching_lock(424242) is True
+        r2.release_matching_lock(424242)
+    finally:
+        c1.exec_driver_sql("SELECT pg_advisory_unlock_all()")
+        c2.exec_driver_sql("SELECT pg_advisory_unlock_all()")
+        c1.close()
+        c2.close()
+```
+
+> Ключевая проверка: после `commit()` на c1 (`r1.touch`) лок **всё ещё держится** — это и доказывает,
+> что пиннутый коннект не вернулся в пул и лок не утёк (баг, который фейк замаскировал бы).
+
+- [ ] **Step 4: Запустить — зелёный + ruff** (интеграционный тест SKIPPED без реального DATABASE_URL)
+
+Run: `cd backend && uv run pytest tests/test_estimate_repository_mapping.py tests/test_estimate_lock_integration.py -v && uv run ruff check app/infrastructure/db/estimate_repository.py app/infrastructure/db/article_repository.py tests/test_estimate_lock_integration.py`
+Expected: маппинг-тесты PASS; интеграционный SKIPPED (CI) либо PASS (локально с реальной БД); ruff чисто.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/app/infrastructure/db/estimate_repository.py backend/app/infrastructure/db/article_repository.py backend/tests/test_estimate_repository_mapping.py
-git commit -m "feat(matching): SQL-методы матчинга (advisory-lock, keyset embed, снимок, счётчики) + matching_readiness"
+git add backend/app/infrastructure/db/estimate_repository.py backend/app/infrastructure/db/article_repository.py backend/tests/test_estimate_repository_mapping.py backend/tests/test_estimate_lock_integration.py
+git commit -m "feat(matching): SQL-методы матчинга (advisory-lock на пиннутом коннекте, keyset embed, снимок) + matching_readiness + интеграц-тест лока"
 ```
 
 ---
@@ -1592,14 +1638,23 @@ Create `backend/app/infrastructure/tasks/tasks.py`. Фабрики из `deps.py
 тестируется напрямую):
 
 ```python
-"""Тонкие Celery-обёртки: сессия → сервис из портов → коммит. Логика брокера живёт ТУТ."""
+"""Тонкие Celery-обёртки: ВЫДЕЛЕННЫЙ коннект → сессия на нём → сервис → коммиты. Логика брокера ТУТ.
+
+КРИТИЧНО (advisory-lock): session-level advisory-lock живёт на backend-коннекте и переживает
+COMMIT, НО `SessionLocal()` привязан к engine → `commit()` возвращает коннект в пул, и следующая
+операция берёт ДРУГОЙ коннект (лок утекает, эксклюзивность теряется на prefork concurrency>1).
+Поэтому задача открывает ОДИН коннект `engine.connect()` на всё время и строит сессию
+`SessionLocal(bind=conn)` — при внешнем bind `commit()` НЕ возвращает коннект в пул, все операции
+и лок остаются на нём. release_*_lock выполняется в сервисе/обёртке ДО `conn.close()`. Краш/SIGKILL
+(тайм-лимит) → коннект рвётся → Postgres сам отпускает лок (детектор живости).
+"""
 
 from __future__ import annotations
 
 from app.core.config import get_settings
 from app.domain.errors import DictionaryNotReadyError
 from app.infrastructure.db.embedding_queue_repository import SqlAlchemyEmbeddingQueueRepository
-from app.infrastructure.db.session import SessionLocal
+from app.infrastructure.db.session import SessionLocal, engine
 from app.infrastructure.tasks.celery_app import celery_app
 from app.services.article_embedding_service import drain_articles
 
@@ -1622,33 +1677,41 @@ def run_match(service, estimate_id: int, *, is_final: bool) -> None:
 def match_estimate_task(self, estimate_id: int) -> None:
     from app.api.deps import build_estimate_matching_service  # ленивый импорт (нет цикла deps↔tasks)
 
-    session = SessionLocal()
+    conn = engine.connect()                       # пиннутый коннект на всю задачу
     try:
-        service = build_estimate_matching_service(session)
-        is_final = self.request.retries >= self.max_retries
+        session = SessionLocal(bind=conn)         # bind=conn → commit() не вернёт коннект в пул
         try:
-            run_match(service, estimate_id, is_final=is_final)
-        except DictionaryNotReadyError as exc:
-            raise self.retry(exc=exc, countdown=_settings.gate_retry_backoff_s)
+            service = build_estimate_matching_service(session)
+            is_final = self.request.retries >= self.max_retries
+            try:
+                run_match(service, estimate_id, is_final=is_final)
+            except DictionaryNotReadyError as exc:
+                raise self.retry(exc=exc, countdown=_settings.gate_retry_backoff_s)
+        finally:
+            session.close()                       # внешний conn НЕ закрывает
     finally:
-        session.close()  # возвращает коннект → session-level advisory-lock снят
+        conn.close()                              # лок уже снят в сервисе → коннект в пул чистым
 
 
 @celery_app.task
 def embed_articles_task() -> None:
     from app.api.deps import build_embedder  # ленивый импорт
 
-    session = SessionLocal()
+    conn = engine.connect()                       # пиннутый коннект (singleton-лок переживёт коммиты)
     try:
-        queue = SqlAlchemyEmbeddingQueueRepository(session)
-        if not queue.try_embed_lock():
-            return  # singleton → no-op
+        session = SessionLocal(bind=conn)
         try:
-            drain_articles(queue, build_embedder())
+            queue = SqlAlchemyEmbeddingQueueRepository(session)
+            if not queue.try_embed_lock():
+                return  # singleton → no-op
+            try:
+                drain_articles(queue, build_embedder())
+            finally:
+                queue.release_embed_lock()
         finally:
-            queue.release_embed_lock()
+            session.close()
     finally:
-        session.close()
+        conn.close()
 ```
 
 Create `backend/app/infrastructure/tasks/task_queue.py`:
@@ -1773,6 +1836,19 @@ def test_ingest_storage_failure_does_not_enqueue() -> None:
     with pytest.raises(StorageError):
         service.ingest(_xlsx(), "смета.xlsx", owner_id=7)
     assert queue.match_calls == []                 # сбой put → ни БД, ни enqueue
+
+
+def test_ingest_survives_broker_failure() -> None:
+    from tests.fakes import FakeTaskQueue
+
+    class _BoomQueue(FakeTaskQueue):
+        def enqueue_match(self, estimate_id: int) -> None:
+            raise RuntimeError("redis down")
+
+    service = EstimateService(EstimateParser(), FakeEstimateRepository(),
+                              FakeObjectStorage(), task_queue=_BoomQueue())
+    result = service.ingest(_xlsx(), "смета.xlsx", owner_id=7)  # НЕ падает
+    assert result.estimate.status == "pending"     # смета создана, ждёт ручного ре-триггера
 ```
 
 > Существующие тесты `EstimateService` создают сервис без `task_queue` — добавить дефолт-фейк, см. Step 3 (сделать параметр обязательным и обновить хелпер `_service`).
@@ -1801,7 +1877,10 @@ Expected: FAIL (`task_queue` не принимается / нет enqueue).
             NewEstimate(user_id=owner_id, filename=filename, original_object_key=key),
             parsed.nodes,
         )
-        self._task_queue.enqueue_match(estimate.id)                # строго ПОСЛЕ коммита create
+        try:
+            self._task_queue.enqueue_match(estimate.id)            # строго ПОСЛЕ коммита create
+        except Exception:  # noqa: BLE001 — best-effort: брокер недоступен → смета остаётся
+            pass           # pending, загрузка НЕ падает (иначе 500 после коммита → дубли). Ручной ре-триггер.
         return IngestResult(estimate=estimate, positions_count=len(parsed.positions),
                             warnings=parsed.warnings)
 ```
@@ -1987,6 +2066,9 @@ def retrigger_match(
     est = repository.get(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN)
     if est is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
+    # Ре-триггер разрешён из ЛЮБОГО статуса своей сметы (осознанно шире, чем ранний список):
+    # из ready это доматчит no_match-строки после расширения справочника; matchable-фильтр
+    # (status ∈ {pending,error,no_match}) гарантирует иммутабельность confident/needs_review.
     task_queue.enqueue_match(estimate_id)
     # честный ответ: если идёт — задача-дубль возьмёт no-op (живой держатель) / дозаберёт (зависла)
     detail = "уже выполняется" if est.status == "running" else "поставлено в очередь"
