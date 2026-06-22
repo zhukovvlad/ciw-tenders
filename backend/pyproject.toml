@@ -20,6 +20,7 @@ dependencies = [
     "pwdlib[argon2]>=0.3.0",
     "alembic>=1.18.4",
     "httpx>=0.28.1",
+    "boto3>=1.43.34",
 ]
 
 [dependency-groups]
