@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { toast } from "sonner"
@@ -33,6 +33,7 @@ function pick(name = "Шаблон.xlsx") {
   )
 }
 
+beforeEach(() => { vi.clearAllMocks(); })
 afterEach(() => vi.restoreAllMocks())
 
 describe("TemplateUpload", () => {

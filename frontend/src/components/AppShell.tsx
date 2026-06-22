@@ -28,7 +28,9 @@ export function AppShell({ tab, onTab, children }: AppShellProps) {
         </span>
         <Tabs
           value={tab}
-          onValueChange={(v) => onTab(v as "estimate" | "articles")}
+          onValueChange={(v) => {
+            if (v === "estimate" || v === "articles") onTab(v);
+          }}
         >
           <TabsList>
             <TabsTrigger value="estimate">
