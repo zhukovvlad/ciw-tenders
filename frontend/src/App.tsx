@@ -4,6 +4,7 @@ import { AppShell } from "@/components/AppShell"
 import { AuthProvider } from "@/lib/auth/AuthContext"
 import { EstimateFlow } from "@/pages/estimate/EstimateFlow"
 import { ArticlesPage } from "@/pages/ArticlesPage"
+import { Toaster } from "@/components/ui/sonner"
 
 export function App() {
   const [tab, setTab] = useState<"estimate" | "articles">("estimate")
@@ -14,6 +15,7 @@ export function App() {
           {tab === "estimate" ? <EstimateFlow /> : <ArticlesPage />}
         </AppShell>
       </AuthGate>
+      <Toaster />
     </AuthProvider>
   )
 }
