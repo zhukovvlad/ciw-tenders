@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import datetime
 
 from app.infrastructure.db.estimate_repository import SqlAlchemyEstimateRepository
 from app.infrastructure.db.models import EstimateModel, EstimateRowModel
@@ -19,7 +19,7 @@ def test_row_mapping_has_embedding_flag() -> None:
 def test_estimate_mapping_excludes_object_key() -> None:
     est = EstimateModel(
         id=1, user_id=7, filename="смета.xlsx", original_object_key="k",
-        status="pending", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        status="pending", created_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
     )
     entity = SqlAlchemyEstimateRepository._to_entity(est, [])
     assert entity.user_id == 7 and entity.filename == "смета.xlsx"
