@@ -19,26 +19,13 @@
 **Почему отложено:** деградация мягкая (ре-триггер всегда проходит, состояние не портится); полноценное
 самовосстановление — это SP3 (ревью/правки статусов). Выявлено финальным ревью SP2.
 
+**Почему остаётся (сужено):** непредвиденное исключение *в процессе* задачи теперь переводит смету в
+`partial_error` (см. «Погашено» ниже). Открыт только **жёсткий** краш (SIGKILL/OOM/потеря воркера),
+когда Python-обработчик `except` не успевает отработать: Postgres лок отпускает, но строка остаётся `running`.
+
 **Как чинить:** SP3 — sweep по `updated_at` + `task_time_limit_s` (660s) для зависших `running` →
 `blocked`/`pending`; ЛИБО проверка живости лока (`pg_try_advisory_lock` пробно) в роуте ре-триггера,
 чтобы `detail` отражал реальность, а не stored-статус. См. [estimate_matching_service.py](../backend/app/services/estimate_matching_service.py).
-
-## 🟡 SP2-матчинг: узкий перехват исключений в embed/match-циклах
-
-**Что:** `_embed_nodes`/`_match_nodes` ловят только `TransientError`. Непредвиденная НЕ-транзиентная
-ошибка провайдера/БД (напр. 400 на кривой вход, рассинхрон длины батча) пробрасывается из
-`match_estimate` (лок при этом освобождается — ок), задача падает без записи статуса → смета может
-застрять в `running` (при `acks_late` сообщение переотдаётся один раз на потере воркера).
-
-**Почему отложено:** транзиент и структурный брак LLM уже обработаны (per-node `error` → `partial_error`);
-не-транзиентный сбой эмбеддера — редкий неожиданный случай. Реализация SP2 сознательно сузила сеть.
-Выявлено финальным ревью SP2 (не блокер мерджа).
-
-**Как чинить:** расширить per-batch `except` в `_embed_nodes`/`_match_nodes` ЛИБО добавить
-wrapper-level `except` в Celery-задаче, пишущий `partial_error` с деталью, прежде чем отпустить лок.
-Связано с [F1] выше (оба про живучесть статуса). См.
-[estimate_matching_service.py](../backend/app/services/estimate_matching_service.py),
-[tasks.py](../backend/app/infrastructure/tasks/tasks.py).
 
 ## 🟢 SP2-матчинг: пул коннектов vs concurrency воркера + drain на каждый `create_article`
 
@@ -146,6 +133,15 @@ wrapper-level `except` в Celery-задаче, пишущий `partial_error` с
 
 ## Погашено
 
+- **🟡 SP2: узкий перехват исключений в embed/match (смета залипала в `running`)** — закрыто по
+  комментарию Copilot к PR #7 (2026-06-23). В `match_estimate` добавлен top-level `except` (не gate,
+  не transient) → `PARTIAL_ERROR` с деталью перед re-raise; `DictionaryNotReadyError` по-прежнему
+  пробрасывается для gate-retry. Лок отпускается в `finally`. Остаётся только жёсткий краш (см. живой
+  пункт про staleness выше). Тест `test_unexpected_error_sets_partial_error_and_reraises`.
+- **🟢 SP2: churn AI-клиентов на воркере** — закрыто по комментарию Copilot к PR #7 (2026-06-23).
+  `build_estimate_matching_service` берёт `get_embedder()`/`get_llm_matcher()` (кэшированные синглтоны)
+  вместо создания нового `httpx.Client`/Anthropic-клиента на каждую задачу и gate-retry; `build_embedder`
+  удалён, репозитории по-прежнему строятся на пиннутой сессии задачи.
 - **🔴 ORM `TemplateArticleModel` расходился со схемой (иерархия)** — закрыто фичей template-ingestion
   (PR #3). `models.py` теперь на дереве: `parent_id` (self-FK), `embedding_input`, `embedding` (VECTOR);
   `section_name` удалён везде. `article_service`/матчинг/репозиторий/DTO переведены на дерево.
