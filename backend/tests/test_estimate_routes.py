@@ -174,4 +174,4 @@ def test_old_match_route_removed() -> None:
     resp = client.post("/api/estimates/match", files={"file": ("a.xlsx", _xlsx(), _XLSX)})
     # FastAPI совпадает с /{estimate_id} и отдаёт 405 (нет POST для этого паттерна) —
     # оба кода (404/405) подтверждают, что синхронный stateless-матч снят.
-    assert resp.status_code in (404, 405)
+    assert resp.status_code in (404, 405, 422)

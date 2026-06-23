@@ -91,5 +91,6 @@ async def import_template(
             status_code=status.HTTP_409_CONFLICT,
             detail={"message": str(exc), "force_required": True, "deleted": exc.deleted},
         ) from exc
-    task_queue.enqueue_articles_embed()
+    if not dry_run:
+        task_queue.enqueue_articles_embed()
     return ImportReportOut.from_entity(report)

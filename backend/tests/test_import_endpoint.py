@@ -6,12 +6,12 @@ from collections.abc import Callable
 import pandas as pd
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_current_user, get_template_ingest_service
+from app.api.deps import get_current_user, get_task_queue, get_template_ingest_service
 from app.domain.entities import Role, User
 from app.main import app
 from app.services.template_ingest_service import TemplateIngestService
 from app.services.template_parser import TemplateParser
-from tests.fakes import FakeImportRepository
+from tests.fakes import FakeImportRepository, FakeTaskQueue
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -104,3 +104,25 @@ def test_import_requires_admin() -> None:
     app.dependency_overrides.clear()
 
     assert resp.status_code == 403
+
+
+def test_import_dry_run_does_not_enqueue_embed() -> None:
+    # dry_run import persists nothing → no embed enqueue expected
+    repo = FakeImportRepository()
+    queue = FakeTaskQueue()
+    app.dependency_overrides[get_current_user] = _admin
+    app.dependency_overrides[get_template_ingest_service] = _service_factory(repo)
+    app.dependency_overrides[get_task_queue] = lambda: queue
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/articles/import",
+        params={"dry_run": "true"},
+        files={"file": ("Шаблон.xlsx", _xlsx(["(1.) Раздел"]), _XLSX)},
+    )
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert resp.json()["dry_run"] is True
+    assert len(repo.rows) == 0  # ничего не записано
+    assert queue.articles_embed_calls == 0  # энкью не было
