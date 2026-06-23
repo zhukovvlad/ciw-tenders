@@ -8,6 +8,52 @@
 
 ---
 
+## 🟡 SP2-матчинг: статус `running` не самовосстанавливается после жёсткого краша воркера
+
+**Что:** session-level advisory-lock держится на пиннутом коннекте Celery-задачи; при крахе/SIGKILL
+коннект рвётся → Postgres сам отпускает лок (это корректно). НО строка `estimates.status` остаётся
+`running` навсегда — ничто её не перезаписывает. Ре-триггер `POST /api/estimates/{id}/match` при этом
+работает (новая задача берёт уже свободный лок и доматчивает), но ответный `detail` для `running`
+показывает «уже выполняется» — вводит в заблуждение.
+
+**Почему отложено:** деградация мягкая (ре-триггер всегда проходит, состояние не портится); полноценное
+самовосстановление — это SP3 (ревью/правки статусов). Выявлено финальным ревью SP2.
+
+**Как чинить:** SP3 — sweep по `updated_at` + `task_time_limit_s` (660s) для зависших `running` →
+`blocked`/`pending`; ЛИБО проверка живости лока (`pg_try_advisory_lock` пробно) в роуте ре-триггера,
+чтобы `detail` отражал реальность, а не stored-статус. См. [estimate_matching_service.py](../backend/app/services/estimate_matching_service.py).
+
+## 🟡 SP2-матчинг: узкий перехват исключений в embed/match-циклах
+
+**Что:** `_embed_nodes`/`_match_nodes` ловят только `TransientError`. Непредвиденная НЕ-транзиентная
+ошибка провайдера/БД (напр. 400 на кривой вход, рассинхрон длины батча) пробрасывается из
+`match_estimate` (лок при этом освобождается — ок), задача падает без записи статуса → смета может
+застрять в `running` (при `acks_late` сообщение переотдаётся один раз на потере воркера).
+
+**Почему отложено:** транзиент и структурный брак LLM уже обработаны (per-node `error` → `partial_error`);
+не-транзиентный сбой эмбеддера — редкий неожиданный случай. Реализация SP2 сознательно сузила сеть.
+Выявлено финальным ревью SP2 (не блокер мерджа).
+
+**Как чинить:** расширить per-batch `except` в `_embed_nodes`/`_match_nodes` ЛИБО добавить
+wrapper-level `except` в Celery-задаче, пишущий `partial_error` с деталью, прежде чем отпустить лок.
+Связано с [F1] выше (оба про живучесть статуса). См.
+[estimate_matching_service.py](../backend/app/services/estimate_matching_service.py),
+[tasks.py](../backend/app/infrastructure/tasks/tasks.py).
+
+## 🟢 SP2-матчинг: пул коннектов vs concurrency воркера + drain на каждый `create_article`
+
+**Что:** (1) `engine` на дефолтном QueuePool (5+10). Каждая running-задача пинит коннект до
+`task_time_limit_s`=660s. Dev-воркер `--pool=solo` (concurrency 1) — безопасно, но прод с
+`prefork concurrency>1` + коннекты FastAPI-запросов могут исчерпать пул. (2) `create_article`
+энкьюит полный drain справочника на каждое добавление (singleton-лок + drain-to-zero делают это
+безопасным, но при массовом добавлении через API — N почти-no-op задач).
+
+**Как чинить:** (1) задокументировать/выставить `pool_size` относительно concurrency воркера перед
+масштабированием за пределы `--pool=solo`; (2) при необходимости — дебаунс/батч enqueue эмбеддинга.
+См. [session.py](../backend/app/infrastructure/db/session.py), [articles.py](../backend/app/api/routes/articles.py).
+
+---
+
 ## 🟡 Alembic autogenerate шумит на `Vector`/HNSW
 
 - **Что:** при будущих `just makemigration` автогенерация некорректно интроспектит тип `Vector` и
