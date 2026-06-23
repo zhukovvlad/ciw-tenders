@@ -28,6 +28,34 @@ export type ReviewAction =
   | { type: "reopen"; row: number }
   | { type: "setFilter"; filter: ReviewState["filter"] }
   | { type: "load"; state: ReviewState }
+  | { type: "syncRow"; row: MatchRow }
+
+/**
+ * Решение для UI, выведенное из авторитетного ответа бэка (review_status + final_*).
+ * Бэк — источник истины: после PATCH локальное решение перезаписывается отсюда.
+ */
+export function decisionFromRow(row: MatchRow): Decision {
+  switch (row.review_status) {
+    case "rejected":
+      return { kind: "no_match" }
+    case "confirmed":
+      return {
+        kind: "confirmed",
+        code: row.final_code ?? row.matched_code ?? "",
+        name: row.final_name ?? row.matched_name ?? "",
+        manual: false,
+      }
+    case "overridden":
+      return {
+        kind: "confirmed",
+        code: row.final_code ?? "",
+        name: row.final_name ?? "",
+        manual: true,
+      }
+    default:
+      return { kind: "pending" }
+  }
+}
 
 function rowByNum(state: ReviewState, n: number): MatchRow | undefined {
   return state.rows.find((r) => r.row_number === n)
@@ -46,6 +74,21 @@ export function reviewReducer(
       return action.state
     case "setFilter":
       return { ...state, filter: action.filter }
+    case "syncRow": {
+      // Бэк вернул авторитетную строку (с замороженными final_*): заменяем строку
+      // в снимке и выводим решение из её review_status — источник истины это бэк.
+      const incoming = action.row
+      return {
+        ...state,
+        rows: state.rows.map((r) =>
+          r.row_number === incoming.row_number ? incoming : r
+        ),
+        decisions: {
+          ...state.decisions,
+          [incoming.row_number]: decisionFromRow(incoming),
+        },
+      }
+    }
     case "reopen":
       return set(action.row, { kind: "pending" })
     case "confirmNoMatch":

@@ -1,8 +1,10 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ChevronDown, Search } from "lucide-react"
 import type { Candidate, Decision, MatchRow } from "@/lib/types"
 import { statusLabel } from "@/lib/reviewState"
 import { searchArticles } from "@/lib/api/articles"
+
+const SEARCH_DEBOUNCE_MS = 250
 
 interface ReviewRowProps {
   row: MatchRow
@@ -35,10 +37,21 @@ export function ReviewRow({
   const chosenCode =
     decision.kind === "confirmed" ? decision.code : row.matched_code
 
-  async function runSearch(q: string) {
-    setQuery(q)
-    setHits(await searchArticles(q))
-  }
+  // Дебаунс поиска (~250мс): не дёргаем /articles/search на каждый символ.
+  // searchArticles сам отсекает запросы короче 2 символов (вернёт []), поэтому
+  // и сброс, и поиск выполняются единообразно в отложенном колбэке (без
+  // синхронного setState в теле эффекта).
+  const reqIdRef = useRef(0)
+  useEffect(() => {
+    const reqId = ++reqIdRef.current
+    const timer = setTimeout(() => {
+      void searchArticles(query).then((res) => {
+        // игнорируем устаревший ответ, если пользователь продолжил печатать
+        if (reqId === reqIdRef.current) setHits(res)
+      })
+    }, SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [query])
 
   return (
     <>
@@ -116,7 +129,7 @@ export function ReviewRow({
               <Search className="size-3.5 text-muted-foreground" />
               <input
                 value={query}
-                onChange={(e) => runSearch(e.target.value)}
+                onChange={(e) => setQuery(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
                 aria-label="Поиск статьи в справочнике"
                 placeholder="Нет верного — искать в справочнике…"

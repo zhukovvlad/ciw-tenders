@@ -1,6 +1,7 @@
 import type { ReviewState } from "@/lib/types"
 
 export const REVIEW_SESSION_KEY = "ciw.review.v1"
+export const REVIEW_ESTIMATE_ID_KEY = "ciw.review.estimateId.v1"
 
 export function saveReview(state: ReviewState): void {
   try {
@@ -38,4 +39,20 @@ export function loadReview(): ReviewState | null {
 
 export function clearReview(): void {
   sessionStorage.removeItem(REVIEW_SESSION_KEY)
+  sessionStorage.removeItem(REVIEW_ESTIMATE_ID_KEY)
+}
+
+export function saveEstimateId(id: number): void {
+  try {
+    sessionStorage.setItem(REVIEW_ESTIMATE_ID_KEY, String(id))
+  } catch (err) {
+    console.warn("saveEstimateId: не удалось сохранить id сметы в сессию", err)
+  }
+}
+
+export function loadEstimateId(): number | null {
+  const raw = sessionStorage.getItem(REVIEW_ESTIMATE_ID_KEY)
+  if (raw === null) return null
+  const id = Number(raw)
+  return Number.isInteger(id) ? id : null
 }

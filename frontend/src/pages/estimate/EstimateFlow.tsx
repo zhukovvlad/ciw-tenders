@@ -1,13 +1,22 @@
 // frontend/src/pages/estimate/EstimateFlow.tsx
 import { useEffect, useReducer, useRef, useState } from "react"
+import { toast } from "sonner"
 import type { Progress } from "@/lib/mock/api"
 import {
   exportEstimate,
+  patchRowReview,
   pollEstimate,
   uploadEstimate,
 } from "@/lib/api/estimates"
 import { initReview, progress, reviewReducer } from "@/lib/reviewState"
-import { clearReview, loadReview, saveReview } from "@/lib/session"
+import type { ReviewActionKind } from "@/pages/estimate/ReviewScreen"
+import {
+  clearReview,
+  loadEstimateId,
+  loadReview,
+  saveEstimateId,
+  saveReview,
+} from "@/lib/session"
 import { StartScreen } from "@/pages/estimate/StartScreen"
 import { ProcessingScreen } from "@/pages/estimate/ProcessingScreen"
 import { ReviewScreen } from "@/pages/estimate/ReviewScreen"
@@ -33,8 +42,8 @@ export function EstimateFlow() {
     undefined,
     () => loadReview() ?? initReview("", [])
   )
-  // estimateId is stored for export calls
-  const estimateIdRef = useRef<number | null>(null)
+  // id сметы для коммита решений (PATCH) и экспорта; регидратируется из сессии
+  const estimateIdRef = useRef<number | null>(loadEstimateId())
 
   // персист ревью на каждое изменение
   useEffect(() => {
@@ -60,6 +69,7 @@ export function EstimateFlow() {
       // SP1: upload → get id, then poll until ready
       const id = await uploadEstimate(file)
       estimateIdRef.current = id
+      saveEstimateId(id)
       setProg({ phase: "parsing", done: 0, total: 0, etaSeconds: null })
 
       const { fileName: serverFileName, rows } = await pollEstimate(
@@ -77,6 +87,9 @@ export function EstimateFlow() {
       setPhase("review")
     } catch (err) {
       console.error(err)
+      toast.error(
+        err instanceof Error ? err.message : "Не удалось обработать смету"
+      )
       setPhase("start")
     }
   }
@@ -90,20 +103,46 @@ export function EstimateFlow() {
 
   async function handleExport() {
     const id = estimateIdRef.current
-    if (id !== null) {
-      try {
-        const blob = await exportEstimate(id)
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = `${fileName.replace(/\.[^.]+$/, "")}_сопоставлено.xlsx`
-        a.click()
-        URL.revokeObjectURL(url)
-      } catch (err) {
-        console.error(err)
-      }
+    if (id === null) {
+      toast.error("Не удалось определить смету для экспорта")
+      return
     }
-    setPhase("done")
+    try {
+      const blob = await exportEstimate(id)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${fileName.replace(/\.[^.]+$/, "")}_сопоставлено.xlsx`
+      a.click()
+      URL.revokeObjectURL(url)
+      setPhase("done")
+    } catch (err) {
+      console.error(err)
+      toast.error(err instanceof Error ? err.message : "Экспорт не удался")
+    }
+  }
+
+  // Коммит решения на бэк: PATCH .../review, затем синхронизация строки из
+  // авторитетного ответа (с замороженными final_*). При ошибке — откат строки
+  // в pending, чтобы не оставить её в полу-обновлённом виде.
+  function handleReview(
+    rowNumber: number,
+    action: ReviewActionKind,
+    articleId?: number
+  ) {
+    const id = estimateIdRef.current
+    if (id === null) return
+    void patchRowReview(id, rowNumber, action, articleId)
+      .then((updated) => {
+        dispatch({ type: "syncRow", row: updated })
+      })
+      .catch((err: unknown) => {
+        console.error(err)
+        dispatch({ type: "reopen", row: rowNumber })
+        toast.error(
+          err instanceof Error ? err.message : "Не удалось сохранить решение"
+        )
+      })
   }
 
   if (phase === "start") return <StartScreen onFile={handleFile} />
@@ -123,6 +162,7 @@ export function EstimateFlow() {
       dispatch={dispatch}
       onExport={handleExport}
       onNewEstimate={handleNew}
+      onReview={handleReview}
     />
   )
 }

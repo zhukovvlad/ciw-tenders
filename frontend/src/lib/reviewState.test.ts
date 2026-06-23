@@ -3,6 +3,7 @@ import {
   initReview,
   reviewReducer,
   decisionFor,
+  decisionFromRow,
   progress,
   filteredRows,
   statusLabel,
@@ -93,5 +94,46 @@ describe("reviewState", () => {
     expect(statusLabel(MOCK_ROWS[0], { kind: "no_match" })).toBe(
       "Нет совпадения"
     )
+  })
+
+  it("decisionFromRow выводит решение из review_status бэка", () => {
+    const row = MOCK_ROWS.find((r) => r.status === "needs_review")!
+    expect(decisionFromRow({ ...row, review_status: "unreviewed" })).toEqual({
+      kind: "pending",
+    })
+    expect(decisionFromRow({ ...row, review_status: "rejected" })).toEqual({
+      kind: "no_match",
+    })
+    expect(
+      decisionFromRow({
+        ...row,
+        review_status: "overridden",
+        final_code: "СМР-X",
+        final_name: "Ручная",
+      })
+    ).toMatchObject({ kind: "confirmed", manual: true, code: "СМР-X" })
+  })
+
+  it("syncRow заменяет строку и выставляет решение из ответа бэка", () => {
+    const r = MOCK_ROWS.find((x) => x.status === "needs_review")!
+    const authoritative = {
+      ...r,
+      review_status: "overridden" as const,
+      final_article_id: 999,
+      final_code: "СМР-99-999",
+      final_name: "Подтверждённая бэком",
+    }
+    const s = reviewReducer(base(), { type: "syncRow", row: authoritative })
+    // строка в снимке заменена авторитетной
+    expect(s.rows.find((x) => x.row_number === r.row_number)!.final_code).toBe(
+      "СМР-99-999"
+    )
+    // решение выведено из review_status
+    expect(decisionFor(s, r)).toMatchObject({
+      kind: "confirmed",
+      manual: true,
+      code: "СМР-99-999",
+    })
+    expect(progress(s).reviewed).toBe(1)
   })
 })

@@ -69,26 +69,32 @@ export async function uploadEstimate(file: File): Promise<number> {
   return dto.id
 }
 
+// Терминальные статусы сметы (см. бэк EstimateStatus): ready/partial_error —
+// успех (есть строки для ревью), blocked — терминальный отказ. pending/running —
+// ещё в работе.
+const TERMINAL_OK = new Set(["ready", "partial_error"])
+
 export async function pollEstimate(
   id: number,
-  onProgress: (phase: string, done: number, total: number) => void,
+  onProgress: (status: string, done: number, total: number) => void,
   intervalMs = 1500
 ): Promise<{ fileName: string; rows: MatchRow[] }> {
   return new Promise((resolve, reject) => {
     const check = async () => {
       try {
         const dto = await apiGet<DetailDto>(`/estimates/${id}`)
-        if (dto.status === "ready" || dto.status === "partial_error") {
+        if (TERMINAL_OK.has(dto.status)) {
           resolve({ fileName: dto.filename, rows: dto.rows.map(rowFromDto) })
           return
         }
-        if (dto.status === "error") {
-          reject(new Error("Обработка сметы завершилась ошибкой"))
+        if (dto.status === "blocked") {
+          reject(new Error("Обработка сметы заблокирована"))
           return
         }
-        // still running — report progress
+        // pending/running — узлы матчатся; «готовы» = строки с терминальным
+        // статусом матчинга (всё, кроме ещё-не-обработанного pending).
         const done = dto.rows.filter(
-          (r) => r.status !== ("running" as MatchStatus)
+          (r) => (r.status as string) !== "pending"
         ).length
         onProgress(dto.status, done, dto.rows.length)
         setTimeout(() => void check(), intervalMs)
