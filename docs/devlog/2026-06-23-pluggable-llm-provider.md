@@ -89,12 +89,11 @@ PR: [#8](https://github.com/zhukovvlad/ciw-tenders/pull/8) (база `main`). К
   Critical/Important; сквозной путь перманентной ошибки → `partial_error` верифицирован против
   `estimate_matching_service.py`. Все накопленные замечания — deferrable (тест-гигиена).
 
-## Долг / на будущее
+## Долг / на будущее (вынесено в [TECH_DEBT](../TECH_DEBT.md))
 
-- Полировочные Minor (тест-гигиена): слабый ассерт `"0" in SYSTEM_PROMPT` (не пинит «номер строки,
-  не код»); `_FakeClient.post` с позиционной сигнатурой; `-> Never` на `_raise_body_error`. Не
-  блокеры — кандидаты на попутную чистку.
-- Google-адаптер сознательно не делался (вне объёма).
+- Полировочные Minor из ревью (тест-гигиена): слабый ассерт `"0" in SYSTEM_PROMPT`, позиционная
+  сигнатура `_FakeClient.post`, `-> Never` на `_raise_body_error` → 🟢 в TECH_DEBT.
+- Google-адаптер сознательно не делался (вне объёма) → раздел «Сознательно вне объёма» в TECH_DEBT.
 
 ## Дальше
 
