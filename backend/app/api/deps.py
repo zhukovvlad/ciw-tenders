@@ -28,6 +28,7 @@ from app.domain.ports import (
 )
 from app.infrastructure.ai.anthropic_matcher import AnthropicLLMMatcher
 from app.infrastructure.ai.openrouter_embedder import OpenRouterEmbedder
+from app.infrastructure.ai.openrouter_matcher import OpenRouterLLMMatcher
 from app.infrastructure.auth.jwt_token_service import JwtTokenService
 from app.infrastructure.auth.password_hasher import Argon2PasswordHasher
 from app.infrastructure.db.article_repository import SqlAlchemyArticleRepository
@@ -126,12 +127,23 @@ def get_embedder() -> Embedder:
 @lru_cache
 def get_llm_matcher() -> LLMMatcher:
     settings = get_settings()
-    return AnthropicLLMMatcher(
-        api_key=settings.anthropic_api_key,
-        model=settings.llm_model,
-        timeout_s=settings.ai_call_timeout_s,
-        retry_budget=settings.transient_retry_budget,
-    )
+    if settings.llm_provider == "anthropic":
+        return AnthropicLLMMatcher(
+            api_key=settings.anthropic_api_key,
+            model=settings.anthropic_llm_model,
+            timeout_s=settings.ai_call_timeout_s,
+            retry_budget=settings.transient_retry_budget,
+        )
+    if settings.llm_provider == "openrouter":
+        return OpenRouterLLMMatcher(
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+            model=settings.openrouter_llm_model,
+            timeout_s=settings.ai_call_timeout_s,
+            retry_budget=settings.transient_retry_budget,
+        )
+    # страховка: конфиг уже валидирует провайдер, но на случай рассинхронизации.
+    raise ValueError(f"Неизвестный LLM_PROVIDER: {settings.llm_provider!r}")
 
 
 @lru_cache
