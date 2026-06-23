@@ -8,10 +8,14 @@ from app.domain.entities import (
     ArticleCandidate,
     Estimate,
     EstimateNode,
+    EstimateStatus,
     EstimateSummary,
     ExistingArticle,
     ImportPlan,
+    MatchableNode,
     NewEstimate,
+    NodeMatch,
+    PendingEmbedding,
     StoredEstimateRow,
     TemplateArticle,
     TokenPayload,
@@ -26,6 +30,7 @@ from app.domain.ports import (
     LLMMatcher,
     ObjectStorage,
     PasswordHasher,
+    TaskQueue,
     TokenService,
     UserRepository,
 )
@@ -76,6 +81,11 @@ class FakeRepository(ArticleRepository):
 
     def search_similar(self, embedding: list[float], top_k: int = 3) -> list[ArticleCandidate]:
         return self._candidates[:top_k]
+
+    def matching_readiness(self) -> tuple[int, int]:
+        total = len(self._store)
+        pending = sum(1 for a in self._store if a.embedding is None)
+        return total, pending
 
 
 class FakeLLMMatcher(LLMMatcher):
@@ -226,32 +236,62 @@ class FakeObjectStorage(ObjectStorage):
         self.store.pop(key, None)
 
 
+class FakeTaskQueue(TaskQueue):
+    def __init__(self) -> None:
+        self.match_calls: list[int] = []
+        self.articles_embed_calls = 0
+
+    def enqueue_match(self, estimate_id: int) -> None:
+        self.match_calls.append(estimate_id)
+
+    def enqueue_articles_embed(self) -> None:
+        self.articles_embed_calls += 1
+
+
 class FakeEstimateRepository(EstimateRepository):
     def __init__(self) -> None:
         self.estimates: dict[int, Estimate] = {}
-        self._keys: dict[int, str] = {}  # estimate_id -> object_key
+        self._keys: dict[int, str] = {}
         self._next = 1
         self.create_calls = 0
+        # SP2: узлы как изменяемые словари + статус/детали/лок/таймстамп
+        self.nodes: dict[int, dict] = {}  # node_id -> {estimate_id, embedding_input, ...}
+        self.statuses: dict[int, str] = {}  # estimate_id -> status
+        self.details: dict[int, str | None] = {}
+        self.touch_count: dict[int, int] = {}
+        self._locks: set[int] = set()
+        self._node_seq = 0
 
     def create(self, new: NewEstimate, nodes: list[EstimateNode]) -> Estimate:
         self.create_calls += 1
         eid = self._next
         self._next += 1
-        rows = [
-            StoredEstimateRow(
-                id=i + 1,
-                code=n.code,
-                name=n.name,
-                parent_code=n.parent_code,
-                section_type=n.section_type,
-                depth=n.depth,
-                embedding_input=n.embedding_input,
-                source_index=n.source_index,
-                status="pending",
-                has_embedding=False,
+        rows = []
+        for n in nodes:
+            self._node_seq += 1
+            nid = self._node_seq
+            self.nodes[nid] = {
+                "id": nid,
+                "estimate_id": eid,
+                "embedding_input": n.embedding_input,
+                "embedding": None,
+                "status": "pending",
+                "match_error": None,
+            }
+            rows.append(
+                StoredEstimateRow(
+                    id=nid,
+                    code=n.code,
+                    name=n.name,
+                    parent_code=n.parent_code,
+                    section_type=n.section_type,
+                    depth=n.depth,
+                    embedding_input=n.embedding_input,
+                    source_index=n.source_index,
+                    status="pending",
+                    has_embedding=False,
+                )
             )
-            for i, n in enumerate(nodes)
-        ]
         est = Estimate(
             id=eid,
             user_id=new.user_id,
@@ -261,6 +301,9 @@ class FakeEstimateRepository(EstimateRepository):
             rows=rows,
         )
         self.estimates[eid] = est
+        self.statuses[eid] = "pending"
+        self.details[eid] = None
+        self.touch_count[eid] = 0
         self._keys[eid] = new.original_object_key
         return est
 
@@ -269,7 +312,7 @@ class FakeEstimateRepository(EstimateRepository):
             EstimateSummary(
                 id=e.id,
                 filename=e.filename,
-                status=e.status,
+                status=self.statuses.get(e.id, e.status),
                 nodes_count=len(e.rows),
                 created_at=e.created_at,
             )
@@ -289,3 +332,81 @@ class FakeEstimateRepository(EstimateRepository):
             return None
         self.estimates.pop(estimate_id)
         return self._keys.pop(estimate_id)
+
+    # --- SP2 ---
+    def try_matching_lock(self, estimate_id: int) -> bool:
+        if estimate_id in self._locks:
+            return False
+        self._locks.add(estimate_id)
+        return True
+
+    def release_matching_lock(self, estimate_id: int) -> None:
+        self._locks.discard(estimate_id)
+
+    def set_status(
+        self, estimate_id: int, status: EstimateStatus, detail: str | None = None
+    ) -> None:
+        self.statuses[estimate_id] = str(status)
+        self.details[estimate_id] = detail
+        self.touch_count[estimate_id] = self.touch_count.get(estimate_id, 0) + 1
+
+    def touch(self, estimate_id: int) -> None:
+        self.touch_count[estimate_id] = self.touch_count.get(estimate_id, 0) + 1
+
+    def get_status(self, estimate_id: int) -> str | None:
+        return self.statuses.get(estimate_id)
+
+    def fetch_unembedded_nodes(
+        self, estimate_id: int, after_id: int, limit: int
+    ) -> list[PendingEmbedding]:
+        rows = sorted(
+            (
+                n
+                for n in self.nodes.values()
+                if n["estimate_id"] == estimate_id
+                and n["embedding"] is None
+                and n["id"] > after_id
+            ),
+            key=lambda n: n["id"],
+        )
+        return [
+            PendingEmbedding(id=n["id"], embedding_input=n["embedding_input"])
+            for n in rows[:limit]
+        ]
+
+    def save_node_embedding(self, node_id: int, embedding_input: str, vector: list[float]) -> bool:
+        n = self.nodes.get(node_id)
+        if n is None or n["embedding_input"] != embedding_input:
+            return False
+        n["embedding"] = vector
+        return True
+
+    def fetch_matchable_nodes(self, estimate_id: int) -> list[MatchableNode]:
+        return [
+            MatchableNode(
+                id=n["id"], embedding=n["embedding"], embedding_input=n["embedding_input"]
+            )
+            for n in sorted(self.nodes.values(), key=lambda n: n["id"])
+            if n["estimate_id"] == estimate_id
+            and n["status"] in ("pending", "error", "no_match")
+            and n["embedding"] is not None
+        ]
+
+    def save_node_match(self, node_id: int, result: NodeMatch) -> None:
+        n = self.nodes[node_id]
+        n["status"] = str(result.status)
+        n["match_error"] = result.match_error  # на успехе result.match_error=None → обнуляется
+
+    def count_node_errors(self, estimate_id: int) -> int:
+        return sum(
+            1
+            for n in self.nodes.values()
+            if n["estimate_id"] == estimate_id and n["status"] == "error"
+        )
+
+    def count_unfinished_nodes(self, estimate_id: int) -> int:
+        return sum(
+            1
+            for n in self.nodes.values()
+            if n["estimate_id"] == estimate_id and n["status"] == "pending"
+        )

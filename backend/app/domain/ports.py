@@ -12,10 +12,13 @@ from app.domain.entities import (
     ArticleCandidate,
     Estimate,
     EstimateNode,
+    EstimateStatus,
     EstimateSummary,
     ExistingArticle,
     ImportPlan,
+    MatchableNode,
     NewEstimate,
+    NodeMatch,
     PendingEmbedding,
     TemplateArticle,
     TokenPayload,
@@ -51,6 +54,11 @@ class ArticleRepository(ABC):
         self, embedding: list[float], top_k: int = 3
     ) -> list[ArticleCandidate]:
         """Топ-K ближайших статей по эмбеддингу (cosine similarity)."""
+        ...
+
+    @abstractmethod
+    def matching_readiness(self) -> tuple[int, int]:
+        """(total, pending): всего статей и сколько с embedding IS NULL. Для gate матчинга."""
         ...
 
 
@@ -128,6 +136,16 @@ class EmbeddingQueueRepository(ABC):
         ...
 
 
+class TaskQueue(ABC):
+    """Постановка фоновых задач (Celery). Методы → None (без task-id — абстракция не течёт)."""
+
+    @abstractmethod
+    def enqueue_match(self, estimate_id: int) -> None: ...
+
+    @abstractmethod
+    def enqueue_articles_embed(self) -> None: ...
+
+
 class EstimateRepository(ABC):
     """Хранилище смет: создание (смета + узлы), список/чтение/удаление с владением."""
 
@@ -144,6 +162,64 @@ class EstimateRepository(ABC):
     def delete(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> str | None:
         """Удаляет смету (каскад строк). Возвращает original_object_key или None
         (не найдена/чужая)."""
+        ...
+
+    @abstractmethod
+    def try_matching_lock(self, estimate_id: int) -> bool:
+        """Неблокирующий session-level advisory-lock. False → занят (no-op)."""
+        ...
+
+    @abstractmethod
+    def release_matching_lock(self, estimate_id: int) -> None: ...
+
+    @abstractmethod
+    def set_status(
+        self, estimate_id: int, status: EstimateStatus, detail: str | None = None
+    ) -> None:
+        """Пишет статус + status_detail, бампает updated_at."""
+        ...
+
+    @abstractmethod
+    def touch(self, estimate_id: int) -> None:
+        """Heartbeat: бамп updated_at без смены статуса."""
+        ...
+
+    @abstractmethod
+    def get_status(self, estimate_id: int) -> str | None: ...
+
+    @abstractmethod
+    def fetch_unembedded_nodes(
+        self, estimate_id: int, after_id: int, limit: int
+    ) -> list[PendingEmbedding]:
+        """Узлы estimate с embedding IS NULL, id > after_id (keyset-курсор), по возрастанию id."""
+        ...
+
+    @abstractmethod
+    def save_node_embedding(
+        self, node_id: int, embedding_input: str, vector: list[float]
+    ) -> bool:
+        """CAS по embedding_input. True — записан."""
+        ...
+
+    @abstractmethod
+    def fetch_matchable_nodes(self, estimate_id: int) -> list[MatchableNode]:
+        """status ∈ {pending, error, no_match} И embedding IS NOT NULL."""
+        ...
+
+    @abstractmethod
+    def save_node_match(self, node_id: int, result: NodeMatch) -> None:
+        """Перезаписывает весь снимок узла (status/matched_*/score/candidates);
+        на успехе match_error→NULL."""
+        ...
+
+    @abstractmethod
+    def count_node_errors(self, estimate_id: int) -> int:
+        """Строго WHERE status='error'."""
+        ...
+
+    @abstractmethod
+    def count_unfinished_nodes(self, estimate_id: int) -> int:
+        """WHERE status='pending' (вектор не записался / не обработан)."""
         ...
 
 
