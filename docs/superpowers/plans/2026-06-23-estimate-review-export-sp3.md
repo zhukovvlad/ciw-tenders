@@ -1295,12 +1295,13 @@ def test_export_storage_down_503(
     client, auth_headers, estimate_repo, object_storage, seed_estimate_with_source_index
 ):
     eid, nid = seed_estimate_with_source_index(source_index=0)
-    # ключа нет в store → FakeObjectStorage.get кинет KeyError; адаптер переведёт в StorageError
+    # ключа нет в store → FakeObjectStorage.get кидает StorageError (контракт порта ObjectStorage.get,
+    # как реальный S3-адаптер) → роут отвечает 503, не 500.
     resp = client.get(f"/api/estimates/{eid}/export", headers=auth_headers)
     assert resp.status_code == 503
 ```
 
-> Реализатор добавляет фикстуры `object_storage` (FakeObjectStorage через override `get_object_storage`) и `seed_estimate_with_source_index(source_index)` в `conftest.py`. Для `test_export_storage_down_503` фейк-хранилище должно кидать `StorageError` на отсутствующий ключ — реализатор правит `FakeObjectStorage.get`: `try: return self.store[key] except KeyError: raise StorageError("нет объекта")`.
+> Реализатор добавляет фикстуры `object_storage` (FakeObjectStorage через override `get_object_storage`) и `seed_estimate_with_source_index(source_index)` в `conftest.py`. **Контракт `ObjectStorage.get`: на сбой/отсутствие объекта кидает `StorageError`** (реальный `S3ObjectStorage.get` уже так делает — мапит ошибки MinIO). Поэтому реализатор правит `FakeObjectStorage.get` под этот контракт: `try: return self.store[key]` / `except KeyError: raise StorageError("нет объекта")`. В `ports.py` к `ObjectStorage.get` добавить docstring `"""...; StorageError на сбой."""`.
 
 - [ ] **Step 4: Прогнать — падает**
 
@@ -1325,7 +1326,7 @@ from io import BytesIO
 import openpyxl
 
 from app.domain.entities import StoredEstimateRow
-from app.domain.errors import InvalidReviewActionError, StorageError
+from app.domain.errors import InvalidReviewActionError
 from app.domain.ports import EstimateRepository, ObjectStorage
 
 _HEADER = "статья смр"  # нормализованный заголовок-приёмник
@@ -1353,17 +1354,14 @@ class EstimateExportService:
                 raise InvalidReviewActionError(
                     f"Не просмотрено строк: {len(unreviewed)}"
                 )
-        try:
-            raw = self._storage.get(key)
-        except StorageError:
-            raise
+        raw = self._storage.get(key)  # сбой MinIO → StorageError долетит до роута → 503
         wb = openpyxl.load_workbook(BytesIO(raw))
         ws = wb.active
         col = self._find_or_create_column(ws)
         for row in est.rows:
-            value = self._cell_value(row)
-            if value is not None:
-                ws.cell(row=row.source_index + 2, column=col, value=value)
+            # пишем ВСЕГДА (в т.ч. "" для blank-случаев) — затирает старое значение
+            # приёмника при повторном экспорте/шаблоне с примерами.
+            ws.cell(row=row.source_index + 2, column=col, value=self._cell_value(row))
         out = BytesIO()
         wb.save(out)
         return out.getvalue()
@@ -1378,14 +1376,12 @@ class EstimateExportService:
         return col
 
     @staticmethod
-    def _cell_value(row: StoredEstimateRow) -> str | None:
+    def _cell_value(row: StoredEstimateRow) -> str:
         if row.review_status in ("confirmed", "overridden"):
-            return row.final_code  # для confirmed это matched_code (заморожен в правке)
-        if row.review_status == "rejected":
-            return None
+            return row.final_code or ""  # для confirmed это matched_code (заморожен в правке)
         if row.review_status == "unreviewed" and row.status == "confident":
-            return row.matched_code
-        return None  # unreviewed + needs_review/no_match/error/pending → пусто
+            return row.matched_code or ""
+        return ""  # rejected ИЛИ unreviewed + needs_review/no_match/error/pending → пусто
 ```
 
 > **Связка с SP1:** `source_index + 2` верно ровно пока SP1-парсер ([estimate_parser.py](../../backend/app/services/estimate_parser.py)) не меняет чтение (заголовок в строке 1, без `skiprows`/`dropna`/`reset_index`). Меняются в одном такте; golden раунд-трип (Step 3) — страж офсета.
@@ -1454,14 +1450,21 @@ git commit -m "feat(sp3): GET /estimates/{id}/export — .xlsx с «Статья
 **Files:**
 - Modify: `backend/app/domain/ports.py` (`EstimateRepository.is_stale_running`)
 - Modify: `backend/app/infrastructure/db/estimate_repository.py` (+`is_stale_running`)
-- Modify: `backend/app/api/routes/estimates.py` (`retrigger_match` — sweep)
-- Modify: `backend/tests/fakes.py` (`is_stale_running`)
-- Test: `backend/tests/test_estimate_sweep.py`
+- Modify: `backend/app/api/deps.py` (`_do_sweep`, `sweep_stale_running`, `get_stale_sweeper`)
+- Modify: `backend/app/api/routes/estimates.py` (`retrigger_match` — вызов инъектированного sweeper)
+- Modify: `backend/tests/fakes.py` (`is_stale_running`, поле `stale_running`)
+- Modify: `backend/tests/conftest.py` (override `get_stale_sweeper` на фейк-репо)
+- Test: `backend/tests/test_estimate_sweep.py`, `backend/tests/test_sweep_lock_integration.py`
 
 **Interfaces:**
 - Produces:
   - `EstimateRepository.is_stale_running(estimate_id, max_age_seconds: int) -> bool` — `status='running' AND updated_at < now() - max_age_seconds`.
-  - `retrigger_match`: перед enqueue, если `is_stale_running` И `try_matching_lock` берётся → `set_status(PENDING)` + release; `detail` отражает исход.
+  - `_do_sweep(repo, estimate_id, max_age_seconds) -> bool` — общая логика: `is_stale → try_lock → set_status(PENDING) → release` (используется и реальным sweeper, и фейк-override в тестах — без дублирования).
+  - `sweep_stale_running(estimate_id, max_age_seconds) -> bool` — обёртка `_do_sweep` на **ВЫДЕЛЕННОМ коннекте** (`engine.connect()` + `SessionLocal(bind=conn)`), как Celery-обёртка [tasks.py](../../backend/app/infrastructure/tasks/tasks.py). Критично: иначе `set_status` коммитит → коннект в пул → `release` на другом коннекте → лок течёт (грабли SP2 на новом call-site).
+  - `get_stale_sweeper() -> Callable[[int, int], bool]` — DI-провайдер (дефолт = `sweep_stale_running`; в тестах override на фейк).
+  - `retrigger_match`: при `status='running'` зовёт инъектированный `sweeper(estimate_id, task_time_limit_s)`; `detail` отражает исход.
+
+> **Почему sweeper инъектируется, а не делается в роуте на request-сессии:** критическая секция лока обязана держать ОДИН коннект через `try_lock → set_status → release` (commit не должен вернуть коннект в пул) — это инфраструктурная забота на выделенном коннекте, мимо фейка. Поэтому реальный sweeper уходит за DI, юнит-тесты роута подменяют его фейк-версией на фейк-репо, а корректность коннекта закрывает интеграц-тест (Step 8, skip без реальной БД) — ровно как лок-тест SP2.
 
 - [ ] **Step 1: Failing-тест**
 
@@ -1499,6 +1502,8 @@ def test_retrigger_stale_but_lock_held_no_reset(client, auth_headers, estimate_r
     assert resp.status_code == 202
     assert estimate_repo.statuses[eid] == "running"  # не тронуто — лок занят
 ```
+
+> Эти тесты работают через **override `get_stale_sweeper`** на фейк-версию поверх фейк-репо (см. Step 6 + conftest-врезка): реальный sweeper ходит на выделенный коннект к БД, поэтому в юнитах подменяется. Фейк-sweeper зовёт ту же `_do_sweep(estimate_repo, ...)`, что и реальный, — branching `is_stale → try_lock → reset` покрыт, а корректность коннекта — в Step 8.
 
 - [ ] **Step 2: Фейк `is_stale_running` + поле**
 
@@ -1543,7 +1548,52 @@ Expected: FAIL (detail/статус не совпадают).
 
 - [ ] **Step 5: Sweep в `retrigger_match`**
 
-Заменить тело `retrigger_match` (`routes/estimates.py` строки ~32-48) на (нужны `get_settings`, `Settings`, `EstimateStatus`):
+- [ ] **Step 5: deps-хелперы — sweep на выделенном коннекте + DI-провайдер**
+
+В `deps.py` добавить (нужны `Callable` из `collections.abc`, `EstimateStatus`):
+
+```python
+def _do_sweep(repo: EstimateRepository, estimate_id: int, max_age_seconds: int) -> bool:
+    """Общая логика sweep: лок = арбитр живости (занят → воркер жив → no-op)."""
+    if not repo.is_stale_running(estimate_id, max_age_seconds):
+        return False
+    if not repo.try_matching_lock(estimate_id):
+        return False
+    try:
+        repo.set_status(
+            estimate_id, EstimateStatus.PENDING, detail="сброшено после сбоя воркера"
+        )
+        return True
+    finally:
+        repo.release_matching_lock(estimate_id)
+
+
+def sweep_stale_running(estimate_id: int, max_age_seconds: int) -> bool:
+    """Сброс зависшего running→pending на ВЫДЕЛЕННОМ коннекте (как Celery-обёртка tasks.py):
+    try_lock → set_status → release держатся на ОДНОМ коннекте, иначе commit вернёт его в пул
+    и release/lock утекут (грабли SP2 на новом call-site)."""
+    from app.infrastructure.db.session import SessionLocal, engine
+
+    conn = engine.connect()
+    try:
+        session = SessionLocal(bind=conn)  # bind=conn → commit() не вернёт коннект в пул
+        try:
+            return _do_sweep(SqlAlchemyEstimateRepository(session), estimate_id, max_age_seconds)
+        finally:
+            session.close()  # внешний conn НЕ закрывает
+    finally:
+        conn.close()  # лок уже снят в _do_sweep → коннект в пул чистым
+
+
+def get_stale_sweeper() -> Callable[[int, int], bool]:
+    return sweep_stale_running
+```
+
+Добавить в начало `deps.py`: `from collections.abc import Callable` и `from app.domain.entities import EstimateStatus` (если ещё не импортированы). `SqlAlchemyEstimateRepository` уже импортирован (используется в `get_estimate_repository`).
+
+- [ ] **Step 6: Роут зовёт инъектированный sweeper + conftest-override**
+
+Заменить тело `retrigger_match` (`routes/estimates.py` строки ~32-48) на:
 
 ```python
 @router.post("/{estimate_id}/match", status_code=status.HTTP_202_ACCEPTED)
@@ -1553,24 +1603,15 @@ def retrigger_match(
     repository: EstimateRepository = Depends(get_estimate_repository),
     task_queue: TaskQueue = Depends(get_task_queue),
     settings: Settings = Depends(get_settings),
+    sweeper: Callable[[int, int], bool] = Depends(get_stale_sweeper),
 ) -> dict[str, str]:
     est = repository.get(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN)
     if est is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
 
-    swept = False
-    if est.status == "running" and repository.is_stale_running(
-        estimate_id, settings.task_time_limit_s
-    ):
-        # try_advisory_lock — арбитр живости: взялся → прежний держатель мёртв → сбрасываем.
-        if repository.try_matching_lock(estimate_id):
-            try:
-                repository.set_status(
-                    estimate_id, EstimateStatus.PENDING, detail="сброшено после сбоя воркера"
-                )
-                swept = True
-            finally:
-                repository.release_matching_lock(estimate_id)
+    # Зависший running после жёсткого краша воркера: sweeper на выделенном коннекте берёт
+    # advisory-лок как арбитр живости (занят → воркер жив → no-op) и сбрасывает running→pending.
+    swept = est.status == "running" and sweeper(estimate_id, settings.task_time_limit_s)
 
     task_queue.enqueue_match(estimate_id)
     if swept:
@@ -1582,23 +1623,70 @@ def retrigger_match(
     return {"status": "accepted", "detail": detail}
 ```
 
-Добавить импорты в `routes/estimates.py`: `from app.api.deps import get_settings`, `from app.core.config import Settings` (уже есть), `from app.domain.entities import EstimateStatus, Role, User`.
+Импорты в `routes/estimates.py`: `from collections.abc import Callable`; `from app.api.deps import get_settings, get_stale_sweeper`; `from app.core.config import Settings` (уже есть); `from app.domain.entities import Role, User` (уже есть — `EstimateStatus` роуту больше не нужен, sweep ушёл в deps).
 
-- [ ] **Step 6: Прогнать**
+В `conftest.py` (там же, где общие override фикстур) — подменить sweeper на фейк-версию поверх фейк-репо:
+
+```python
+from app.api.deps import _do_sweep, get_stale_sweeper
+
+# в фикстуре, монтирующей фейки (рядом с override get_estimate_repository = lambda: estimate_repo):
+app.dependency_overrides[get_stale_sweeper] = lambda: (
+    lambda eid, age: _do_sweep(estimate_repo, eid, age)
+)
+```
+
+- [ ] **Step 7: Прогнать unit-тесты sweep**
 
 Run: `cd backend && PYTHONIOENCODING=utf-8 uv run pytest tests/test_estimate_sweep.py -v`
 Expected: 3 passed.
 
-- [ ] **Step 7: Ruff + полный бэк-прогон + коммит**
+- [ ] **Step 8: Интеграц-тест корректности коннекта (skip без реальной БД)**
+
+Create `backend/tests/test_sweep_lock_integration.py` (по образцу `test_estimate_lock_integration.py` — opt-in `RUN_LOCK_INTEGRATION=1` + реальный `DATABASE_URL`):
+
+```python
+from __future__ import annotations
+
+import os
+
+import pytest
+
+from app.api.deps import sweep_stale_running
+from app.infrastructure.db.estimate_repository import SqlAlchemyEstimateRepository
+from app.infrastructure.db.session import SessionLocal, engine
+
+_RUN = os.environ.get("RUN_LOCK_INTEGRATION") == "1"
+_SKIP = "нужен реальный Postgres: RUN_LOCK_INTEGRATION=1 + реальный DATABASE_URL"
+
+
+@pytest.mark.skipif(not _RUN, reason=_SKIP)
+def test_sweep_does_not_strand_lock() -> None:
+    # sweep на несуществующей смете: is_stale=False → лок НЕ берётся. Главное — критическая
+    # секция на выделенном коннекте не оставляет лок занятым (повтор грабель SP2 = утечка).
+    assert sweep_stale_running(999_999, max_age_seconds=0) is False
+    probe = engine.connect()
+    try:
+        r = SqlAlchemyEstimateRepository(SessionLocal(bind=probe))
+        assert r.try_matching_lock(999_999) is True  # лок свободен — ничего не застряло
+        r.release_matching_lock(999_999)
+    finally:
+        probe.exec_driver_sql("SELECT pg_advisory_unlock_all()")
+        probe.close()
+```
+
+> Страж того, что критическая секция sweep не стрэндит лок (повтор грабель SP2). Полный сценарий «реальная running-смета → sweep берёт лок на c1, set_status COMMIT, release; c2 видит свободу» — опционально расширить при наличии смета-фикстуры; минимум выше уже ловит утечку коннекта.
+
+- [ ] **Step 9: Ruff + полный бэк-прогон + коммит**
 
 ```bash
 cd backend && uv run ruff check .
 cd backend && PYTHONIOENCODING=utf-8 uv run pytest
-git add backend/app/domain/ports.py backend/app/infrastructure/db/estimate_repository.py backend/app/api/routes/estimates.py backend/tests/fakes.py backend/tests/test_estimate_sweep.py
-git commit -m "feat(sp3): staleness-sweep на ре-триггере — мёртвый running→pending под арбитражем лока"
+git add backend/app/domain/ports.py backend/app/infrastructure/db/estimate_repository.py backend/app/api/deps.py backend/app/api/routes/estimates.py backend/tests/fakes.py backend/tests/conftest.py backend/tests/test_estimate_sweep.py backend/tests/test_sweep_lock_integration.py
+git commit -m "feat(sp3): staleness-sweep на ре-триггере — running→pending на выделенном коннекте (лок не течёт)"
 ```
 
-Expected полного прогона: всё passed (1 skipped — lock-интеграция SP2, как в SP2).
+Expected полного прогона: всё passed (2 skipped — lock-интеграция SP2 + sweep-интеграция SP3).
 
 ---
 
