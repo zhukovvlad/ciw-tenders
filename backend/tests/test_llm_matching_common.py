@@ -61,6 +61,13 @@ def test_code_like_answer_out_of_range_is_none(caplog) -> None:
     assert caplog.records  # это сбой формата → warning
 
 
+def test_negative_number_is_none_not_misroute(caplog) -> None:
+    # "-1" не должен мапиться на candidates[0]: знаковый токен → вне диапазона → None (warning)
+    with caplog.at_level(logging.WARNING):
+        assert parse_choice("-1", _three()) is None
+    assert caplog.records
+
+
 def test_garbage_is_none_with_warning(caplog) -> None:
     with caplog.at_level(logging.WARNING):
         assert parse_choice("не знаю", _three()) is None

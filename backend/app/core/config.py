@@ -78,8 +78,14 @@ class Settings(BaseSettings):
             )
         if self.llm_provider == "openrouter" and not self.openrouter_api_key:
             raise ValueError("LLM_PROVIDER=openrouter требует OPENROUTER_API_KEY")
+        if self.llm_provider == "openrouter" and not self.openrouter_llm_model.strip():
+            raise ValueError("LLM_PROVIDER=openrouter требует непустой OPENROUTER_LLM_MODEL")
+        if self.llm_provider == "openrouter" and not self.openrouter_base_url.strip():
+            raise ValueError("LLM_PROVIDER=openrouter требует непустой OPENROUTER_BASE_URL")
         if self.llm_provider == "anthropic" and not self.anthropic_api_key:
             raise ValueError("LLM_PROVIDER=anthropic требует ANTHROPIC_API_KEY")
+        if self.llm_provider == "anthropic" and not self.anthropic_llm_model.strip():
+            raise ValueError("LLM_PROVIDER=anthropic требует непустой ANTHROPIC_LLM_MODEL")
         return self
 
 

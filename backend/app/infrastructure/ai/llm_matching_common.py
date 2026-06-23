@@ -35,9 +35,10 @@ def parse_choice(text: str, candidates: list[ArticleCandidate]) -> TemplateArtic
     """Первый целочисленный токен ответа → кандидат. 0/нет числа/вне диапазона → None (отказ).
 
     `0` отсекается ДО индексации (иначе candidates[-1] на choice=0 — ложный матч).
+    Знак учитывается: «-1» парсится как отрицательное → вне диапазона → None, а не candidates[0].
     Warning только на непустой-не-«0»-непарсящийся ответ (легитимный отказ ≠ сбой формата).
     """
-    match = re.search(r"\d+", text)
+    match = re.search(r"-?\d+", text)
     if match is None:
         if text.strip():
             logger.warning("LLM-арбитр вернул нечитаемый ответ: %r", text)

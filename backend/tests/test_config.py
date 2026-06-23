@@ -64,8 +64,9 @@ def test_unknown_provider_fails(monkeypatch) -> None:
     from app.core.config import Settings
 
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc:
         Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
+    assert "LLM_PROVIDER должен быть из" in str(exc.value)
 
 
 def test_missing_key_for_provider_fails(monkeypatch) -> None:
@@ -76,8 +77,9 @@ def test_missing_key_for_provider_fails(monkeypatch) -> None:
 
     monkeypatch.setenv("LLM_PROVIDER", "openrouter")
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc:
         Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
+    assert "OPENROUTER_API_KEY" in str(exc.value)
 
 
 def test_deprecated_llm_model_fails(monkeypatch) -> None:
@@ -87,5 +89,6 @@ def test_deprecated_llm_model_fails(monkeypatch) -> None:
     from app.core.config import Settings
 
     monkeypatch.setenv("LLM_MODEL", "claude-3-5-sonnet-20240620")
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc:
         Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
+    assert "LLM_MODEL устарел" in str(exc.value)
