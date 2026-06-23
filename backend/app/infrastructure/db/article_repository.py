@@ -85,3 +85,12 @@ class SqlAlchemyArticleRepository(ArticleRepository):
             ArticleCandidate(article=self._to_entity(model), score=1.0 - float(dist))
             for model, dist in self._session.execute(stmt)
         ]
+
+    def matching_readiness(self) -> tuple[int, int]:
+        total = self._session.scalar(select(func.count()).select_from(TemplateArticleModel)) or 0
+        pending = self._session.scalar(
+            select(func.count()).select_from(TemplateArticleModel).where(
+                TemplateArticleModel.embedding.is_(None)
+            )
+        ) or 0
+        return int(total), int(pending)

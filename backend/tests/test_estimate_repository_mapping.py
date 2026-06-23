@@ -24,3 +24,20 @@ def test_estimate_mapping_excludes_object_key() -> None:
     entity = SqlAlchemyEstimateRepository._to_entity(est, [])
     assert entity.user_id == 7 and entity.filename == "смета.xlsx"
     assert not hasattr(entity, "original_object_key")
+
+
+def test_match_values_overwrites_full_snapshot() -> None:
+    from app.domain.entities import EstimateRowStatus, MatchCandidate, NodeMatch
+    from app.infrastructure.db.estimate_repository import SqlAlchemyEstimateRepository
+
+    # успех обнуляет match_error
+    ok = SqlAlchemyEstimateRepository._match_values(
+        NodeMatch(EstimateRowStatus.CONFIDENT, 5, "1.1", "X", 0.95,
+                  [MatchCandidate(5, "1.1", "X", 0.95)])
+    )
+    assert ok["status"] == "confident" and ok["match_error"] is None
+    assert ok["candidates"] == [{"id": 5, "code": "1.1", "name": "X", "score": 0.95}]
+
+    # пустой снимок (no_match) → candidates None, score None
+    nm = SqlAlchemyEstimateRepository._match_values(NodeMatch(EstimateRowStatus.NO_MATCH))
+    assert nm["candidates"] is None and nm["score"] is None and nm["matched_article_id"] is None
