@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import (
     get_current_user,
+    get_estimate_export_service,
     get_estimate_repository,
     get_estimate_review_service,
     get_estimate_service,
@@ -23,6 +25,7 @@ from app.core.config import Settings
 from app.domain.entities import Role, User
 from app.domain.errors import InvalidReviewActionError, RowNotMatchedError, StorageError
 from app.domain.ports import EstimateRepository, TaskQueue
+from app.services.estimate_export_service import EstimateExportService
 from app.services.estimate_review_service import EstimateReviewService
 from app.services.estimate_service import EstimateService
 
@@ -142,3 +145,28 @@ def review_row(
     except InvalidReviewActionError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     return EstimateRowOut.from_entity(row)
+
+
+@router.get("/{estimate_id}/export")
+def export_estimate(
+    estimate_id: int,
+    strict: bool = Query(False),
+    user: User = Depends(get_current_user),
+    service: EstimateExportService = Depends(get_estimate_export_service),
+) -> StreamingResponse:
+    try:
+        data = service.export(
+            estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN, strict=strict
+        )
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except InvalidReviewActionError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Хранилище недоступно") from exc
+    filename = "estimate_matched.xlsx"
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

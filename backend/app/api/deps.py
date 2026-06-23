@@ -39,6 +39,7 @@ from app.infrastructure.db.user_repository import SqlAlchemyUserRepository
 from app.infrastructure.storage.s3_object_storage import S3ObjectStorage
 from app.services.article_service import ArticleService
 from app.services.auth_service import AuthService
+from app.services.estimate_export_service import EstimateExportService
 from app.services.estimate_matching_service import EstimateMatchingService
 from app.services.estimate_parser import EstimateParser
 from app.services.estimate_review_service import EstimateReviewService
@@ -231,3 +232,10 @@ def get_estimate_service(
     return EstimateService(
         parser=parser, repository=repository, storage=storage, task_queue=task_queue
     )
+
+
+def get_estimate_export_service(
+    repository: EstimateRepository = Depends(get_estimate_repository),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> EstimateExportService:
+    return EstimateExportService(estimates=repository, storage=storage)

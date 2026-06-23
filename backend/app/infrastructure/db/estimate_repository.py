@@ -303,3 +303,11 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 )
             ) or 0
         )
+
+    def get_object_key(
+        self, estimate_id: int, requester_id: int, *, is_admin: bool
+    ) -> str | None:
+        est = self._session.get(EstimateModel, estimate_id)
+        if est is None or (not is_admin and est.user_id != requester_id):
+            return None
+        return est.original_object_key

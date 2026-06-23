@@ -307,7 +307,10 @@ class FakeObjectStorage(ObjectStorage):
         self.store[key] = data
 
     def get(self, key: str) -> bytes:
-        return self.store[key]
+        try:
+            return self.store[key]
+        except KeyError as exc:
+            raise StorageError(f"Объект не найден: {key!r}") from exc
 
     def delete(self, key: str) -> None:
         self.delete_calls.append(key)
@@ -544,3 +547,11 @@ class FakeEstimateRepository(EstimateRepository):
             for n in self.nodes.values()
             if n["estimate_id"] == estimate_id and n["status"] == "pending"
         )
+
+    def get_object_key(
+        self, estimate_id: int, requester_id: int, *, is_admin: bool
+    ) -> str | None:
+        est = self.estimates.get(estimate_id)
+        if est is None or (not is_admin and est.user_id != requester_id):
+            return None
+        return self._keys.get(estimate_id)

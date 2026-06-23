@@ -156,3 +156,54 @@ def seed_estimate(estimate_repo):
     eid = est.id
     nid = est.rows[0].id
     return eid, nid
+
+
+@pytest.fixture()
+def object_storage(client, estimate_repo):
+    """FakeObjectStorage смонтированная через get_estimate_export_service override.
+
+    Контракт ObjectStorage.get: кидает StorageError на сбой/отсутствие объекта
+    (FakeObjectStorage.get реализует это через try/except KeyError → StorageError).
+    """
+    from app.api.deps import get_estimate_export_service
+    from app.main import app
+    from app.services.estimate_export_service import EstimateExportService
+    from tests.fakes import FakeObjectStorage
+
+    storage = FakeObjectStorage()
+
+    def _export_svc() -> EstimateExportService:
+        return EstimateExportService(estimates=estimate_repo, storage=storage)
+
+    app.dependency_overrides[get_estimate_export_service] = _export_svc
+    yield storage
+    app.dependency_overrides.pop(get_estimate_export_service, None)
+
+
+@pytest.fixture()
+def seed_estimate_with_source_index(estimate_repo):
+    """Фабрика: создаёт смету с одним узлом с заданным source_index.
+
+    Строит EstimateNode напрямую (минуя парсер), чтобы получить произвольный source_index.
+    Ключ объекта = "key" (тесты кладут данные в object_storage.store["key"]).
+    Возвращает callable(source_index) → (estimate_id, node_id).
+    """
+    from app.domain.entities import EstimateNode, NewEstimate
+
+    def _factory(*, source_index: int) -> tuple[int, int]:
+        node = EstimateNode(
+            code="1",
+            name="Тестовый узел",
+            parent_code=None,
+            section_type="СМР",
+            embedding_input="1 Тестовый узел",
+            source_index=source_index,
+            depth=1,
+        )
+        est = estimate_repo.create(
+            NewEstimate(user_id=1, filename="export_test.xlsx", original_object_key="key"),
+            [node],
+        )
+        return est.id, est.rows[0].id
+
+    return _factory

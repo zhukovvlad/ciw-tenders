@@ -253,6 +253,13 @@ class EstimateRepository(ABC):
         """WHERE status='pending' (вектор не записался / не обработан)."""
         ...
 
+    @abstractmethod
+    def get_object_key(
+        self, estimate_id: int, requester_id: int, *, is_admin: bool
+    ) -> str | None:
+        """original_object_key с проверкой владения (None — не найдена/чужая)."""
+        ...
+
 
 class ObjectStorage(ABC):
     """Объектное хранилище (MinIO/S3) для исходных файлов."""
@@ -261,7 +268,9 @@ class ObjectStorage(ABC):
     def put(self, key: str, data: bytes, content_type: str) -> None: ...
 
     @abstractmethod
-    def get(self, key: str) -> bytes: ...
+    def get(self, key: str) -> bytes:
+        """Возвращает содержимое объекта. Кидает StorageError на сбой или отсутствие объекта."""
+        ...
 
     @abstractmethod
     def delete(self, key: str) -> None: ...
