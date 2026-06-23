@@ -119,6 +119,15 @@ class EstimateRowStatus(StrEnum):
     ERROR = "error"
 
 
+class ReviewStatus(StrEnum):
+    """Ось ревью поверх иммутабельного AI-снимка (status). Независима от EstimateRowStatus."""
+
+    UNREVIEWED = "unreviewed"
+    CONFIRMED = "confirmed"   # согласие с рекомендацией AI (matched_*)
+    OVERRIDDEN = "overridden"  # выбран другой кандидат или ручной подбор
+    REJECTED = "rejected"      # явно «статьи нет»
+
+
 class EstimateStatus(StrEnum):
     """Статус сметы в пайплайне матчинга."""
 
@@ -188,9 +197,16 @@ class StoredEstimateRow:
     source_index: int
     status: str
     has_embedding: bool = False
+    matched_article_id: int | None = None
     matched_code: str | None = None
     matched_name: str | None = None
     score: float | None = None
+    candidates: list[MatchCandidate] = field(default_factory=list)
+    review_status: str = "unreviewed"
+    final_article_id: int | None = None
+    final_code: str | None = None
+    final_name: str | None = None
+    reviewed_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

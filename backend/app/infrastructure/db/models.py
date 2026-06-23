@@ -117,3 +117,12 @@ class EstimateRowModel(Base):
     score: Mapped[float | None] = mapped_column(Double, nullable=True)
     candidates: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     match_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="unreviewed"
+    )
+    final_article_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    final_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    final_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
