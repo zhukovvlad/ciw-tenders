@@ -5,21 +5,19 @@ describe("MOCK_ROWS", () => {
   it("содержит 15 строк СМР", () => {
     expect(MOCK_ROWS).toHaveLength(15)
   })
-  it("у каждой needs_review есть ровно 3 кандидата и rationale", () => {
+  it("у каждой needs_review есть ровно 3 кандидата и matched_code", () => {
     const review = MOCK_ROWS.filter((r) => r.status === "needs_review")
     expect(review.length).toBeGreaterThan(0)
     for (const r of review) {
       expect(r.candidates).toHaveLength(3)
-      expect(r.rationale).toBeTruthy()
       expect(r.matched_code).toBeTruthy()
     }
   })
-  it("confident-строки имеют matched_code и не имеют rationale", () => {
+  it("confident-строки имеют matched_code", () => {
     const conf = MOCK_ROWS.filter((r) => r.status === "confident")
     expect(conf.length).toBeGreaterThan(0)
     for (const r of conf) {
       expect(r.matched_code).toBeTruthy()
-      expect(r.rationale).toBeNull()
     }
   })
   it("no_match-строки без matched_code", () => {

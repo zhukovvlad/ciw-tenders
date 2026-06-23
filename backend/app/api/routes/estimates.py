@@ -2,24 +2,34 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from collections.abc import Callable
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import (
     get_current_user,
+    get_estimate_export_service,
     get_estimate_repository,
+    get_estimate_review_service,
     get_estimate_service,
     get_settings,
+    get_stale_sweeper,
     get_task_queue,
 )
 from app.api.schemas import (
     EstimateDetailOut,
+    EstimateRowOut,
     EstimateSummaryOut,
     EstimateUploadResponse,
+    ReviewDecisionIn,
 )
 from app.core.config import Settings
 from app.domain.entities import Role, User
-from app.domain.errors import StorageError
+from app.domain.errors import InvalidReviewActionError, RowNotMatchedError, StorageError
 from app.domain.ports import EstimateRepository, TaskQueue
+from app.services.estimate_export_service import EstimateExportService
+from app.services.estimate_review_service import EstimateReviewService
 from app.services.estimate_service import EstimateService
 
 router = APIRouter(
@@ -35,16 +45,24 @@ def retrigger_match(
     user: User = Depends(get_current_user),
     repository: EstimateRepository = Depends(get_estimate_repository),
     task_queue: TaskQueue = Depends(get_task_queue),
+    settings: Settings = Depends(get_settings),
+    sweeper: Callable[[int, int], bool] = Depends(get_stale_sweeper),
 ) -> dict[str, str]:
     est = repository.get(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN)
     if est is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
-    # Ре-триггер разрешён из ЛЮБОГО статуса своей сметы (осознанно шире, чем ранний список):
-    # из ready это доматчит no_match-строки после расширения справочника; matchable-фильтр
-    # (status ∈ {pending,error,no_match}) гарантирует иммутабельность confident/needs_review.
+
+    # Зависший running после жёсткого краша воркера: sweeper на выделенном коннекте берёт
+    # advisory-лок как арбитр живости (занят → воркер жив → no-op) и сбрасывает running→pending.
+    swept = est.status == "running" and sweeper(estimate_id, settings.task_time_limit_s)
+
     task_queue.enqueue_match(estimate_id)
-    # честный ответ: если идёт — задача-дубль возьмёт no-op (живой держатель) / дозаберёт (зависла)
-    detail = "уже выполняется" if est.status == "running" else "поставлено в очередь"
+    if swept:
+        detail = "перезапущено после сбоя"
+    elif est.status == "running":
+        detail = "уже выполняется"
+    else:
+        detail = "поставлено в очередь"
     return {"status": "accepted", "detail": detail}
 
 
@@ -116,3 +134,50 @@ def delete_estimate(
 ) -> None:
     if not service.delete(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
+
+
+@router.patch("/{estimate_id}/rows/{row_id}/review", response_model=EstimateRowOut)
+def review_row(
+    estimate_id: int,
+    row_id: int,
+    decision: ReviewDecisionIn,
+    user: User = Depends(get_current_user),
+    service: EstimateReviewService = Depends(get_estimate_review_service),
+) -> EstimateRowOut:
+    try:
+        row = service.apply(
+            estimate_id, row_id, decision.action, decision.article_id,
+            user.id or 0, is_admin=user.role is Role.ADMIN,
+        )
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except RowNotMatchedError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except InvalidReviewActionError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return EstimateRowOut.from_entity(row)
+
+
+@router.get("/{estimate_id}/export")
+def export_estimate(
+    estimate_id: int,
+    strict: bool = Query(False),
+    user: User = Depends(get_current_user),
+    service: EstimateExportService = Depends(get_estimate_export_service),
+) -> StreamingResponse:
+    try:
+        data = service.export(
+            estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN, strict=strict
+        )
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except InvalidReviewActionError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Хранилище недоступно") from exc
+    filename = "estimate_matched.xlsx"
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

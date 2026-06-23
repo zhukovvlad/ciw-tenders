@@ -46,3 +46,11 @@ class DictionaryNotReadyError(Exception):
         self.total = total
         self.pending = pending
         super().__init__(f"справочник не готов: total={total} pending={pending}")
+
+
+class RowNotMatchedError(Exception):
+    """Строка ещё не сматчена (status=pending) — ревью невозможно. → 409."""
+
+
+class InvalidReviewActionError(Exception):
+    """Действие не применимо к строке (confirm без matched_*, статья не найдена). → 422."""

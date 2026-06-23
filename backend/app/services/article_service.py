@@ -44,6 +44,9 @@ class ArticleService:
         )
         return self._repository.add(article)
 
+    def search(self, q: str, limit: int = 20) -> list[TemplateArticle]:
+        return self._repository.search(q, limit=limit)
+
     def list(self, limit: int = 100, offset: int = 0) -> list[TemplateArticle]:
         return self._repository.list_all(limit=limit, offset=offset)
 

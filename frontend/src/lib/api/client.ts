@@ -67,6 +67,13 @@ export async function apiSend<T>(
   return res.json() as Promise<T>
 }
 
+// Бинарная загрузка (напр. экспорт .xlsx) через общий request — токен и обработка
+// ошибок (ApiError) централизованы здесь, как требует auth-storage-контракт.
+export async function apiGetBlob(path: string): Promise<Blob> {
+  const res = await request(path, { headers: { ...authHeaders() } })
+  return res.blob()
+}
+
 export async function apiUpload<T>(path: string, file: File): Promise<T> {
   const form = new FormData()
   form.append("file", file)

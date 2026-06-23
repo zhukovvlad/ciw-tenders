@@ -13,6 +13,7 @@ from app.domain.entities import (
     ExistingArticle,
     ImportPlan,
     MatchableNode,
+    MatchCandidate,
     NewEstimate,
     NodeMatch,
     PendingEmbedding,
@@ -64,6 +65,9 @@ class FakeRepository(ArticleRepository):
     def get_by_code(self, code: str) -> TemplateArticle | None:
         return next((a for a in self._store if a.article_code == code), None)
 
+    def get_by_id(self, article_id: int) -> TemplateArticle | None:
+        return next((a for a in self._store if a.id == article_id), None)
+
     def list_all(self, limit: int = 100, offset: int = 0) -> list[TemplateArticle]:
         return self._store[offset : offset + limit]
 
@@ -79,12 +83,86 @@ class FakeRepository(ArticleRepository):
         prefix = f"{code}."
         return any(a.article_code.startswith(prefix) for a in self._store)
 
+    def search(self, q: str, limit: int = 20) -> list[TemplateArticle]:
+        ql = q.lower()
+        hits = [
+            a for a in self._store
+            if ql in a.article_code.lower() or ql in a.name.lower()
+        ]
+        return sorted(hits, key=lambda a: a.article_code)[:limit]
+
     def search_similar(self, embedding: list[float], top_k: int = 3) -> list[ArticleCandidate]:
         return self._candidates[:top_k]
 
     def matching_readiness(self) -> tuple[int, int]:
         total = len(self._store)
         pending = sum(1 for a in self._store if a.embedding is None)
+        return total, pending
+
+
+class FakeArticleRepository(ArticleRepository):
+    """In-memory ArticleRepository для тестов SP3 (ревью)."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, TemplateArticle] = {}  # code -> TemplateArticle
+
+    def add_article(self, *, id: int, code: str, name: str) -> None:
+        """Хелпер: кладёт TemplateArticle с фиксированным id (для тестов pick из каталога)."""
+        self.rows[code] = TemplateArticle(
+            id=id,
+            article_code=code,
+            name=name,
+            embedding_input=f"{code} {name}",
+            embedding=None,
+        )
+
+    def add(self, article: TemplateArticle) -> TemplateArticle:
+        stored = TemplateArticle(
+            id=len(self.rows) + 1,
+            parent_id=article.parent_id,
+            article_code=article.article_code,
+            name=article.name,
+            embedding_input=article.embedding_input,
+            embedding=article.embedding,
+        )
+        self.rows[article.article_code] = stored
+        return stored
+
+    def get_by_code(self, code: str) -> TemplateArticle | None:
+        return self.rows.get(code)
+
+    def get_by_id(self, article_id: int) -> TemplateArticle | None:
+        return next((a for a in self.rows.values() if a.id == article_id), None)
+
+    def list_all(self, limit: int = 100, offset: int = 0) -> list[TemplateArticle]:
+        return list(self.rows.values())[offset : offset + limit]
+
+    def delete(self, article_id: int) -> None:
+        self.rows = {k: v for k, v in self.rows.items() if v.id != article_id}
+
+    def delete_all(self) -> int:
+        n = len(self.rows)
+        self.rows = {}
+        return n
+
+    def has_descendant_codes(self, code: str) -> bool:
+        prefix = f"{code}."
+        return any(a.article_code.startswith(prefix) for a in self.rows.values())
+
+    def search(self, q: str, limit: int = 20) -> list[TemplateArticle]:
+        ql = q.lower()
+        hits = [
+            a for a in self.rows.values()
+            if ql in a.article_code.lower() or ql in a.name.lower()
+        ]
+        return sorted(hits, key=lambda a: a.article_code)[:limit]
+
+    def search_similar(self, embedding: list[float], top_k: int = 3) -> list[ArticleCandidate]:
+        return []
+
+    def matching_readiness(self) -> tuple[int, int]:
+        total = len(self.rows)
+        pending = sum(1 for a in self.rows.values() if a.embedding is None)
         return total, pending
 
 
@@ -229,7 +307,10 @@ class FakeObjectStorage(ObjectStorage):
         self.store[key] = data
 
     def get(self, key: str) -> bytes:
-        return self.store[key]
+        try:
+            return self.store[key]
+        except KeyError as exc:
+            raise StorageError(f"Объект не найден: {key!r}") from exc
 
     def delete(self, key: str) -> None:
         self.delete_calls.append(key)
@@ -260,6 +341,7 @@ class FakeEstimateRepository(EstimateRepository):
         self.details: dict[int, str | None] = {}
         self.touch_count: dict[int, int] = {}
         self._locks: set[int] = set()
+        self.stale_running: set[int] = set()
         self._node_seq = 0
 
     def create(self, new: NewEstimate, nodes: list[EstimateNode]) -> Estimate:
@@ -277,6 +359,16 @@ class FakeEstimateRepository(EstimateRepository):
                 "embedding": None,
                 "status": "pending",
                 "match_error": None,
+                "matched_article_id": None,
+                "matched_code": None,
+                "matched_name": None,
+                "score": None,
+                "candidates": [],
+                "review_status": "unreviewed",
+                "final_article_id": None,
+                "final_code": None,
+                "final_name": None,
+                "reviewed_at": None,
             }
             rows.append(
                 StoredEstimateRow(
@@ -324,7 +416,31 @@ class FakeEstimateRepository(EstimateRepository):
         est = self.estimates.get(estimate_id)
         if est is None or (not is_admin and est.user_id != requester_id):
             return None
-        return est
+        rows = [self._row_entity(r, self.nodes[r.id]) for r in est.rows]
+        return Estimate(
+            id=est.id, user_id=est.user_id, filename=est.filename,
+            status=self.statuses.get(est.id, est.status),
+            created_at=est.created_at, rows=rows,
+            status_detail=self.details.get(est.id),
+        )
+
+    @staticmethod
+    def _row_entity(base: StoredEstimateRow, n: dict) -> StoredEstimateRow:
+        return StoredEstimateRow(
+            id=base.id, code=base.code, name=base.name, parent_code=base.parent_code,
+            section_type=base.section_type, depth=base.depth,
+            embedding_input=base.embedding_input, source_index=base.source_index,
+            status=n["status"], has_embedding=n["embedding"] is not None,
+            matched_article_id=n["matched_article_id"], matched_code=n["matched_code"],
+            matched_name=n["matched_name"], score=n["score"],
+            candidates=[
+                MatchCandidate(id=c.get("id"), code=c["code"], name=c["name"], score=c["score"])
+                for c in n["candidates"]
+            ],
+            review_status=n["review_status"], final_article_id=n["final_article_id"],
+            final_code=n["final_code"], final_name=n["final_name"],
+            reviewed_at=n["reviewed_at"],
+        )
 
     def delete(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> str | None:
         est = self.estimates.get(estimate_id)
@@ -355,6 +471,12 @@ class FakeEstimateRepository(EstimateRepository):
 
     def get_status(self, estimate_id: int) -> str | None:
         return self.statuses.get(estimate_id)
+
+    def is_stale_running(self, estimate_id: int, max_age_seconds: int) -> bool:
+        return (
+            self.statuses.get(estimate_id) == "running"
+            and estimate_id in self.stale_running
+        )
 
     def fetch_unembedded_nodes(
         self, estimate_id: int, after_id: int, limit: int
@@ -390,12 +512,34 @@ class FakeEstimateRepository(EstimateRepository):
             if n["estimate_id"] == estimate_id
             and n["status"] in ("pending", "error", "no_match")
             and n["embedding"] is not None
+            and n["review_status"] == "unreviewed"
         ]
+
+    def save_review_decision(
+        self, node_id: int, *, review_status: str,
+        final_article_id: int | None, final_code: str | None, final_name: str | None,
+    ) -> None:
+        n = self.nodes[node_id]
+        n["review_status"] = review_status
+        n["final_article_id"] = final_article_id
+        n["final_code"] = final_code
+        n["final_name"] = final_name
+        n["reviewed_at"] = datetime(2026, 1, 2, tzinfo=timezone.utc)  # noqa: UP017
 
     def save_node_match(self, node_id: int, result: NodeMatch) -> None:
         n = self.nodes[node_id]
+        if n["review_status"] != "unreviewed":
+            return  # CAS: человек тронул строку — AI-снимок не затирает решение
         n["status"] = str(result.status)
-        n["match_error"] = result.match_error  # на успехе result.match_error=None → обнуляется
+        n["match_error"] = result.match_error
+        n["matched_article_id"] = result.matched_id
+        n["matched_code"] = result.matched_code
+        n["matched_name"] = result.matched_name
+        n["score"] = result.score
+        n["candidates"] = [
+            {"id": c.id, "code": c.code, "name": c.name, "score": c.score}
+            for c in result.candidates
+        ]
 
     def count_node_errors(self, estimate_id: int) -> int:
         return sum(
@@ -410,3 +554,11 @@ class FakeEstimateRepository(EstimateRepository):
             for n in self.nodes.values()
             if n["estimate_id"] == estimate_id and n["status"] == "pending"
         )
+
+    def get_object_key(
+        self, estimate_id: int, requester_id: int, *, is_admin: bool
+    ) -> str | None:
+        est = self.estimates.get(estimate_id)
+        if est is None or (not is_admin and est.user_id != requester_id):
+            return None
+        return self._keys.get(estimate_id)

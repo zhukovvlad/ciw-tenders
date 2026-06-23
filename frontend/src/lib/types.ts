@@ -1,21 +1,30 @@
-export type MatchStatus = "confident" | "needs_review" | "no_match"
+export type MatchStatus = "confident" | "needs_review" | "no_match" | "error"
+export type ReviewStatus =
+  | "unreviewed"
+  | "confirmed"
+  | "overridden"
+  | "rejected"
 
 export interface Candidate {
+  id: number | null
   article_code: string
   name: string
-  section_name: string
   score: number
 }
 
 export interface MatchRow {
-  row_number: number
-  source_name: string
+  row_number: number // ← row.id из бэка
+  source_name: string // ← row.name
   status: MatchStatus
   score: number
   matched_code: string | null
   matched_name: string | null
+  matched_article_id: number | null
   candidates: Candidate[]
-  rationale: string | null
+  review_status: ReviewStatus
+  final_article_id: number | null
+  final_code: string | null
+  final_name: string | null
 }
 
 export type Decision =

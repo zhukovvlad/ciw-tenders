@@ -8,25 +8,6 @@
 
 ---
 
-## 🟡 SP2-матчинг: статус `running` не самовосстанавливается после жёсткого краша воркера
-
-**Что:** session-level advisory-lock держится на пиннутом коннекте Celery-задачи; при крахе/SIGKILL
-коннект рвётся → Postgres сам отпускает лок (это корректно). НО строка `estimates.status` остаётся
-`running` навсегда — ничто её не перезаписывает. Ре-триггер `POST /api/estimates/{id}/match` при этом
-работает (новая задача берёт уже свободный лок и доматчивает), но ответный `detail` для `running`
-показывает «уже выполняется» — вводит в заблуждение.
-
-**Почему отложено:** деградация мягкая (ре-триггер всегда проходит, состояние не портится); полноценное
-самовосстановление — это SP3 (ревью/правки статусов). Выявлено финальным ревью SP2.
-
-**Почему остаётся (сужено):** непредвиденное исключение *в процессе* задачи теперь переводит смету в
-`partial_error` (см. «Погашено» ниже). Открыт только **жёсткий** краш (SIGKILL/OOM/потеря воркера),
-когда Python-обработчик `except` не успевает отработать: Postgres лок отпускает, но строка остаётся `running`.
-
-**Как чинить:** SP3 — sweep по `updated_at` + `task_time_limit_s` (660s) для зависших `running` →
-`blocked`/`pending`; ЛИБО проверка живости лока (`pg_try_advisory_lock` пробно) в роуте ре-триггера,
-чтобы `detail` отражал реальность, а не stored-статус. См. [estimate_matching_service.py](../backend/app/services/estimate_matching_service.py).
-
 ## 🟢 SP2-матчинг: пул коннектов vs concurrency воркера + drain на каждый `create_article`
 
 **Что:** (1) `engine` на дефолтном QueuePool (5+10). Каждая running-задача пинит коннект до
@@ -117,6 +98,34 @@
   лишний `CREATE EXTENSION` в [neon-database-setup.md](instructions/neon-database-setup.md) (ревизия `0001`
   уже его делает); порядок импортов в `alembic/script.py.mako` (ruff I001 на сгенерированных ревизиях).
 
+## 🟢 SP3: нет несклип-CI-теста раунд-трипа парсер→экспортёр (страж офсета `+2`)
+
+- **Что:** экспорт пишет код по физ.строке `source_index + 2` — инвариант держится, **пока** SP1-парсер
+  не меняет чтение (`read_excel`: заголовок в строке 1, без `skiprows`/`header=`/`dropna`/`reset_index`).
+  Сейчас офсет страхуют два **раздельных** теста: парсер ассертит `source_index==33` для узла `1.1.5`,
+  но только при наличии приватного golden-файла (`skipif`, в CI **не** гоняется); экспорт-тест ассертит
+  `source_index=33 → физ.строка 35` на рукотворном workbook. Цепочки «выход парсера → вход экспортёра»
+  в одном несклип-тесте нет: добавит кто-то `skiprows`/`header=` — CI останется зелёным, экспорт молча
+  поедет в соседние ячейки.
+- **Почему отложено:** связка задокументирована (docstring `estimate_export_service.py`, коммент парсера);
+  оба конца по отдельности покрыты; вероятность незаметной правки SP1-чтения низка. Выявлено финальным
+  ревью SP3.
+- **Как чинить:** добавить несклип раунд-трип-тест на синтетическом `.xlsx`: parse → export → ассерт
+  ячейки. См. [estimate_export_service.py](../backend/app/services/estimate_export_service.py),
+  [estimate_parser.py](../backend/app/services/estimate_parser.py).
+
+## 🟢 SP3-фронт: прод-код импортит тип из мок-модуля + тихий no-op экспорта/правки
+
+- **Что:** (1) `EstimateFlow.tsx` импортит `type Progress` из `@/lib/mock/api` — связка прод-потока с
+  тест-фикстурным модулем, от которого SP3 как раз уходит (тип стирается на сборке, рантайм-связки нет,
+  но смысловая есть). (2) `handleReview` молча `return`-ит при `estimateId === null`, хотя оптимистичный
+  dispatch уже сработал → строка показана «подтверждённой», но на бэк не уехала (прикрыто регидрацией
+  `estimateId` из sessionStorage; достижимо только при битом session-storage).
+- **Почему отложено:** косметика/край; на нормальном потоке не воспроизводится. Выявлено финальным ревью SP3.
+- **Как чинить:** (1) вынести `Progress` в `@/lib/types` или объявить локально в `estimates.ts`;
+  (2) в null-ветке `handleReview` добавить `reopen` + `toast.error` (как в `.catch`-ветке PATCH).
+  См. [EstimateFlow.tsx](../frontend/src/pages/estimate/EstimateFlow.tsx).
+
 ## 🟢 Pluggable LLM provider — полировка из ревью (тест-гигиена)
 
 - **Что:** мелочи, выявленные ревью PR #8 (не блокеры, на корректность не влияют):
@@ -150,6 +159,15 @@
 
 ## Погашено
 
+- **🟡 SP2: статус `running` не самовосстанавливается после жёсткого краша воркера** — закрыто SP3
+  staleness-sweep'ом (2026-06-23, ветка `feat/estimate-review-export`). `POST /api/estimates/{id}/match`
+  перед enqueue: при `status='running'` и `now-updated_at > task_time_limit_s` (660s) берёт advisory-лок
+  как арбитр живости (взялся → прежний держатель мёртв → `running→pending`; занят → воркер жив → no-op).
+  Sweeper на **выделенном коннекте** (`bind=conn`, как `tasks.py`): `try_lock→set_status(commit)→release`
+  на одном коннекте, лок не течёт. `detail` ре-триггера стал честным («перезапущено после сбоя» /
+  «уже выполняется» / «поставлено в очередь»). Тесты `test_estimate_sweep.py` (юнит) +
+  `test_sweep_lock_integration.py` (opt-in, страж против регрессии утечки лока). См. devlog
+  [2026-06-23-estimate-review-export.md](devlog/2026-06-23-estimate-review-export.md).
 - **🟡 SP2: узкий перехват исключений в embed/match (смета залипала в `running`)** — закрыто по
   комментарию Copilot к PR #7 (2026-06-23). В `match_estimate` добавлен top-level `except` (не gate,
   не transient) → `PARTIAL_ERROR` с деталью перед re-raise; `DictionaryNotReadyError` по-прежнему

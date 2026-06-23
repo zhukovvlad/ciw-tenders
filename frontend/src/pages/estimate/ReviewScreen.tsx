@@ -12,11 +12,22 @@ import { Button } from "@/components/ui/button"
 import { ReviewRow } from "@/pages/estimate/ReviewRow"
 import { useReviewKeyboard } from "@/lib/useReviewKeyboard"
 
+export type ReviewActionKind = "confirm" | "pick" | "reject"
+
 interface ReviewScreenProps {
   state: ReviewState
   dispatch: React.Dispatch<ReviewAction>
   onExport: () => void
   onNewEstimate: () => void
+  /**
+   * Коммит решения на бэк (PATCH .../review). Вызывается параллельно локальному
+   * dispatch (оптимистичный UI). Если не передан — работает в офлайн/мок-режиме.
+   */
+  onReview?: (
+    rowNumber: number,
+    action: ReviewActionKind,
+    articleId?: number
+  ) => void
 }
 
 const counts = (state: ReviewState) => ({
@@ -30,6 +41,7 @@ export function ReviewScreen({
   dispatch,
   onExport,
   onNewEstimate,
+  onReview,
 }: ReviewScreenProps) {
   // useMemo: rows/queue стабильны между рендерами, пока не изменился state — иначе
   // новый массив на каждый рендер пересоздавал бы автостарт-эффект (и нервировал
@@ -74,22 +86,26 @@ export function ReviewScreen({
     enabled: Boolean(active),
     candidateCount: active?.candidates.length ?? 0,
     onPick: (i) => {
-      if (active?.candidates[i]) {
+      const cand = active?.candidates[i]
+      if (active && cand) {
         dispatch({
           type: "pickCandidate",
           row: active.row_number,
-          code: active.candidates[i].article_code,
+          code: cand.article_code,
         })
+        onReview?.(active.row_number, "pick", cand.id ?? undefined)
         gotoNext()
       }
     },
     onConfirm: () => {
       if (active) {
-        dispatch(
-          active.status === "no_match"
-            ? { type: "confirmNoMatch", row: active.row_number }
-            : { type: "confirmArbiter", row: active.row_number }
-        )
+        if (active.status === "no_match") {
+          dispatch({ type: "confirmNoMatch", row: active.row_number })
+          onReview?.(active.row_number, "reject")
+        } else {
+          dispatch({ type: "confirmArbiter", row: active.row_number })
+          onReview?.(active.row_number, "confirm")
+        }
         gotoNext()
       }
     },
@@ -174,7 +190,9 @@ export function ReviewScreen({
                 )
               }
               onPickCandidate={(code) => {
+                const cand = row.candidates.find((x) => x.article_code === code)
                 dispatch({ type: "pickCandidate", row: row.row_number, code })
+                onReview?.(row.row_number, "pick", cand?.id ?? undefined)
                 gotoNext()
               }}
               onManualPick={(cand) => {
@@ -183,10 +201,12 @@ export function ReviewScreen({
                   row: row.row_number,
                   candidate: cand,
                 })
+                onReview?.(row.row_number, "pick", cand.id ?? undefined)
                 gotoNext()
               }}
               onConfirmNoMatch={() => {
                 dispatch({ type: "confirmNoMatch", row: row.row_number })
+                onReview?.(row.row_number, "reject")
                 gotoNext()
               }}
             />

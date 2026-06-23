@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session
 
 from app.domain.entities import (
@@ -11,6 +11,7 @@ from app.domain.entities import (
     EstimateStatus,
     EstimateSummary,
     MatchableNode,
+    MatchCandidate,
     NewEstimate,
     NodeMatch,
     PendingEmbedding,
@@ -39,9 +40,19 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             source_index=m.source_index,
             status=m.status,
             has_embedding=m.embedding is not None,
+            matched_article_id=m.matched_article_id,
             matched_code=m.matched_code,
             matched_name=m.matched_name,
             score=m.score,
+            candidates=[
+                MatchCandidate(id=c.get("id"), code=c["code"], name=c["name"], score=c["score"])
+                for c in (m.candidates or [])
+            ],
+            review_status=m.review_status,
+            final_article_id=m.final_article_id,
+            final_code=m.final_code,
+            final_name=m.final_name,
+            reviewed_at=m.reviewed_at,
         )
 
     @classmethod
@@ -175,6 +186,15 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             select(EstimateModel.status).where(EstimateModel.id == estimate_id)
         )
 
+    def is_stale_running(self, estimate_id: int, max_age_seconds: int) -> bool:
+        stmt = select(EstimateModel.id).where(
+            EstimateModel.id == estimate_id,
+            EstimateModel.status == "running",
+            EstimateModel.updated_at
+            < func.now() - (text(":age * interval '1 second'").bindparams(age=max_age_seconds)),
+        )
+        return self._session.scalar(stmt) is not None
+
     def fetch_unembedded_nodes(
         self, estimate_id: int, after_id: int, limit: int
     ) -> list[PendingEmbedding]:
@@ -215,6 +235,7 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 EstimateRowModel.estimate_id == estimate_id,
                 EstimateRowModel.status.in_(("pending", "error", "no_match")),
                 EstimateRowModel.embedding.is_not(None),
+                EstimateRowModel.review_status == "unreviewed",
             )
             .order_by(EstimateRowModel.id)
         )
@@ -224,10 +245,15 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
         ]
 
     def save_node_match(self, node_id: int, result: NodeMatch) -> None:
+        # CAS: пишем AI-снимок только если строку ещё не тронул человек. Закрывает гонку
+        # read(matchable)→write с правкой ревью (SP3): нулевой rowcount → решение сохранено.
         self._session.execute(
-            update(EstimateRowModel).where(EstimateRowModel.id == node_id).values(
-                **self._match_values(result)
+            update(EstimateRowModel)
+            .where(
+                EstimateRowModel.id == node_id,
+                EstimateRowModel.review_status == "unreviewed",
             )
+            .values(**self._match_values(result))
         )
         self._session.commit()
 
@@ -246,6 +272,26 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             ] or None,
             "match_error": result.match_error,
         }
+
+    def save_review_decision(
+        self,
+        node_id: int,
+        *,
+        review_status: str,
+        final_article_id: int | None,
+        final_code: str | None,
+        final_name: str | None,
+    ) -> None:
+        self._session.execute(
+            update(EstimateRowModel).where(EstimateRowModel.id == node_id).values(
+                review_status=review_status,
+                final_article_id=final_article_id,
+                final_code=final_code,
+                final_name=final_name,
+                reviewed_at=func.now(),
+            )
+        )
+        self._session.commit()
 
     def count_node_errors(self, estimate_id: int) -> int:
         return int(
@@ -266,3 +312,11 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 )
             ) or 0
         )
+
+    def get_object_key(
+        self, estimate_id: int, requester_id: int, *, is_admin: bool
+    ) -> str | None:
+        est = self._session.get(EstimateModel, estimate_id)
+        if est is None or (not is_admin and est.user_id != requester_id):
+            return None
+        return est.original_object_key

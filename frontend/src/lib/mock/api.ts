@@ -46,12 +46,11 @@ export async function matchEstimate(
 export async function searchArticles(query: string): Promise<Candidate[]> {
   await delay(120)
   const q = query.trim().toLowerCase()
-  if (!q) return []
+  if (q.length < 2) return [] // как реальный клиент: запросы короче 2 символов — пусто
   return MOCK_ARTICLES.filter(
     (c) =>
       c.name.toLowerCase().includes(q) ||
-      c.article_code.toLowerCase().includes(q) ||
-      c.section_name.toLowerCase().includes(q)
+      c.article_code.toLowerCase().includes(q)
   )
 }
 

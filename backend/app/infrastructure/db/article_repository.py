@@ -51,6 +51,10 @@ class SqlAlchemyArticleRepository(ArticleRepository):
         model = self._session.scalars(stmt).one_or_none()
         return self._to_entity(model) if model is not None else None
 
+    def get_by_id(self, article_id: int) -> TemplateArticle | None:
+        model = self._session.get(TemplateArticleModel, article_id)
+        return self._to_entity(model) if model is not None else None
+
     def list_all(self, limit: int = 100, offset: int = 0) -> list[TemplateArticle]:
         stmt = select(TemplateArticleModel).order_by(_CODE_ORDER).limit(limit).offset(offset)
         return [self._to_entity(m) for m in self._session.scalars(stmt)]
@@ -72,6 +76,20 @@ class SqlAlchemyArticleRepository(ArticleRepository):
             TemplateArticleModel.article_code.like(prefix, escape="\\")
         ).limit(1)
         return self._session.scalars(stmt).first() is not None
+
+    def search(self, q: str, limit: int = 20) -> list[TemplateArticle]:
+        # экранируем LIKE-метасимволы в пользовательском вводе
+        like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        stmt = (
+            select(TemplateArticleModel)
+            .where(
+                TemplateArticleModel.article_code.ilike(like, escape="\\")
+                | TemplateArticleModel.name.ilike(like, escape="\\")
+            )
+            .order_by(_CODE_ORDER)
+            .limit(limit)
+        )
+        return [self._to_entity(m) for m in self._session.scalars(stmt)]
 
     def search_similar(self, embedding: list[float], top_k: int = 3) -> list[ArticleCandidate]:
         distance = TemplateArticleModel.embedding.cosine_distance(embedding)

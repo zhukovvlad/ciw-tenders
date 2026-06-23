@@ -64,8 +64,17 @@ create-admin:
     cd {{backend}}; uv run python -m app.scripts.create_admin
 
 # Celery-воркер: матчинг смет + эмбеддинг справочника. По умолчанию solo-pool (Windows).
-# Прод (Linux): just celery-worker "--pool=prefork --concurrency=4 --loglevel=info"
-celery-worker *args="--pool=solo --loglevel=info":
+# Доставка задач идёт через списки LPUSH/BRPOP — права на каналы Redis не нужны. Чтобы воркер
+# не падал с "NoPermissionError: No permissions to access a channel" на Redis-ACL без прав на
+# каналы, ВСЕ fanout pub/sub отключены ДВУМЯ независимыми механизмами:
+#   - --without-mingle/--without-gossip (ниже): startup-sync с соседями + gossip-fanout;
+#   - worker_enable_remote_control=False (celery_app.py): управляющий pidbox-мейлбокс
+#     (`celery inspect`/`control`) — его флаги НЕ отключают, только эта настройка.
+# Прод (Linux): just celery-worker "--pool=prefork --concurrency=4 --loglevel=info" —
+# переопределяет args целиком и вернёт mingle/gossip (если на прод-Redis каналы разрешены),
+# НО remote-control останется off (управляется конфигом, не флагами): для `celery inspect`
+# верни worker_enable_remote_control=True в celery_app.py + выдай права на каналы.
+celery-worker *args="--pool=solo --loglevel=info --without-mingle --without-gossip":
     cd {{backend}}; uv run celery -A app.infrastructure.tasks.celery_app worker {{args}}
 
 # MinIO (S3-хранилище оригиналов смет): API на :9000, консоль на :9001, данные в ./minio-data (gitignored).

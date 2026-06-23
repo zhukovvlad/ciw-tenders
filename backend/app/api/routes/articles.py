@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
 from app.api.deps import (
     get_article_service,
@@ -11,7 +11,13 @@ from app.api.deps import (
     get_template_ingest_service,
     require_admin,
 )
-from app.api.schemas import ArticleCreate, ArticleOut, DeleteAllResponse, ImportReportOut
+from app.api.schemas import (
+    ArticleCreate,
+    ArticleOut,
+    ArticleSearchOut,
+    DeleteAllResponse,
+    ImportReportOut,
+)
 from app.domain.errors import DeletionGuardError, DuplicateError, TemplateValidationError
 from app.domain.ports import TaskQueue
 from app.services.article_service import ArticleService
@@ -27,6 +33,22 @@ def list_articles(
     service: ArticleService = Depends(get_article_service),
 ) -> list[ArticleOut]:
     return [ArticleOut.from_entity(a) for a in service.list(limit=limit, offset=offset)]
+
+
+@router.get("/search", response_model=list[ArticleSearchOut])
+def search_articles(
+    q: str = Query(...),
+    limit: int = Query(20, ge=1, le=100),
+    service: ArticleService = Depends(get_article_service),
+) -> list[ArticleSearchOut]:
+    if len(q.strip()) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Запрос слишком короткий"
+        )
+    return [
+        ArticleSearchOut(id=a.id or 0, code=a.article_code, name=a.name)
+        for a in service.search(q.strip(), limit=limit)
+    ]
 
 
 @router.post("/embed", status_code=status.HTTP_202_ACCEPTED,

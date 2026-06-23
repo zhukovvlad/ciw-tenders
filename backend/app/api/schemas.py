@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -75,6 +76,12 @@ class ArticleOut(BaseModel):
         )
 
 
+class ArticleSearchOut(BaseModel):
+    id: int
+    code: str
+    name: str
+
+
 class DeleteAllResponse(BaseModel):
     deleted: int
 
@@ -126,24 +133,51 @@ class EstimateSummaryOut(BaseModel):
         )
 
 
+class MatchCandidateOut(BaseModel):
+    id: int | None
+    code: str
+    name: str
+    score: float
+
+
 class EstimateRowOut(BaseModel):
+    id: int
     code: str
     name: str
     parent_code: str | None
     section_type: str | None
     depth: int
     status: str
+    matched_article_id: int | None = None
     matched_code: str | None = None
     matched_name: str | None = None
     score: float | None = None
+    candidates: list[MatchCandidateOut] = []
+    review_status: str = "unreviewed"
+    final_article_id: int | None = None
+    final_code: str | None = None
+    final_name: str | None = None
+    reviewed_at: datetime | None = None
 
     @classmethod
     def from_entity(cls, r: StoredEstimateRow) -> EstimateRowOut:
         return cls(
-            code=r.code, name=r.name, parent_code=r.parent_code,
+            id=r.id, code=r.code, name=r.name, parent_code=r.parent_code,
             section_type=r.section_type, depth=r.depth, status=r.status,
-            matched_code=r.matched_code, matched_name=r.matched_name, score=r.score,
+            matched_article_id=r.matched_article_id, matched_code=r.matched_code,
+            matched_name=r.matched_name, score=r.score,
+            candidates=[
+                MatchCandidateOut(id=c.id, code=c.code, name=c.name, score=c.score)
+                for c in r.candidates
+            ],
+            review_status=r.review_status, final_article_id=r.final_article_id,
+            final_code=r.final_code, final_name=r.final_name, reviewed_at=r.reviewed_at,
         )
+
+
+class ReviewDecisionIn(BaseModel):
+    action: Literal["confirm", "pick", "reject"]
+    article_id: int | None = None
 
 
 class EstimateDetailOut(BaseModel):

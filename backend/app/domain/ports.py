@@ -57,6 +57,14 @@ class ArticleRepository(ABC):
         ...
 
     @abstractmethod
+    def get_by_id(self, article_id: int) -> TemplateArticle | None: ...
+
+    @abstractmethod
+    def search(self, q: str, limit: int = 20) -> list[TemplateArticle]:
+        """Лексический поиск code ILIKE %q% OR name ILIKE %q% (НЕ фильтрует по embedding)."""
+        ...
+
+    @abstractmethod
     def matching_readiness(self) -> tuple[int, int]:
         """(total, pending): всего статей и сколько с embedding IS NULL. Для gate матчинга."""
         ...
@@ -196,6 +204,11 @@ class EstimateRepository(ABC):
     def get_status(self, estimate_id: int) -> str | None: ...
 
     @abstractmethod
+    def is_stale_running(self, estimate_id: int, max_age_seconds: int) -> bool:
+        """True, если status='running' и updated_at старше max_age_seconds (мёртвый прогон)."""
+        ...
+
+    @abstractmethod
     def fetch_unembedded_nodes(
         self, estimate_id: int, after_id: int, limit: int
     ) -> list[PendingEmbedding]:
@@ -211,13 +224,28 @@ class EstimateRepository(ABC):
 
     @abstractmethod
     def fetch_matchable_nodes(self, estimate_id: int) -> list[MatchableNode]:
-        """status ∈ {pending, error, no_match} И embedding IS NOT NULL."""
+        """status ∈ {pending, error, no_match} И embedding IS NOT NULL
+        И review_status = 'unreviewed' (ручные правки SP3 не перематчиваются)."""
         ...
 
     @abstractmethod
     def save_node_match(self, node_id: int, result: NodeMatch) -> None:
-        """Перезаписывает весь снимок узла (status/matched_*/score/candidates);
-        на успехе match_error→NULL."""
+        """Перезаписывает весь AI-снимок узла (status/matched_*/score/candidates),
+        НО только WHERE review_status='unreviewed' (CAS). На успехе match_error→NULL."""
+        ...
+
+    @abstractmethod
+    def save_review_decision(
+        self,
+        node_id: int,
+        *,
+        review_status: str,
+        final_article_id: int | None,
+        final_code: str | None,
+        final_name: str | None,
+    ) -> None:
+        """Пишет ось ревью + reviewed_at=now(). Авторитетна — без условия на текущий
+        review_status (оператор может передумать). AI-снимок не трогает."""
         ...
 
     @abstractmethod
@@ -230,6 +258,13 @@ class EstimateRepository(ABC):
         """WHERE status='pending' (вектор не записался / не обработан)."""
         ...
 
+    @abstractmethod
+    def get_object_key(
+        self, estimate_id: int, requester_id: int, *, is_admin: bool
+    ) -> str | None:
+        """original_object_key с проверкой владения (None — не найдена/чужая)."""
+        ...
+
 
 class ObjectStorage(ABC):
     """Объектное хранилище (MinIO/S3) для исходных файлов."""
@@ -238,7 +273,9 @@ class ObjectStorage(ABC):
     def put(self, key: str, data: bytes, content_type: str) -> None: ...
 
     @abstractmethod
-    def get(self, key: str) -> bytes: ...
+    def get(self, key: str) -> bytes:
+        """Возвращает содержимое объекта. Кидает StorageError на сбой или отсутствие объекта."""
+        ...
 
     @abstractmethod
     def delete(self, key: str) -> None: ...

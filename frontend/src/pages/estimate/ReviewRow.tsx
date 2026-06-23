@@ -1,8 +1,10 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ChevronDown, Search } from "lucide-react"
 import type { Candidate, Decision, MatchRow } from "@/lib/types"
 import { statusLabel } from "@/lib/reviewState"
-import { searchArticles } from "@/lib/mock/api"
+import { searchArticles } from "@/lib/api/articles"
+
+const SEARCH_DEBOUNCE_MS = 250
 
 interface ReviewRowProps {
   row: MatchRow
@@ -35,10 +37,26 @@ export function ReviewRow({
   const chosenCode =
     decision.kind === "confirmed" ? decision.code : row.matched_code
 
-  async function runSearch(q: string) {
-    setQuery(q)
-    setHits(await searchArticles(q))
-  }
+  // Дебаунс поиска (~250мс): не дёргаем /articles/search на каждый символ.
+  // searchArticles сам отсекает запросы короче 2 символов (вернёт []), поэтому
+  // и сброс, и поиск выполняются единообразно в отложенном колбэке (без
+  // синхронного setState в теле эффекта).
+  const reqIdRef = useRef(0)
+  useEffect(() => {
+    const reqId = ++reqIdRef.current
+    const timer = setTimeout(() => {
+      void searchArticles(query)
+        .then((res) => {
+          // игнорируем устаревший ответ, если пользователь продолжил печатать
+          if (reqId === reqIdRef.current) setHits(res)
+        })
+        .catch(() => {
+          // сбой поиска не должен ронять промис и оставлять stale-подсказки
+          if (reqId === reqIdRef.current) setHits([])
+        })
+    }, SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [query])
 
   return (
     <>
@@ -82,14 +100,6 @@ export function ReviewRow({
             colSpan={5}
             className="bg-[color-mix(in_srgb,var(--primary)_5%,transparent)] px-12 py-3"
           >
-            {row.rationale && (
-              <p className="mb-2 text-sm text-[var(--ds-text-2)]">
-                <span className="mr-1 text-xs tracking-wide text-muted-foreground uppercase">
-                  Почему:
-                </span>
-                {row.rationale}
-              </p>
-            )}
             {row.candidates.map((c, i) => {
               const sel = c.article_code === chosenCode
               return (
@@ -124,7 +134,7 @@ export function ReviewRow({
               <Search className="size-3.5 text-muted-foreground" />
               <input
                 value={query}
-                onChange={(e) => runSearch(e.target.value)}
+                onChange={(e) => setQuery(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
                 aria-label="Поиск статьи в справочнике"
                 placeholder="Нет верного — искать в справочнике…"
