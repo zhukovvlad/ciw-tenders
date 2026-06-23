@@ -11,7 +11,7 @@ backend не используется). Старый синхронный пут
 
 Спек: [docs/superpowers/specs/2026-06-23-estimate-matching-sp2-design.md](../superpowers/specs/2026-06-23-estimate-matching-sp2-design.md).
 План: [docs/superpowers/plans/2026-06-23-estimate-matching-sp2.md](../superpowers/plans/2026-06-23-estimate-matching-sp2.md).
-PR: _(заполнить)_ (база `main`). Коммиты `27bd258..HEAD` (12 задач).
+PR: [#7](https://github.com/zhukovvlad/ciw-tenders/pull/7) (база `main`). Коммиты `27bd258..4e0655e` (12 задач).
 
 ## Архитектура
 
