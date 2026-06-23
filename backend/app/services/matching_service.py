@@ -1,68 +1,73 @@
-"""Сервис сопоставления строк сметы с эталонным справочником (RAG-ядро).
+"""Ядро сопоставления узла со справочником (RAG: retrieval + LLM-арбитраж).
 
-Алгоритм (Шаг 3 ТЗ):
-  1. Векторизуем строку (Embedder → Gemini).
-  2. Ищем топ-3 ближайших статьи в БД (ArticleRepository → pgvector).
-  3. score > threshold      -> "Уверенное совпадение".
-     score <= threshold     -> LLM-арбитр (Anthropic) выбирает из топ-3 -> "Требует проверки".
-
-Сервис не знает о конкретных Gemini/Anthropic/Postgres — только о портах.
+Принимает ГОТОВЫЙ вектор узла (не ре-эмбеддит). query_text (= embedding_input узла) идёт
+только в LLM-арбитр. Возвращает NodeMatch со слаг-статусом и снимком кандидатов.
 """
 
 from __future__ import annotations
 
-from app.domain.entities import EstimateRow, MatchResult, MatchStatus
+from app.domain.entities import (
+    ArticleCandidate,
+    EstimateRowStatus,
+    MatchCandidate,
+    NodeMatch,
+    TemplateArticle,
+)
 from app.domain.ports import ArticleRepository, Embedder, LLMMatcher
+
+
+def _snapshot(candidates: list[ArticleCandidate]) -> list[MatchCandidate]:
+    return [
+        MatchCandidate(
+            id=c.article.id, code=c.article.article_code, name=c.article.name, score=c.score
+        )
+        for c in candidates
+    ]
 
 
 class MatchingService:
     def __init__(
         self,
         repository: ArticleRepository,
-        embedder: Embedder,
-        llm_matcher: LLMMatcher,
+        embedder: Embedder | None = None,  # больше не используется ядром (сметы хранят вектор)
+        llm_matcher: LLMMatcher | None = None,
         confidence_threshold: float = 0.90,
         top_k: int = 3,
     ) -> None:
         self._repository = repository
-        self._embedder = embedder
         self._llm_matcher = llm_matcher
         self._threshold = confidence_threshold
         self._top_k = top_k
 
-    def match_row(self, row: EstimateRow) -> MatchResult:
-        embedding = self._embedder.embed(row.name)
+    def match_one(self, embedding: list[float], query_text: str) -> NodeMatch:
         candidates = self._repository.search_similar(embedding, top_k=self._top_k)
-
         if not candidates:
-            return MatchResult(
-                source_row=row,
-                matched_article=None,
-                status=MatchStatus.NO_MATCH,
-                score=0.0,
-                candidates=[],
-            )
-
+            return NodeMatch(EstimateRowStatus.NO_MATCH)
+        snap = _snapshot(candidates)
         best = candidates[0]
-
         if best.score > self._threshold:
-            return MatchResult(
-                source_row=row,
-                matched_article=best.article,
-                status=MatchStatus.CONFIDENT,
-                score=best.score,
-                candidates=candidates,
+            return NodeMatch(
+                EstimateRowStatus.CONFIDENT, best.article.id, best.article.article_code,
+                best.article.name, best.score, snap,
             )
-
-        # Низкая уверенность — отдаём топ-K на арбитраж LLM.
-        chosen = self._llm_matcher.choose_best(row.name, candidates)
-        return MatchResult(
-            source_row=row,
-            matched_article=chosen,
-            status=MatchStatus.NEEDS_REVIEW,
-            score=best.score,
-            candidates=candidates,
+        chosen = (
+            self._llm_matcher.choose_best(query_text, candidates) if self._llm_matcher else None
+        )
+        chosen_score = self._score_of(chosen, candidates)
+        if chosen is None or chosen_score is None:   # отказ / галлюцинация вне кандидатов
+            return NodeMatch(EstimateRowStatus.NO_MATCH, candidates=snap)
+        return NodeMatch(
+            EstimateRowStatus.NEEDS_REVIEW, chosen.id, chosen.article_code,
+            chosen.name, chosen_score, snap,
         )
 
-    def match_rows(self, rows: list[EstimateRow]) -> list[MatchResult]:
-        return [self.match_row(row) for row in rows]
+    @staticmethod
+    def _score_of(
+        chosen: TemplateArticle | None, candidates: list[ArticleCandidate]
+    ) -> float | None:
+        if chosen is None:
+            return None
+        for c in candidates:                          # валидация: chosen ДОЛЖЕН быть из кандидатов
+            if c.article.id == chosen.id and c.article.article_code == chosen.article_code:
+                return c.score
+        return None                                   # «придуманная» статья → трактуем как отказ
