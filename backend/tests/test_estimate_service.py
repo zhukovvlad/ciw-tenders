@@ -8,7 +8,7 @@ import pytest
 from app.domain.entities import EstimateNode, NewEstimate
 from app.services.estimate_parser import EstimateParser
 from app.services.estimate_service import EstimateService
-from tests.fakes import FakeEstimateRepository, FakeObjectStorage
+from tests.fakes import FakeEstimateRepository, FakeObjectStorage, FakeTaskQueue
 
 
 def _node(code: str) -> EstimateNode:
@@ -27,7 +27,7 @@ def _xlsx() -> bytes:
 
 def _service(storage: FakeObjectStorage) -> tuple[EstimateService, FakeEstimateRepository]:
     repo = FakeEstimateRepository()
-    return EstimateService(EstimateParser(), repo, storage), repo
+    return EstimateService(EstimateParser(), repo, storage, task_queue=FakeTaskQueue()), repo
 
 
 def test_repo_ownership_isolation() -> None:
@@ -78,3 +78,41 @@ def test_delete_removes_db_and_object() -> None:
     assert service.delete(est.id, requester_id=7, is_admin=False) is True
     assert storage.delete_calls  # объект удалён best-effort
     assert service.get(est.id, requester_id=7, is_admin=False) is None
+
+
+def test_ingest_enqueues_match_after_create() -> None:
+    from tests.fakes import FakeTaskQueue
+
+    storage = FakeObjectStorage()
+    repo = FakeEstimateRepository()
+    queue = FakeTaskQueue()
+    service = EstimateService(EstimateParser(), repo, storage, task_queue=queue)
+    est = service.ingest(_xlsx(), "смета.xlsx", owner_id=7).estimate
+    assert queue.match_calls == [est.id]          # энкью был
+    assert repo.create_calls == 1                  # и строки уже созданы (после коммита)
+
+
+def test_ingest_storage_failure_does_not_enqueue() -> None:
+    from app.domain.errors import StorageError
+    from tests.fakes import FakeTaskQueue
+
+    queue = FakeTaskQueue()
+    service = EstimateService(EstimateParser(), FakeEstimateRepository(),
+                              FakeObjectStorage(fail=True), task_queue=queue)
+    import pytest
+    with pytest.raises(StorageError):
+        service.ingest(_xlsx(), "смета.xlsx", owner_id=7)
+    assert queue.match_calls == []                 # сбой put → ни БД, ни enqueue
+
+
+def test_ingest_survives_broker_failure() -> None:
+    from tests.fakes import FakeTaskQueue
+
+    class _BoomQueue(FakeTaskQueue):
+        def enqueue_match(self, estimate_id: int) -> None:
+            raise RuntimeError("redis down")
+
+    service = EstimateService(EstimateParser(), FakeEstimateRepository(),
+                              FakeObjectStorage(), task_queue=_BoomQueue())
+    result = service.ingest(_xlsx(), "смета.xlsx", owner_id=7)  # НЕ падает
+    assert result.estimate.status == "pending"     # смета создана, ждёт ручного ре-триггера

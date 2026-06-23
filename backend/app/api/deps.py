@@ -22,6 +22,7 @@ from app.domain.ports import (
     LLMMatcher,
     ObjectStorage,
     PasswordHasher,
+    TaskQueue,
     TokenService,
     UserRepository,
 )
@@ -37,6 +38,7 @@ from app.infrastructure.db.user_repository import SqlAlchemyUserRepository
 from app.infrastructure.storage.s3_object_storage import S3ObjectStorage
 from app.services.article_service import ArticleService
 from app.services.auth_service import AuthService
+from app.services.estimate_matching_service import EstimateMatchingService
 from app.services.estimate_parser import EstimateParser
 from app.services.estimate_service import EstimateService
 from app.services.excel_parser import ExcelEstimateParser
@@ -117,13 +119,64 @@ def get_embedder() -> Embedder:
         base_url=settings.embedding_base_url,
         model=settings.embedding_model,
         dimensions=settings.embedding_dim,
+        timeout_s=settings.ai_call_timeout_s,
+        retry_budget=settings.transient_retry_budget,
     )
 
 
 @lru_cache
 def get_llm_matcher() -> LLMMatcher:
     settings = get_settings()
-    return AnthropicLLMMatcher(api_key=settings.anthropic_api_key, model=settings.llm_model)
+    return AnthropicLLMMatcher(
+        api_key=settings.anthropic_api_key,
+        model=settings.llm_model,
+        timeout_s=settings.ai_call_timeout_s,
+        retry_budget=settings.transient_retry_budget,
+    )
+
+
+@lru_cache
+def get_task_queue() -> TaskQueue:
+    # Ленивый импорт: не тащить Celery при старте API-модуля.
+    from app.infrastructure.tasks.task_queue import CeleryTaskQueue
+
+    return CeleryTaskQueue()
+
+
+def build_embedder() -> Embedder:
+    settings = get_settings()
+    return OpenRouterEmbedder(
+        api_key=settings.openrouter_api_key,
+        base_url=settings.embedding_base_url,
+        model=settings.embedding_model,
+        dimensions=settings.embedding_dim,
+        timeout_s=settings.ai_call_timeout_s,
+        retry_budget=settings.transient_retry_budget,
+    )
+
+
+def build_estimate_matching_service(session: Session) -> EstimateMatchingService:
+    """Фабрика для Celery-задачи (вне FastAPI DI): собирает сервис на переданной сессии."""
+    settings = get_settings()
+    articles = SqlAlchemyArticleRepository(session)
+    estimates = SqlAlchemyEstimateRepository(session)
+    matcher = MatchingService(
+        articles,
+        embedder=None,
+        llm_matcher=AnthropicLLMMatcher(
+            api_key=settings.anthropic_api_key,
+            model=settings.llm_model,
+            timeout_s=settings.ai_call_timeout_s,
+            retry_budget=settings.transient_retry_budget,
+        ),
+        confidence_threshold=settings.confidence_threshold,
+    )
+    return EstimateMatchingService(
+        matcher=matcher,
+        embedder=build_embedder(),
+        estimates=estimates,
+        articles=articles,
+    )
 
 
 def get_parser() -> ExcelEstimateParser:
@@ -185,5 +238,8 @@ def get_estimate_service(
     parser: EstimateParser = Depends(get_estimate_parser),
     repository: EstimateRepository = Depends(get_estimate_repository),
     storage: ObjectStorage = Depends(get_object_storage),
+    task_queue: TaskQueue = Depends(get_task_queue),
 ) -> EstimateService:
-    return EstimateService(parser=parser, repository=repository, storage=storage)
+    return EstimateService(
+        parser=parser, repository=repository, storage=storage, task_queue=task_queue
+    )

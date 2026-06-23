@@ -13,7 +13,7 @@ from app.domain.entities import Role, User
 from app.main import app
 from app.services.estimate_parser import EstimateParser
 from app.services.estimate_service import EstimateService
-from tests.fakes import FakeEstimateRepository, FakeObjectStorage
+from tests.fakes import FakeEstimateRepository, FakeObjectStorage, FakeTaskQueue
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -42,7 +42,7 @@ def _user(uid: int = 2, role: Role = Role.USER) -> Callable[[], User]:
 
 def _svc_factory(repo: FakeEstimateRepository, storage: FakeObjectStorage):
     def _f() -> EstimateService:
-        return EstimateService(EstimateParser(), repo, storage)
+        return EstimateService(EstimateParser(), repo, storage, task_queue=FakeTaskQueue())
 
     return _f
 
@@ -113,7 +113,9 @@ def test_upload_storage_unavailable_503() -> None:
 
 def test_list_and_get_ownership() -> None:
     repo, storage = FakeEstimateRepository(), FakeObjectStorage()
-    EstimateService(EstimateParser(), repo, storage).ingest(_xlsx(), "a.xlsx", owner_id=2)
+    EstimateService(EstimateParser(), repo, storage, task_queue=FakeTaskQueue()).ingest(
+        _xlsx(), "a.xlsx", owner_id=2
+    )
     client = _client(repo, storage)  # user id=2
     assert len(client.get("/api/estimates").json()) == 1
     other = _client(repo, storage, user=_user(uid=9))  # чужой
@@ -122,7 +124,9 @@ def test_list_and_get_ownership() -> None:
 
 def test_delete_removes_object() -> None:
     repo, storage = FakeEstimateRepository(), FakeObjectStorage()
-    EstimateService(EstimateParser(), repo, storage).ingest(_xlsx(), "a.xlsx", owner_id=2)
+    EstimateService(EstimateParser(), repo, storage, task_queue=FakeTaskQueue()).ingest(
+        _xlsx(), "a.xlsx", owner_id=2
+    )
     client = _client(repo, storage)
     resp = client.delete("/api/estimates/1")
     assert resp.status_code == 204
