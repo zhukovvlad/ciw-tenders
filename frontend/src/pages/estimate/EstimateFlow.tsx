@@ -131,7 +131,13 @@ export function EstimateFlow() {
     articleId?: number
   ) {
     const id = estimateIdRef.current
-    if (id === null) return
+    if (id === null) {
+      // ReviewScreen уже применил оптимистичное решение — откатываем, иначе строка
+      // покажется сохранённой, не уехав на бэк.
+      dispatch({ type: "reopen", row: rowNumber })
+      toast.error("Не удалось определить смету — решение не сохранено")
+      return
+    }
     void patchRowReview(id, rowNumber, action, articleId)
       .then((updated) => {
         dispatch({ type: "syncRow", row: updated })

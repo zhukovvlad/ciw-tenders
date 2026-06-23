@@ -9,6 +9,7 @@ from __future__ import annotations
 from io import BytesIO
 
 import openpyxl
+from openpyxl.worksheet.worksheet import Worksheet
 
 from app.domain.entities import StoredEstimateRow
 from app.domain.errors import InvalidReviewActionError
@@ -29,7 +30,8 @@ class EstimateExportService:
         if key is None:
             raise LookupError("Смета не найдена")
         est = self._estimates.get(estimate_id, requester_id, is_admin=is_admin)
-        assert est is not None
+        if est is None:  # смета удалена между get_object_key и get (гонка) → 404, не 500
+            raise LookupError("Смета не найдена")
         if strict:
             unreviewed = [
                 r for r in est.rows
@@ -52,7 +54,7 @@ class EstimateExportService:
         return out.getvalue()
 
     @staticmethod
-    def _find_or_create_column(ws) -> int:  # noqa: ANN001 — openpyxl Worksheet
+    def _find_or_create_column(ws: Worksheet) -> int:
         for cell in ws[1]:
             if cell.value is not None and str(cell.value).strip().casefold() == _HEADER:
                 return cell.column

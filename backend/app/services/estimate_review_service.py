@@ -47,8 +47,12 @@ class EstimateReviewService:
             raise InvalidReviewActionError(f"Неизвестное действие: {action!r}")
 
         updated = self._estimates.get(estimate_id, requester_id, is_admin=is_admin)
-        assert updated is not None
-        return next(r for r in updated.rows if r.id == row_id)
+        if updated is None:  # гонка: смета удалена между записью и перечитыванием → 404
+            raise LookupError("Смета не найдена")
+        updated_row = next((r for r in updated.rows if r.id == row_id), None)
+        if updated_row is None:
+            raise LookupError("Строка не найдена")
+        return updated_row
 
     def _confirm(self, row: StoredEstimateRow) -> None:
         if row.matched_article_id is None:

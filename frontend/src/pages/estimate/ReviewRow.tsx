@@ -45,10 +45,15 @@ export function ReviewRow({
   useEffect(() => {
     const reqId = ++reqIdRef.current
     const timer = setTimeout(() => {
-      void searchArticles(query).then((res) => {
-        // игнорируем устаревший ответ, если пользователь продолжил печатать
-        if (reqId === reqIdRef.current) setHits(res)
-      })
+      void searchArticles(query)
+        .then((res) => {
+          // игнорируем устаревший ответ, если пользователь продолжил печатать
+          if (reqId === reqIdRef.current) setHits(res)
+        })
+        .catch(() => {
+          // сбой поиска не должен ронять промис и оставлять stale-подсказки
+          if (reqId === reqIdRef.current) setHits([])
+        })
     }, SEARCH_DEBOUNCE_MS)
     return () => clearTimeout(timer)
   }, [query])

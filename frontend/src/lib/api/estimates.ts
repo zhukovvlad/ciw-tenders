@@ -4,7 +4,7 @@ import type {
   MatchStatus,
   ReviewStatus,
 } from "@/lib/types"
-import { apiGet, apiSend, apiUpload } from "./client"
+import { apiGet, apiGetBlob, apiSend, apiUpload } from "./client"
 
 interface RowDto {
   id: number
@@ -121,10 +121,5 @@ export async function patchRowReview(
 }
 
 export async function exportEstimate(id: number): Promise<Blob> {
-  const token = sessionStorage.getItem("ciw.auth.token")
-  const res = await fetch(`/api/estimates/${id}/export`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!res.ok) throw new Error(`Экспорт не удался (${res.status})`)
-  return res.blob()
+  return apiGetBlob(`/estimates/${id}/export`)
 }
