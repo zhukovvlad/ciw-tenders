@@ -117,6 +117,21 @@
   лишний `CREATE EXTENSION` в [neon-database-setup.md](instructions/neon-database-setup.md) (ревизия `0001`
   уже его делает); порядок импортов в `alembic/script.py.mako` (ruff I001 на сгенерированных ревизиях).
 
+## 🟢 Pluggable LLM provider — полировка из ревью (тест-гигиена)
+
+- **Что:** мелочи, выявленные ревью PR #8 (не блокеры, на корректность не влияют):
+  - `test_system_prompt_requires_row_number_and_refusal_channel` ([test_llm_matching_common.py](../backend/tests/test_llm_matching_common.py))
+    ассертит только `"0" in SYSTEM_PROMPT` — слабый гейт: не пинит инструкцию «номер строки, а не код»,
+    регрессия с удалением этой инструкции не будет поймана (сам промпт корректен).
+  - `_FakeClient.post(self, url, headers, json)` ([test_openrouter_matcher.py](../backend/tests/test_openrouter_matcher.py))
+    позиционная сигнатура; прод зовёт `headers=`/`json=` по имени, так что тесты проходят, но фейк
+    вводит в заблуждение про порядок аргументов. Сделать `def post(self, url, *, headers, json)`.
+  - `_raise_body_error` ([openrouter_matcher.py](../backend/app/infrastructure/ai/openrouter_matcher.py))
+    аннотирован `-> None`, но всегда бросает — точнее `-> typing.Never`.
+- **Почему отложено:** косметика/тест-гигиена; сьют зелёный, поведение корректно. Кандидаты на попутную
+  чистку при следующем касании этих файлов.
+- **Связано:** PR #8 (CodeRabbit-ревью), финальное whole-branch ревью под-проекта.
+
 ---
 
 ## Сознательно вне объёма (не долг, а план на будущее)
@@ -128,6 +143,8 @@
 - Сброс и смена пароля; самостоятельная регистрация.
 - Фронтенд: страница логина, хранение токена, гварды роутов (бэкенд даёт готовый API).
 - Перевод `/api/estimates/match` на отдачу Excel-файла; вынос обогащения смет в фоновые задачи.
+- Google-адаптер LLM-арбитра матчинга (порт `LLMMatcher` готов к ещё одному провайдеру) — не делался
+  в под-проекте pluggable-llm-provider; добавляется по той же схеме, что `OpenRouterLLMMatcher`.
 
 ---
 

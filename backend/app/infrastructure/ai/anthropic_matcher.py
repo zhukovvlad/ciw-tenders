@@ -1,26 +1,18 @@
-"""Реализация LLMMatcher через Anthropic Claude 3.5 Sonnet.
-
-LLM выступает арбитром: из топ-K кандидатов выбирает наиболее подходящую статью
-(или сообщает об отсутствии совпадения). Возвращаем индекс — детерминированный парсинг.
-"""
+"""LLMMatcher через прямой Anthropic SDK. Семантика промпта/парсинга — из llm_matching_common."""
 
 from __future__ import annotations
-
-import re
 
 import anthropic
 import httpx
 
 from app.domain.entities import ArticleCandidate, TemplateArticle
 from app.domain.ports import LLMMatcher
-from app.infrastructure.retry import retry_transient
-
-_SYSTEM_PROMPT = (
-    "Ты — эксперт по строительным сметам. Тебе дают наименование работы из сметы "
-    "и пронумерованный список статей-кандидатов из справочника СМР. "
-    "Выбери одну статью, которая точнее всего соответствует работе. "
-    "Ответь СТРОГО одним числом — номером кандидата. Если ни один не подходит, ответь 0."
+from app.infrastructure.ai.llm_matching_common import (
+    SYSTEM_PROMPT,
+    build_user_prompt,
+    parse_choice,
 )
+from app.infrastructure.retry import retry_transient
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -37,11 +29,13 @@ class AnthropicLLMMatcher(LLMMatcher):
     def __init__(
         self,
         api_key: str,
-        model: str = "claude-3-5-sonnet-20240620",
+        model: str = "claude-sonnet-4-6",
         timeout_s: float = 30.0,
         retry_budget: int = 3,
+        *,
+        client: anthropic.Anthropic | None = None,
     ) -> None:
-        self._client = anthropic.Anthropic(api_key=api_key, timeout=timeout_s)
+        self._client = client or anthropic.Anthropic(api_key=api_key, timeout=timeout_s)
         self._model = model
         self._retry_budget = retry_budget
 
@@ -50,32 +44,17 @@ class AnthropicLLMMatcher(LLMMatcher):
     ) -> TemplateArticle | None:
         if not candidates:
             return None
-
-        listing = "\n".join(
-            f"{i + 1}. [{c.article.article_code}] {c.article.name}"
-            for i, c in enumerate(candidates)
-        )
-        user_prompt = f'Работа из сметы: "{query}"\n\nКандидаты:\n{listing}'
+        user_prompt = build_user_prompt(query, candidates)
 
         def _call_llm() -> str:
             response = self._client.messages.create(
                 model=self._model,
                 max_tokens=16,
-                system=_SYSTEM_PROMPT,
+                temperature=0,
+                system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_prompt}],
             )
             return response.content[0].text if response.content else "0"
 
         text = retry_transient(_call_llm, budget=self._retry_budget, classify=_is_transient)
-
-        # Structural validation: must be parseable integer
-        match = re.search(r"\d+", text)
-        if not match:
-            # Non-JSON / unparseable response — structural defect, decline without retry
-            return None
-        choice = int(match.group())
-
-        # Structural validation: chosen index must be within candidates range
-        if not (1 <= choice <= len(candidates)):
-            return None
-        return candidates[choice - 1].article
+        return parse_choice(text, candidates)
