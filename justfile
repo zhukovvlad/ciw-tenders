@@ -64,8 +64,13 @@ create-admin:
     cd {{backend}}; uv run python -m app.scripts.create_admin
 
 # Celery-воркер: матчинг смет + эмбеддинг справочника. По умолчанию solo-pool (Windows).
-# Прод (Linux): just celery-worker "--pool=prefork --concurrency=4 --loglevel=info"
-celery-worker *args="--pool=solo --loglevel=info":
+# --without-mingle/--without-gossip: воркер не шлёт startup-broadcast в Redis pub/sub-каналы
+# (доставка задач идёт через списки LPUSH/BRPOP — каналы не нужны). Снимает падение
+# "NoPermissionError: No permissions to access a channel" на Redis-ACL без прав на каналы;
+# побочно отключает inter-worker sync и remote-control (`celery inspect`) — здесь не используются.
+# Прод (Linux): just celery-worker "--pool=prefork --concurrency=4 --loglevel=info" (если на
+# прод-Redis каналы разрешены — переопределяет args целиком и вернёт mingle/gossip).
+celery-worker *args="--pool=solo --loglevel=info --without-mingle --without-gossip":
     cd {{backend}}; uv run celery -A app.infrastructure.tasks.celery_app worker {{args}}
 
 # MinIO (S3-хранилище оригиналов смет): API на :9000, консоль на :9001, данные в ./minio-data (gitignored).
