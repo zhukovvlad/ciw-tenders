@@ -76,6 +76,12 @@ class ArticleOut(BaseModel):
         )
 
 
+class ArticleSearchOut(BaseModel):
+    id: int
+    code: str
+    name: str
+
+
 class DeleteAllResponse(BaseModel):
     deleted: int
 

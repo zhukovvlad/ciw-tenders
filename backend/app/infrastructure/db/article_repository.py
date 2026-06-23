@@ -77,6 +77,20 @@ class SqlAlchemyArticleRepository(ArticleRepository):
         ).limit(1)
         return self._session.scalars(stmt).first() is not None
 
+    def search(self, q: str, limit: int = 20) -> list[TemplateArticle]:
+        # экранируем LIKE-метасимволы в пользовательском вводе
+        like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        stmt = (
+            select(TemplateArticleModel)
+            .where(
+                TemplateArticleModel.article_code.ilike(like, escape="\\")
+                | TemplateArticleModel.name.ilike(like, escape="\\")
+            )
+            .order_by(_CODE_ORDER)
+            .limit(limit)
+        )
+        return [self._to_entity(m) for m in self._session.scalars(stmt)]
+
     def search_similar(self, embedding: list[float], top_k: int = 3) -> list[ArticleCandidate]:
         distance = TemplateArticleModel.embedding.cosine_distance(embedding)
         stmt = (

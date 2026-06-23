@@ -105,11 +105,12 @@ def auth_headers():
 def article_repo(estimate_repo):
     """FakeArticleRepository для одного теста (SP3).
 
-    Переопределяет get_estimate_review_service, чтобы сервис ревью использовал
-    тот же estimate_repo, что и client-фикстура, плюс этот article_repo.
+    Переопределяет get_estimate_review_service и get_article_service, чтобы
+    сервис ревью и роут поиска использовали тот же article_repo.
     """
-    from app.api.deps import get_estimate_review_service
+    from app.api.deps import get_article_service, get_estimate_review_service
     from app.main import app
+    from app.services.article_service import ArticleService
     from app.services.estimate_review_service import EstimateReviewService
     from tests.fakes import FakeArticleRepository
 
@@ -118,9 +119,14 @@ def article_repo(estimate_repo):
     def _review_svc() -> EstimateReviewService:
         return EstimateReviewService(estimates=estimate_repo, articles=repo)
 
+    def _article_svc() -> ArticleService:
+        return ArticleService(repository=repo)
+
     app.dependency_overrides[get_estimate_review_service] = _review_svc
+    app.dependency_overrides[get_article_service] = _article_svc
     yield repo
     app.dependency_overrides.pop(get_estimate_review_service, None)
+    app.dependency_overrides.pop(get_article_service, None)
 
 
 @pytest.fixture()

@@ -60,6 +60,11 @@ class ArticleRepository(ABC):
     def get_by_id(self, article_id: int) -> TemplateArticle | None: ...
 
     @abstractmethod
+    def search(self, q: str, limit: int = 20) -> list[TemplateArticle]:
+        """Лексический поиск code ILIKE %q% OR name ILIKE %q% (НЕ фильтрует по embedding)."""
+        ...
+
+    @abstractmethod
     def matching_readiness(self) -> tuple[int, int]:
         """(total, pending): всего статей и сколько с embedding IS NULL. Для gate матчинга."""
         ...

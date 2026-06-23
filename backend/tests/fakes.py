@@ -83,6 +83,14 @@ class FakeRepository(ArticleRepository):
         prefix = f"{code}."
         return any(a.article_code.startswith(prefix) for a in self._store)
 
+    def search(self, q: str, limit: int = 20) -> list[TemplateArticle]:
+        ql = q.lower()
+        hits = [
+            a for a in self._store
+            if ql in a.article_code.lower() or ql in a.name.lower()
+        ]
+        return sorted(hits, key=lambda a: a.article_code)[:limit]
+
     def search_similar(self, embedding: list[float], top_k: int = 3) -> list[ArticleCandidate]:
         return self._candidates[:top_k]
 
@@ -140,6 +148,14 @@ class FakeArticleRepository(ArticleRepository):
     def has_descendant_codes(self, code: str) -> bool:
         prefix = f"{code}."
         return any(a.article_code.startswith(prefix) for a in self.rows.values())
+
+    def search(self, q: str, limit: int = 20) -> list[TemplateArticle]:
+        ql = q.lower()
+        hits = [
+            a for a in self.rows.values()
+            if ql in a.article_code.lower() or ql in a.name.lower()
+        ]
+        return sorted(hits, key=lambda a: a.article_code)[:limit]
 
     def search_similar(self, embedding: list[float], top_k: int = 3) -> list[ArticleCandidate]:
         return []
