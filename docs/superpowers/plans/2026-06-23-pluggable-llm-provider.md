@@ -21,7 +21,7 @@
 - **Только обычные chat-модели** (малый `max_tokens`); reasoning вне объёма.
 - **Вне объёма:** эмбеддер, Google-адаптер, любые правки SP3.
 - **Перед мерджем (человек):** сверить актуальный слаг `anthropic/claude-3.5-sonnet` на стороне OpenRouter.
-- **[Операционно, критично] Убрать `LLM_MODEL`** из `backend/.env` и CI-секретов ДО мерджа: депрекация-валидатор роняет `Settings` при любом заданном `LLM_MODEL`, а `conftest` инстанцирует `Settings` для **каждого** теста → застрянет НЕ только конфиг-тест, а **весь** `pytest` (Task 5 Step 5 «полный прогон зелёный» недостижим на грязной среде). Код верен — это гигиена окружения.
+- **[Операционно, критично] Убрать `LLM_MODEL` из ВСЕХ источников окружения** ДО мерджа/прогона: валидатор читает `os.environ` — источник ему безразличен. Проверять не только `backend/.env` и CI-секреты, но и **локальный шелл-профиль** (`export LLM_MODEL=...`), `docker-compose environment:`, k8s-манифесты. Дешёвый чек на каждой машине, где гоняют тесты: `env | grep LLM_MODEL` (должно быть пусто). Иначе `conftest` инстанцирует `Settings` для **каждого** теста → застрянет **весь** `pytest`, а в гите при этом чисто (самый коварный случай — переменная из шелла/compose, которой нет ни в одном файле репо). Код верен — это гигиена окружения.
 
 ## File Structure
 
@@ -448,6 +448,16 @@ def test_body_error_permanent_is_loud_not_transient() -> None:
     assert not exc.value.transient and "model not found" in str(exc.value)
 
 
+def test_empty_choices_is_transient() -> None:
+    # ОТДЕЛЬНАЯ ветка от структурной (ниже): пусто/нет choices → ТРАНЗИЕНТ (модель моргнула) →
+    # становится TransientError. Граница «пусто=транзиент, кривая структура=перманент» запинена тем,
+    # что это РАЗНЫЕ типы исключений (TransientError vs _BodyError), а не оба «просто исключение».
+    client = _FakeClient(data={"choices": []})
+    matcher = OpenRouterLLMMatcher(api_key="k", client=client, retry_budget=1)
+    with pytest.raises(TransientError):
+        matcher.choose_best("q", _cands())
+
+
 def test_unexpected_choice_structure_is_loud_permanent() -> None:
     # есть choices, но без message.content (некоторые модели/прокси) → НЕ голый KeyError,
     # а перманентный _BodyError с логом (единообразно с error-веткой, без «глухого» partial_error)
@@ -455,7 +465,7 @@ def test_unexpected_choice_structure_is_loud_permanent() -> None:
     matcher = OpenRouterLLMMatcher(api_key="k", client=client, retry_budget=1)
     with pytest.raises(_BodyError) as exc:
         matcher.choose_best("q", _cands())
-    assert not exc.value.transient
+    assert not exc.value.transient  # перманент явно — не съедет в транзиент при рефакторе
 
 
 def test_empty_candidates_returns_none() -> None:
