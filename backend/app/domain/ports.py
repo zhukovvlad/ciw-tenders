@@ -211,13 +211,14 @@ class EstimateRepository(ABC):
 
     @abstractmethod
     def fetch_matchable_nodes(self, estimate_id: int) -> list[MatchableNode]:
-        """status ∈ {pending, error, no_match} И embedding IS NOT NULL."""
+        """status ∈ {pending, error, no_match} И embedding IS NOT NULL
+        И review_status = 'unreviewed' (ручные правки SP3 не перематчиваются)."""
         ...
 
     @abstractmethod
     def save_node_match(self, node_id: int, result: NodeMatch) -> None:
-        """Перезаписывает весь снимок узла (status/matched_*/score/candidates);
-        на успехе match_error→NULL."""
+        """Перезаписывает весь AI-снимок узла (status/matched_*/score/candidates),
+        НО только WHERE review_status='unreviewed' (CAS). На успехе match_error→NULL."""
         ...
 
     @abstractmethod

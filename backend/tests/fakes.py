@@ -277,6 +277,16 @@ class FakeEstimateRepository(EstimateRepository):
                 "embedding": None,
                 "status": "pending",
                 "match_error": None,
+                "matched_article_id": None,
+                "matched_code": None,
+                "matched_name": None,
+                "score": None,
+                "candidates": [],
+                "review_status": "unreviewed",
+                "final_article_id": None,
+                "final_code": None,
+                "final_name": None,
+                "reviewed_at": None,
             }
             rows.append(
                 StoredEstimateRow(
@@ -390,12 +400,23 @@ class FakeEstimateRepository(EstimateRepository):
             if n["estimate_id"] == estimate_id
             and n["status"] in ("pending", "error", "no_match")
             and n["embedding"] is not None
+            and n["review_status"] == "unreviewed"
         ]
 
     def save_node_match(self, node_id: int, result: NodeMatch) -> None:
         n = self.nodes[node_id]
+        if n["review_status"] != "unreviewed":
+            return  # CAS: человек тронул строку — AI-снимок не затирает решение
         n["status"] = str(result.status)
-        n["match_error"] = result.match_error  # на успехе result.match_error=None → обнуляется
+        n["match_error"] = result.match_error
+        n["matched_article_id"] = result.matched_id
+        n["matched_code"] = result.matched_code
+        n["matched_name"] = result.matched_name
+        n["score"] = result.score
+        n["candidates"] = [
+            {"id": c.id, "code": c.code, "name": c.name, "score": c.score}
+            for c in result.candidates
+        ]
 
     def count_node_errors(self, estimate_id: int) -> int:
         return sum(

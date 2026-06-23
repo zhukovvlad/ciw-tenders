@@ -215,6 +215,7 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 EstimateRowModel.estimate_id == estimate_id,
                 EstimateRowModel.status.in_(("pending", "error", "no_match")),
                 EstimateRowModel.embedding.is_not(None),
+                EstimateRowModel.review_status == "unreviewed",
             )
             .order_by(EstimateRowModel.id)
         )
@@ -224,10 +225,15 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
         ]
 
     def save_node_match(self, node_id: int, result: NodeMatch) -> None:
+        # CAS: пишем AI-снимок только если строку ещё не тронул человек. Закрывает гонку
+        # read(matchable)→write с правкой ревью (SP3): нулевой rowcount → решение сохранено.
         self._session.execute(
-            update(EstimateRowModel).where(EstimateRowModel.id == node_id).values(
-                **self._match_values(result)
+            update(EstimateRowModel)
+            .where(
+                EstimateRowModel.id == node_id,
+                EstimateRowModel.review_status == "unreviewed",
             )
+            .values(**self._match_values(result))
         )
         self._session.commit()
 
