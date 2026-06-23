@@ -22,5 +22,8 @@ Thumbs.db
 
 temp/
 
+# MinIO (локальное S3-хранилище, just minio)
+minio-data/
+
 # Superpowers brainstorming artifacts
 .superpowers/

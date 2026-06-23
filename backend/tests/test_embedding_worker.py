@@ -23,6 +23,12 @@ class _Queue(EmbeddingQueueRepository):
         self.saved[article_id] = vector
         return True
 
+    def try_embed_lock(self) -> bool:
+        return True
+
+    def release_embed_lock(self) -> None:
+        pass
+
 
 def test_run_once_embeds_pending_in_batches() -> None:
     queue = _Queue(

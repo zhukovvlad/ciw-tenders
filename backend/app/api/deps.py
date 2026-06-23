@@ -11,7 +11,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings, get_settings
+from app.core.config import get_settings
 from app.domain.entities import Role, User
 from app.domain.errors import TokenError
 from app.domain.ports import (
@@ -22,6 +22,7 @@ from app.domain.ports import (
     LLMMatcher,
     ObjectStorage,
     PasswordHasher,
+    TaskQueue,
     TokenService,
     UserRepository,
 )
@@ -37,9 +38,9 @@ from app.infrastructure.db.user_repository import SqlAlchemyUserRepository
 from app.infrastructure.storage.s3_object_storage import S3ObjectStorage
 from app.services.article_service import ArticleService
 from app.services.auth_service import AuthService
+from app.services.estimate_matching_service import EstimateMatchingService
 from app.services.estimate_parser import EstimateParser
 from app.services.estimate_service import EstimateService
-from app.services.excel_parser import ExcelEstimateParser
 from app.services.matching_service import MatchingService
 from app.services.template_ingest_service import TemplateIngestService
 from app.services.template_parser import TemplateParser
@@ -117,17 +118,51 @@ def get_embedder() -> Embedder:
         base_url=settings.embedding_base_url,
         model=settings.embedding_model,
         dimensions=settings.embedding_dim,
+        timeout_s=settings.ai_call_timeout_s,
+        retry_budget=settings.transient_retry_budget,
     )
 
 
 @lru_cache
 def get_llm_matcher() -> LLMMatcher:
     settings = get_settings()
-    return AnthropicLLMMatcher(api_key=settings.anthropic_api_key, model=settings.llm_model)
+    return AnthropicLLMMatcher(
+        api_key=settings.anthropic_api_key,
+        model=settings.llm_model,
+        timeout_s=settings.ai_call_timeout_s,
+        retry_budget=settings.transient_retry_budget,
+    )
 
 
-def get_parser() -> ExcelEstimateParser:
-    return ExcelEstimateParser()
+@lru_cache
+def get_task_queue() -> TaskQueue:
+    # Ленивый импорт: не тащить Celery при старте API-модуля.
+    from app.infrastructure.tasks.task_queue import CeleryTaskQueue
+
+    return CeleryTaskQueue()
+
+
+def build_estimate_matching_service(session: Session) -> EstimateMatchingService:
+    """Фабрика для Celery-задачи (вне FastAPI DI): репозитории — на ПЕРЕДАННОЙ сессии
+    (пиннутый коннект задачи), а embedder/LLM-матчер берём из кэшированных синглтонов
+    `get_embedder()`/`get_llm_matcher()`. Они stateless (конфиг + HTTP-клиент), поэтому
+    переиспользуются процессом воркера — без создания нового httpx-клиента на каждую
+    задачу и каждый gate-retry (иначе течёт пул сокетов на долгоживущем воркере)."""
+    settings = get_settings()
+    articles = SqlAlchemyArticleRepository(session)
+    estimates = SqlAlchemyEstimateRepository(session)
+    matcher = MatchingService(
+        articles,
+        embedder=None,
+        llm_matcher=get_llm_matcher(),
+        confidence_threshold=settings.confidence_threshold,
+    )
+    return EstimateMatchingService(
+        matcher=matcher,
+        embedder=get_embedder(),
+        estimates=estimates,
+        articles=articles,
+    )
 
 
 def get_article_service(
@@ -146,20 +181,6 @@ def get_template_ingest_service(
     repository: ArticleImportRepository = Depends(get_import_repository),
 ) -> TemplateIngestService:
     return TemplateIngestService(parser=TemplateParser(), repository=repository)
-
-
-def get_matching_service(
-    repository: ArticleRepository = Depends(get_repository),
-    embedder: Embedder = Depends(get_embedder),
-    llm_matcher: LLMMatcher = Depends(get_llm_matcher),
-    settings: Settings = Depends(get_settings),
-) -> MatchingService:
-    return MatchingService(
-        repository=repository,
-        embedder=embedder,
-        llm_matcher=llm_matcher,
-        confidence_threshold=settings.confidence_threshold,
-    )
 
 
 def get_estimate_parser() -> EstimateParser:
@@ -185,5 +206,8 @@ def get_estimate_service(
     parser: EstimateParser = Depends(get_estimate_parser),
     repository: EstimateRepository = Depends(get_estimate_repository),
     storage: ObjectStorage = Depends(get_object_storage),
+    task_queue: TaskQueue = Depends(get_task_queue),
 ) -> EstimateService:
-    return EstimateService(parser=parser, repository=repository, storage=storage)
+    return EstimateService(
+        parser=parser, repository=repository, storage=storage, task_queue=task_queue
+    )

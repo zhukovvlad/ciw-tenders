@@ -31,3 +31,15 @@ def test_settings_have_s3_and_upload_limit() -> None:
     assert s.s3_bucket == "estimates"
     assert s.estimate_max_upload_mb == 25.0
     assert s.s3_endpoint  # непустой дефолт
+
+
+def test_settings_have_celery_and_matching_knobs() -> None:
+    from app.core.config import Settings
+
+    s = Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
+    assert s.celery_broker_url  # непустой дефолт
+    assert s.task_time_limit_s > s.task_soft_time_limit_s
+    assert s.ai_call_timeout_s > 0
+    assert s.transient_retry_budget >= 1
+    assert s.gate_retry_max >= 1
+    assert s.gate_retry_backoff_s > 0

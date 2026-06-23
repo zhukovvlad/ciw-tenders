@@ -43,6 +43,22 @@ class Settings(BaseSettings):
 
     estimate_max_upload_mb: float = 25.0
 
+    # Celery / Redis (брокер на Timeweb). Result backend НЕ используется — БД источник правды.
+    celery_broker_url: str = "redis://localhost:6379/0"
+
+    # Тайм-лимиты задачи матчинга (от них зависит истинность семантики running):
+    # зависший воркер → SIGKILL/исключение → коннект рвётся → PG отпускает advisory-lock.
+    task_soft_time_limit_s: int = 600
+    task_time_limit_s: int = 660
+
+    # Инлайн-обработка транзиента в адаптерах эмбеддера/LLM:
+    ai_call_timeout_s: float = 30.0       # hard per-call timeout
+    transient_retry_budget: int = 3       # попыток на один вызов до TransientError
+
+    # Bounded gate-retry: ожидание готовности справочника (DictionaryNotReadyError → self.retry).
+    gate_retry_max: int = 30
+    gate_retry_backoff_s: float = 20.0
+
 
 @lru_cache
 def get_settings() -> Settings:

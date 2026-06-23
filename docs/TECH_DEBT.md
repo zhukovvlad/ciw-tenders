@@ -8,6 +8,39 @@
 
 ---
 
+## 🟡 SP2-матчинг: статус `running` не самовосстанавливается после жёсткого краша воркера
+
+**Что:** session-level advisory-lock держится на пиннутом коннекте Celery-задачи; при крахе/SIGKILL
+коннект рвётся → Postgres сам отпускает лок (это корректно). НО строка `estimates.status` остаётся
+`running` навсегда — ничто её не перезаписывает. Ре-триггер `POST /api/estimates/{id}/match` при этом
+работает (новая задача берёт уже свободный лок и доматчивает), но ответный `detail` для `running`
+показывает «уже выполняется» — вводит в заблуждение.
+
+**Почему отложено:** деградация мягкая (ре-триггер всегда проходит, состояние не портится); полноценное
+самовосстановление — это SP3 (ревью/правки статусов). Выявлено финальным ревью SP2.
+
+**Почему остаётся (сужено):** непредвиденное исключение *в процессе* задачи теперь переводит смету в
+`partial_error` (см. «Погашено» ниже). Открыт только **жёсткий** краш (SIGKILL/OOM/потеря воркера),
+когда Python-обработчик `except` не успевает отработать: Postgres лок отпускает, но строка остаётся `running`.
+
+**Как чинить:** SP3 — sweep по `updated_at` + `task_time_limit_s` (660s) для зависших `running` →
+`blocked`/`pending`; ЛИБО проверка живости лока (`pg_try_advisory_lock` пробно) в роуте ре-триггера,
+чтобы `detail` отражал реальность, а не stored-статус. См. [estimate_matching_service.py](../backend/app/services/estimate_matching_service.py).
+
+## 🟢 SP2-матчинг: пул коннектов vs concurrency воркера + drain на каждый `create_article`
+
+**Что:** (1) `engine` на дефолтном QueuePool (5+10). Каждая running-задача пинит коннект до
+`task_time_limit_s`=660s. Dev-воркер `--pool=solo` (concurrency 1) — безопасно, но прод с
+`prefork concurrency>1` + коннекты FastAPI-запросов могут исчерпать пул. (2) `create_article`
+энкьюит полный drain справочника на каждое добавление (singleton-лок + drain-to-zero делают это
+безопасным, но при массовом добавлении через API — N почти-no-op задач).
+
+**Как чинить:** (1) задокументировать/выставить `pool_size` относительно concurrency воркера перед
+масштабированием за пределы `--pool=solo`; (2) при необходимости — дебаунс/батч enqueue эмбеддинга.
+См. [session.py](../backend/app/infrastructure/db/session.py), [articles.py](../backend/app/api/routes/articles.py).
+
+---
+
 ## 🟡 Alembic autogenerate шумит на `Vector`/HNSW
 
 - **Что:** при будущих `just makemigration` автогенерация некорректно интроспектит тип `Vector` и
@@ -100,6 +133,15 @@
 
 ## Погашено
 
+- **🟡 SP2: узкий перехват исключений в embed/match (смета залипала в `running`)** — закрыто по
+  комментарию Copilot к PR #7 (2026-06-23). В `match_estimate` добавлен top-level `except` (не gate,
+  не transient) → `PARTIAL_ERROR` с деталью перед re-raise; `DictionaryNotReadyError` по-прежнему
+  пробрасывается для gate-retry. Лок отпускается в `finally`. Остаётся только жёсткий краш (см. живой
+  пункт про staleness выше). Тест `test_unexpected_error_sets_partial_error_and_reraises`.
+- **🟢 SP2: churn AI-клиентов на воркере** — закрыто по комментарию Copilot к PR #7 (2026-06-23).
+  `build_estimate_matching_service` берёт `get_embedder()`/`get_llm_matcher()` (кэшированные синглтоны)
+  вместо создания нового `httpx.Client`/Anthropic-клиента на каждую задачу и gate-retry; `build_embedder`
+  удалён, репозитории по-прежнему строятся на пиннутой сессии задачи.
 - **🔴 ORM `TemplateArticleModel` расходился со схемой (иерархия)** — закрыто фичей template-ingestion
   (PR #3). `models.py` теперь на дереве: `parent_id` (self-FK), `embedding_input`, `embedding` (VECTOR);
   `section_name` удалён везде. `article_service`/матчинг/репозиторий/DTO переведены на дерево.

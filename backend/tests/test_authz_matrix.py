@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.api.deps import (
     get_article_service,
     get_password_hasher,
+    get_task_queue,
     get_token_service,
     get_user_repository,
 )
@@ -16,6 +17,7 @@ from app.services.article_service import ArticleService
 from tests.fakes import (
     FakePasswordHasher,
     FakeRepository,
+    FakeTaskQueue,
     FakeTokenService,
     FakeUserRepository,
 )
@@ -32,6 +34,7 @@ def _wire() -> None:
     app.dependency_overrides[get_article_service] = lambda: ArticleService(
         repository=FakeRepository()
     )
+    app.dependency_overrides[get_task_queue] = FakeTaskQueue
 
 
 def teardown_function() -> None:

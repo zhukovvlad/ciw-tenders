@@ -10,7 +10,6 @@ from app.domain.entities import (
     Estimate,
     EstimateSummary,
     ImportReport,
-    MatchResult,
     Role,
     StoredEstimateRow,
     TemplateArticle,
@@ -134,12 +133,16 @@ class EstimateRowOut(BaseModel):
     section_type: str | None
     depth: int
     status: str
+    matched_code: str | None = None
+    matched_name: str | None = None
+    score: float | None = None
 
     @classmethod
     def from_entity(cls, r: StoredEstimateRow) -> EstimateRowOut:
         return cls(
             code=r.code, name=r.name, parent_code=r.parent_code,
             section_type=r.section_type, depth=r.depth, status=r.status,
+            matched_code=r.matched_code, matched_name=r.matched_name, score=r.score,
         )
 
 
@@ -147,47 +150,15 @@ class EstimateDetailOut(BaseModel):
     id: int
     filename: str
     status: str
+    status_detail: str | None = None
     created_at: datetime
     rows: list[EstimateRowOut]
 
     @classmethod
     def from_entity(cls, e: Estimate) -> EstimateDetailOut:
         return cls(
-            id=e.id, filename=e.filename, status=e.status, created_at=e.created_at,
-            rows=[EstimateRowOut.from_entity(r) for r in e.rows],
+            id=e.id, filename=e.filename, status=e.status, status_detail=e.status_detail,
+            created_at=e.created_at, rows=[EstimateRowOut.from_entity(r) for r in e.rows],
         )
 
 
-class CandidateOut(BaseModel):
-    article_code: str
-    name: str
-    score: float
-
-
-class MatchResultOut(BaseModel):
-    row_number: int
-    source_name: str
-    status: str
-    score: float
-    matched_code: str | None
-    matched_name: str | None
-    candidates: list[CandidateOut]
-
-    @classmethod
-    def from_entity(cls, result: MatchResult) -> MatchResultOut:
-        return cls(
-            row_number=result.source_row.row_number,
-            source_name=result.source_row.name,
-            status=result.status.value,
-            score=round(result.score, 4),
-            matched_code=result.matched_article.article_code if result.matched_article else None,
-            matched_name=result.matched_article.name if result.matched_article else None,
-            candidates=[
-                CandidateOut(
-                    article_code=c.article.article_code,
-                    name=c.article.name,
-                    score=round(c.score, 4),
-                )
-                for c in result.candidates
-            ],
-        )

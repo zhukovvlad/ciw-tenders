@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 
 from app.domain.entities import Estimate, EstimateSummary, NewEstimate
-from app.domain.ports import EstimateRepository, ObjectStorage
+from app.domain.ports import EstimateRepository, ObjectStorage, TaskQueue
 from app.services.estimate_parser import EstimateParser
 
 _XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -25,10 +25,12 @@ class EstimateService:
         parser: EstimateParser,
         repository: EstimateRepository,
         storage: ObjectStorage,
+        task_queue: TaskQueue,
     ) -> None:
         self._parser = parser
         self._repository = repository
         self._storage = storage
+        self._task_queue = task_queue
 
     def ingest(self, content: bytes, filename: str, owner_id: int) -> IngestResult:
         parsed = self._parser.parse(content)  # бросает ValueError (нет колонок) до put
@@ -38,6 +40,10 @@ class EstimateService:
             NewEstimate(user_id=owner_id, filename=filename, original_object_key=key),
             parsed.nodes,
         )
+        try:
+            self._task_queue.enqueue_match(estimate.id)  # строго ПОСЛЕ коммита create
+        except Exception:  # noqa: BLE001 — best-effort: брокер недоступен → смета остаётся
+            pass  # pending; загрузка НЕ падает (500 после коммита → дубли). Ручной ре-триггер.
         return IngestResult(
             estimate=estimate,
             positions_count=len(parsed.positions),

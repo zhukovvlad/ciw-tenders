@@ -7,14 +7,6 @@ from datetime import datetime
 from enum import StrEnum
 
 
-class MatchStatus(StrEnum):
-    """Статус сопоставления строки сметы с эталонной статьёй."""
-
-    CONFIDENT = "Уверенное совпадение"
-    NEEDS_REVIEW = "Требует проверки"
-    NO_MATCH = "Нет совпадений"
-
-
 class Role(StrEnum):
     """Роль пользователя."""
 
@@ -35,31 +27,11 @@ class TemplateArticle:
 
 
 @dataclass(frozen=True, slots=True)
-class EstimateRow:
-    """Строка целевой сметы (после фильтрации по виду раздела 'СМР')."""
-
-    row_number: int
-    name: str
-    raw: dict[str, object] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
 class ArticleCandidate:
     """Кандидат из векторного поиска: статья + мера близости (cosine similarity 0..1)."""
 
     article: TemplateArticle
     score: float
-
-
-@dataclass(frozen=True, slots=True)
-class MatchResult:
-    """Итог сопоставления одной строки сметы."""
-
-    source_row: EstimateRow
-    matched_article: TemplateArticle | None
-    status: MatchStatus
-    score: float
-    candidates: list[ArticleCandidate] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +109,26 @@ class PendingEmbedding:
     embedding_input: str
 
 
+class EstimateRowStatus(StrEnum):
+    """Статус узла сметы при матчинге (слаг — для хранения; рус.подписи в API-DTO)."""
+
+    PENDING = "pending"
+    CONFIDENT = "confident"
+    NEEDS_REVIEW = "needs_review"
+    NO_MATCH = "no_match"
+    ERROR = "error"
+
+
+class EstimateStatus(StrEnum):
+    """Статус сметы в пайплайне матчинга."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    READY = "ready"
+    PARTIAL_ERROR = "partial_error"
+    BLOCKED = "blocked"
+
+
 class EstimateRowKind(StrEnum):
     """Тип строки сметы при разборе."""
 
@@ -196,6 +188,9 @@ class StoredEstimateRow:
     source_index: int
     status: str
     has_embedding: bool = False
+    matched_code: str | None = None
+    matched_name: str | None = None
+    score: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +203,7 @@ class Estimate:
     status: str
     created_at: datetime
     rows: list[StoredEstimateRow] = field(default_factory=list)
+    status_detail: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,3 +213,35 @@ class EstimateSummary:
     status: str
     nodes_count: int
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class MatchCandidate:
+    """Замороженный кандидат в снимке (для ревью в SP3). id — для перелинковки."""
+
+    id: int | None
+    code: str
+    name: str
+    score: float
+
+
+@dataclass(frozen=True, slots=True)
+class NodeMatch:
+    """Результат матчинга одного узла (пишется в снимок estimate_rows)."""
+
+    status: EstimateRowStatus
+    matched_id: int | None = None
+    matched_code: str | None = None
+    matched_name: str | None = None
+    score: float | None = None
+    candidates: list[MatchCandidate] = field(default_factory=list)
+    match_error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MatchableNode:
+    """Узел, готовый к матчингу: id + сохранённый вектор + текст для арбитра."""
+
+    id: int
+    embedding: list[float]
+    embedding_input: str

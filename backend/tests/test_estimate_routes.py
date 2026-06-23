@@ -13,7 +13,7 @@ from app.domain.entities import Role, User
 from app.main import app
 from app.services.estimate_parser import EstimateParser
 from app.services.estimate_service import EstimateService
-from tests.fakes import FakeEstimateRepository, FakeObjectStorage
+from tests.fakes import FakeEstimateRepository, FakeObjectStorage, FakeTaskQueue
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -42,7 +42,7 @@ def _user(uid: int = 2, role: Role = Role.USER) -> Callable[[], User]:
 
 def _svc_factory(repo: FakeEstimateRepository, storage: FakeObjectStorage):
     def _f() -> EstimateService:
-        return EstimateService(EstimateParser(), repo, storage)
+        return EstimateService(EstimateParser(), repo, storage, task_queue=FakeTaskQueue())
 
     return _f
 
@@ -113,7 +113,9 @@ def test_upload_storage_unavailable_503() -> None:
 
 def test_list_and_get_ownership() -> None:
     repo, storage = FakeEstimateRepository(), FakeObjectStorage()
-    EstimateService(EstimateParser(), repo, storage).ingest(_xlsx(), "a.xlsx", owner_id=2)
+    EstimateService(EstimateParser(), repo, storage, task_queue=FakeTaskQueue()).ingest(
+        _xlsx(), "a.xlsx", owner_id=2
+    )
     client = _client(repo, storage)  # user id=2
     assert len(client.get("/api/estimates").json()) == 1
     other = _client(repo, storage, user=_user(uid=9))  # чужой
@@ -122,7 +124,9 @@ def test_list_and_get_ownership() -> None:
 
 def test_delete_removes_object() -> None:
     repo, storage = FakeEstimateRepository(), FakeObjectStorage()
-    EstimateService(EstimateParser(), repo, storage).ingest(_xlsx(), "a.xlsx", owner_id=2)
+    EstimateService(EstimateParser(), repo, storage, task_queue=FakeTaskQueue()).ingest(
+        _xlsx(), "a.xlsx", owner_id=2
+    )
     client = _client(repo, storage)
     resp = client.delete("/api/estimates/1")
     assert resp.status_code == 204
@@ -132,3 +136,42 @@ def test_delete_removes_object() -> None:
 def test_requires_auth() -> None:
     client = TestClient(app)
     assert client.get("/api/estimates").status_code == 401
+
+
+def test_retrigger_match_enqueues_for_owner() -> None:
+    from app.api.deps import get_estimate_repository, get_task_queue
+    from tests.fakes import FakeTaskQueue
+
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    EstimateService(EstimateParser(), repo, storage, task_queue=FakeTaskQueue()).ingest(
+        _xlsx(), "a.xlsx", owner_id=2)
+    queue = FakeTaskQueue()
+    app.dependency_overrides[get_current_user] = _user(uid=2)
+    app.dependency_overrides[get_estimate_repository] = lambda: repo
+    app.dependency_overrides[get_task_queue] = lambda: queue
+    client = TestClient(app)
+    resp = client.post("/api/estimates/1/match")
+    assert resp.status_code == 202 and queue.match_calls == [1]
+
+
+def test_retrigger_foreign_estimate_404() -> None:
+    from app.api.deps import get_estimate_repository, get_task_queue
+    from tests.fakes import FakeTaskQueue
+
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    EstimateService(EstimateParser(), repo, storage, task_queue=FakeTaskQueue()).ingest(
+        _xlsx(), "a.xlsx", owner_id=2)
+    app.dependency_overrides[get_current_user] = _user(uid=9)  # чужой
+    app.dependency_overrides[get_estimate_repository] = lambda: repo
+    app.dependency_overrides[get_task_queue] = lambda: FakeTaskQueue()
+    client = TestClient(app)
+    assert client.post("/api/estimates/1/match").status_code == 404
+
+
+def test_old_match_route_removed() -> None:
+    app.dependency_overrides[get_current_user] = _user()
+    client = TestClient(app)
+    resp = client.post("/api/estimates/match", files={"file": ("a.xlsx", _xlsx(), _XLSX)})
+    # FastAPI совпадает с /{estimate_id} и отдаёт 405 (нет POST для этого паттерна) —
+    # оба кода (404/405) подтверждают, что синхронный stateless-матч снят.
+    assert resp.status_code in (404, 405, 422)

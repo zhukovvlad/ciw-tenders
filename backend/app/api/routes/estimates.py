@@ -1,4 +1,4 @@
-"""Роут загрузки сметы и сопоставления строк со справочником."""
+"""Роут загрузки сметы и ре-триггера матчинга."""
 
 from __future__ import annotations
 
@@ -6,23 +6,21 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.api.deps import (
     get_current_user,
+    get_estimate_repository,
     get_estimate_service,
-    get_matching_service,
-    get_parser,
     get_settings,
+    get_task_queue,
 )
 from app.api.schemas import (
     EstimateDetailOut,
     EstimateSummaryOut,
     EstimateUploadResponse,
-    MatchResultOut,
 )
 from app.core.config import Settings
 from app.domain.entities import Role, User
 from app.domain.errors import StorageError
+from app.domain.ports import EstimateRepository, TaskQueue
 from app.services.estimate_service import EstimateService
-from app.services.excel_parser import ExcelEstimateParser
-from app.services.matching_service import MatchingService
 
 router = APIRouter(
     prefix="/estimates", tags=["estimates"], dependencies=[Depends(get_current_user)]
@@ -31,28 +29,23 @@ router = APIRouter(
 _XLSX_SIGNATURE = b"PK\x03\x04"
 
 
-@router.post("/match", response_model=list[MatchResultOut])
-async def match_estimate(
-    file: UploadFile = File(...),
-    parser: ExcelEstimateParser = Depends(get_parser),
-    matching: MatchingService = Depends(get_matching_service),
-) -> list[MatchResultOut]:
-    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Ожидается файл Excel (.xlsx/.xls)",
-        )
-
-    content = await file.read()
-    try:
-        rows = parser.parse(content)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-        ) from exc
-
-    results = matching.match_rows(rows)
-    return [MatchResultOut.from_entity(r) for r in results]
+@router.post("/{estimate_id}/match", status_code=status.HTTP_202_ACCEPTED)
+def retrigger_match(
+    estimate_id: int,
+    user: User = Depends(get_current_user),
+    repository: EstimateRepository = Depends(get_estimate_repository),
+    task_queue: TaskQueue = Depends(get_task_queue),
+) -> dict[str, str]:
+    est = repository.get(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN)
+    if est is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
+    # Ре-триггер разрешён из ЛЮБОГО статуса своей сметы (осознанно шире, чем ранний список):
+    # из ready это доматчит no_match-строки после расширения справочника; matchable-фильтр
+    # (status ∈ {pending,error,no_match}) гарантирует иммутабельность confident/needs_review.
+    task_queue.enqueue_match(estimate_id)
+    # честный ответ: если идёт — задача-дубль возьмёт no-op (живой держатель) / дозаберёт (зависла)
+    detail = "уже выполняется" if est.status == "running" else "поставлено в очередь"
+    return {"status": "accepted", "detail": detail}
 
 
 @router.post("", response_model=EstimateUploadResponse, status_code=status.HTTP_201_CREATED)
