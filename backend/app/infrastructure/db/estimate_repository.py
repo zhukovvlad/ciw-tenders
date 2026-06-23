@@ -264,6 +264,26 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             "match_error": result.match_error,
         }
 
+    def save_review_decision(
+        self,
+        node_id: int,
+        *,
+        review_status: str,
+        final_article_id: int | None,
+        final_code: str | None,
+        final_name: str | None,
+    ) -> None:
+        self._session.execute(
+            update(EstimateRowModel).where(EstimateRowModel.id == node_id).values(
+                review_status=review_status,
+                final_article_id=final_article_id,
+                final_code=final_code,
+                final_name=final_name,
+                reviewed_at=func.now(),
+            )
+        )
+        self._session.commit()
+
     def count_node_errors(self, estimate_id: int) -> int:
         return int(
             self._session.scalar(

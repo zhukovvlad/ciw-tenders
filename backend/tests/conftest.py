@@ -58,25 +58,38 @@ def estimate_repo():
 
 @pytest.fixture()
 def client(estimate_repo):
-    """TestClient с переопределёнными get_estimate_service и get_current_user (uid=1).
+    """TestClient с переопределёнными get_estimate_service, get_estimate_review_service
+    и get_current_user (uid=1).
 
     Чтобы добавить второго пользователя (other_auth_headers) в последующих задачах:
     используй _make_user(uid=2) и отдельный override get_current_user в нужном тесте.
+    Чтобы подменить article_repo для get_estimate_review_service — используй фикстуру
+    article_repo (она переопределяет get_estimate_review_service с нужным репо).
     """
-    from app.api.deps import get_current_user, get_estimate_service
+    from app.api.deps import (
+        get_current_user,
+        get_estimate_review_service,
+        get_estimate_service,
+    )
     from app.main import app
     from app.services.estimate_parser import EstimateParser
+    from app.services.estimate_review_service import EstimateReviewService
     from app.services.estimate_service import EstimateService
-    from tests.fakes import FakeObjectStorage, FakeTaskQueue
+    from tests.fakes import FakeArticleRepository, FakeObjectStorage, FakeTaskQueue
 
     storage = FakeObjectStorage()
     queue = FakeTaskQueue()
+    default_article_repo = FakeArticleRepository()
 
     def _svc() -> EstimateService:
         return EstimateService(EstimateParser(), estimate_repo, storage, task_queue=queue)
 
+    def _review_svc() -> EstimateReviewService:
+        return EstimateReviewService(estimates=estimate_repo, articles=default_article_repo)
+
     app.dependency_overrides[get_current_user] = _make_user(uid=1)
     app.dependency_overrides[get_estimate_service] = _svc
+    app.dependency_overrides[get_estimate_review_service] = _review_svc
     c = TestClient(app)
     yield c
     app.dependency_overrides.clear()
@@ -86,6 +99,41 @@ def client(estimate_repo):
 def auth_headers():
     """Заголовки авторизации для пользователя uid=1 (совпадает с override в `client`)."""
     return {"Authorization": "Bearer fake-token-uid-1"}
+
+
+@pytest.fixture()
+def article_repo(estimate_repo):
+    """FakeArticleRepository для одного теста (SP3).
+
+    Переопределяет get_estimate_review_service, чтобы сервис ревью использовал
+    тот же estimate_repo, что и client-фикстура, плюс этот article_repo.
+    """
+    from app.api.deps import get_estimate_review_service
+    from app.main import app
+    from app.services.estimate_review_service import EstimateReviewService
+    from tests.fakes import FakeArticleRepository
+
+    repo = FakeArticleRepository()
+
+    def _review_svc() -> EstimateReviewService:
+        return EstimateReviewService(estimates=estimate_repo, articles=repo)
+
+    app.dependency_overrides[get_estimate_review_service] = _review_svc
+    yield repo
+    app.dependency_overrides.pop(get_estimate_review_service, None)
+
+
+@pytest.fixture()
+def other_auth_headers():
+    """Переопределяет get_current_user на uid=2 и возвращает заголовки (SP3 — 404-тест)."""
+    from app.api.deps import get_current_user
+    from app.main import app
+
+    app.dependency_overrides[get_current_user] = _make_user(uid=2)
+    yield {"Authorization": "Bearer fake-token-uid-2"}
+    # client-фикстура сделает clear() при своём teardown; здесь восстанавливаем uid=1
+    # на случай если other_auth_headers используется без client
+    app.dependency_overrides[get_current_user] = _make_user(uid=1)
 
 
 @pytest.fixture()

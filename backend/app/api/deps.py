@@ -41,6 +41,7 @@ from app.services.article_service import ArticleService
 from app.services.auth_service import AuthService
 from app.services.estimate_matching_service import EstimateMatchingService
 from app.services.estimate_parser import EstimateParser
+from app.services.estimate_review_service import EstimateReviewService
 from app.services.estimate_service import EstimateService
 from app.services.matching_service import MatchingService
 from app.services.template_ingest_service import TemplateIngestService
@@ -212,6 +213,13 @@ def get_object_storage() -> ObjectStorage:
 
 def get_estimate_repository(session: Session = Depends(get_session)) -> EstimateRepository:
     return SqlAlchemyEstimateRepository(session)
+
+
+def get_estimate_review_service(
+    repository: EstimateRepository = Depends(get_estimate_repository),
+    articles: ArticleRepository = Depends(get_repository),
+) -> EstimateReviewService:
+    return EstimateReviewService(estimates=repository, articles=articles)
 
 
 def get_estimate_service(

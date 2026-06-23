@@ -7,19 +7,23 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from app.api.deps import (
     get_current_user,
     get_estimate_repository,
+    get_estimate_review_service,
     get_estimate_service,
     get_settings,
     get_task_queue,
 )
 from app.api.schemas import (
     EstimateDetailOut,
+    EstimateRowOut,
     EstimateSummaryOut,
     EstimateUploadResponse,
+    ReviewDecisionIn,
 )
 from app.core.config import Settings
 from app.domain.entities import Role, User
-from app.domain.errors import StorageError
+from app.domain.errors import InvalidReviewActionError, RowNotMatchedError, StorageError
 from app.domain.ports import EstimateRepository, TaskQueue
+from app.services.estimate_review_service import EstimateReviewService
 from app.services.estimate_service import EstimateService
 
 router = APIRouter(
@@ -116,3 +120,25 @@ def delete_estimate(
 ) -> None:
     if not service.delete(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
+
+
+@router.patch("/{estimate_id}/rows/{row_id}/review", response_model=EstimateRowOut)
+def review_row(
+    estimate_id: int,
+    row_id: int,
+    decision: ReviewDecisionIn,
+    user: User = Depends(get_current_user),
+    service: EstimateReviewService = Depends(get_estimate_review_service),
+) -> EstimateRowOut:
+    try:
+        row = service.apply(
+            estimate_id, row_id, decision.action, decision.article_id,
+            user.id or 0, is_admin=user.role is Role.ADMIN,
+        )
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except RowNotMatchedError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except InvalidReviewActionError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return EstimateRowOut.from_entity(row)

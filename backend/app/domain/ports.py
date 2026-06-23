@@ -57,6 +57,9 @@ class ArticleRepository(ABC):
         ...
 
     @abstractmethod
+    def get_by_id(self, article_id: int) -> TemplateArticle | None: ...
+
+    @abstractmethod
     def matching_readiness(self) -> tuple[int, int]:
         """(total, pending): всего статей и сколько с embedding IS NULL. Для gate матчинга."""
         ...
@@ -219,6 +222,20 @@ class EstimateRepository(ABC):
     def save_node_match(self, node_id: int, result: NodeMatch) -> None:
         """Перезаписывает весь AI-снимок узла (status/matched_*/score/candidates),
         НО только WHERE review_status='unreviewed' (CAS). На успехе match_error→NULL."""
+        ...
+
+    @abstractmethod
+    def save_review_decision(
+        self,
+        node_id: int,
+        *,
+        review_status: str,
+        final_article_id: int | None,
+        final_code: str | None,
+        final_name: str | None,
+    ) -> None:
+        """Пишет ось ревью + reviewed_at=now(). Авторитетна — без условия на текущий
+        review_status (оператор может передумать). AI-снимок не трогает."""
         ...
 
     @abstractmethod

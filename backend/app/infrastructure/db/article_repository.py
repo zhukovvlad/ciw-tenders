@@ -51,6 +51,10 @@ class SqlAlchemyArticleRepository(ArticleRepository):
         model = self._session.scalars(stmt).one_or_none()
         return self._to_entity(model) if model is not None else None
 
+    def get_by_id(self, article_id: int) -> TemplateArticle | None:
+        model = self._session.get(TemplateArticleModel, article_id)
+        return self._to_entity(model) if model is not None else None
+
     def list_all(self, limit: int = 100, offset: int = 0) -> list[TemplateArticle]:
         stmt = select(TemplateArticleModel).order_by(_CODE_ORDER).limit(limit).offset(offset)
         return [self._to_entity(m) for m in self._session.scalars(stmt)]

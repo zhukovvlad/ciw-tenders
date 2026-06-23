@@ -65,6 +65,9 @@ class FakeRepository(ArticleRepository):
     def get_by_code(self, code: str) -> TemplateArticle | None:
         return next((a for a in self._store if a.article_code == code), None)
 
+    def get_by_id(self, article_id: int) -> TemplateArticle | None:
+        return next((a for a in self._store if a.id == article_id), None)
+
     def list_all(self, limit: int = 100, offset: int = 0) -> list[TemplateArticle]:
         return self._store[offset : offset + limit]
 
@@ -86,6 +89,64 @@ class FakeRepository(ArticleRepository):
     def matching_readiness(self) -> tuple[int, int]:
         total = len(self._store)
         pending = sum(1 for a in self._store if a.embedding is None)
+        return total, pending
+
+
+class FakeArticleRepository(ArticleRepository):
+    """In-memory ArticleRepository для тестов SP3 (ревью)."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, TemplateArticle] = {}  # code -> TemplateArticle
+
+    def add_article(self, *, id: int, code: str, name: str) -> None:
+        """Хелпер: кладёт TemplateArticle с фиксированным id (для тестов pick из каталога)."""
+        self.rows[code] = TemplateArticle(
+            id=id,
+            article_code=code,
+            name=name,
+            embedding_input=f"{code} {name}",
+            embedding=None,
+        )
+
+    def add(self, article: TemplateArticle) -> TemplateArticle:
+        stored = TemplateArticle(
+            id=len(self.rows) + 1,
+            parent_id=article.parent_id,
+            article_code=article.article_code,
+            name=article.name,
+            embedding_input=article.embedding_input,
+            embedding=article.embedding,
+        )
+        self.rows[article.article_code] = stored
+        return stored
+
+    def get_by_code(self, code: str) -> TemplateArticle | None:
+        return self.rows.get(code)
+
+    def get_by_id(self, article_id: int) -> TemplateArticle | None:
+        return next((a for a in self.rows.values() if a.id == article_id), None)
+
+    def list_all(self, limit: int = 100, offset: int = 0) -> list[TemplateArticle]:
+        return list(self.rows.values())[offset : offset + limit]
+
+    def delete(self, article_id: int) -> None:
+        self.rows = {k: v for k, v in self.rows.items() if v.id != article_id}
+
+    def delete_all(self) -> int:
+        n = len(self.rows)
+        self.rows = {}
+        return n
+
+    def has_descendant_codes(self, code: str) -> bool:
+        prefix = f"{code}."
+        return any(a.article_code.startswith(prefix) for a in self.rows.values())
+
+    def search_similar(self, embedding: list[float], top_k: int = 3) -> list[ArticleCandidate]:
+        return []
+
+    def matching_readiness(self) -> tuple[int, int]:
+        total = len(self.rows)
+        pending = sum(1 for a in self.rows.values() if a.embedding is None)
         return total, pending
 
 
@@ -427,6 +488,17 @@ class FakeEstimateRepository(EstimateRepository):
             and n["embedding"] is not None
             and n["review_status"] == "unreviewed"
         ]
+
+    def save_review_decision(
+        self, node_id: int, *, review_status: str,
+        final_article_id: int | None, final_code: str | None, final_name: str | None,
+    ) -> None:
+        n = self.nodes[node_id]
+        n["review_status"] = review_status
+        n["final_article_id"] = final_article_id
+        n["final_code"] = final_code
+        n["final_name"] = final_name
+        n["reviewed_at"] = datetime(2026, 1, 2, tzinfo=timezone.utc)  # noqa: UP017
 
     def save_node_match(self, node_id: int, result: NodeMatch) -> None:
         n = self.nodes[node_id]

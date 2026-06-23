@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -166,6 +167,11 @@ class EstimateRowOut(BaseModel):
             review_status=r.review_status, final_article_id=r.final_article_id,
             final_code=r.final_code, final_name=r.final_name, reviewed_at=r.reviewed_at,
         )
+
+
+class ReviewDecisionIn(BaseModel):
+    action: Literal["confirm", "pick", "reject"]
+    article_id: int | None = None
 
 
 class EstimateDetailOut(BaseModel):
