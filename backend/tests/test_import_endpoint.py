@@ -39,9 +39,12 @@ def _service_factory(repo: FakeImportRepository) -> Callable[[], TemplateIngestS
 
 
 def test_import_creates_and_reports() -> None:
+    from tests.fakes import FakeTaskQueue
+
     repo = FakeImportRepository()
     app.dependency_overrides[get_current_user] = _admin
     app.dependency_overrides[get_template_ingest_service] = _service_factory(repo)
+    app.dependency_overrides[get_task_queue] = FakeTaskQueue
 
     client = TestClient(app)
     resp = client.post(

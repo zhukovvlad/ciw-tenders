@@ -63,6 +63,6 @@ build:
 create-admin:
     cd {{backend}}; uv run python -m app.scripts.create_admin
 
-# Фоновый воркер эмбеддингов (template_articles с embedding IS NULL). --once для одного прохода.
-embed-worker *args:
-    cd {{backend}}; uv run python -m app.scripts.embed_worker {{args}}
+# Celery-воркер: матчинг смет + эмбеддинг справочника (dev: solo-pool для Windows).
+celery-worker:
+    cd {{backend}}; uv run celery -A app.infrastructure.tasks.celery_app worker --pool=solo --loglevel=info

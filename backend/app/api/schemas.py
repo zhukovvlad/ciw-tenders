@@ -10,7 +10,6 @@ from app.domain.entities import (
     Estimate,
     EstimateSummary,
     ImportReport,
-    MatchResult,
     Role,
     StoredEstimateRow,
     TemplateArticle,
@@ -163,36 +162,3 @@ class EstimateDetailOut(BaseModel):
         )
 
 
-class CandidateOut(BaseModel):
-    article_code: str
-    name: str
-    score: float
-
-
-class MatchResultOut(BaseModel):
-    row_number: int
-    source_name: str
-    status: str
-    score: float
-    matched_code: str | None
-    matched_name: str | None
-    candidates: list[CandidateOut]
-
-    @classmethod
-    def from_entity(cls, result: MatchResult) -> MatchResultOut:
-        return cls(
-            row_number=result.source_row.row_number,
-            source_name=result.source_row.name,
-            status=result.status.value,
-            score=round(result.score, 4),
-            matched_code=result.matched_article.article_code if result.matched_article else None,
-            matched_name=result.matched_article.name if result.matched_article else None,
-            candidates=[
-                CandidateOut(
-                    article_code=c.article.article_code,
-                    name=c.article.name,
-                    score=round(c.score, 4),
-                )
-                for c in result.candidates
-            ],
-        )

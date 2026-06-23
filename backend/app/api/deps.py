@@ -11,7 +11,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings, get_settings
+from app.core.config import get_settings
 from app.domain.entities import Role, User
 from app.domain.errors import TokenError
 from app.domain.ports import (
@@ -41,7 +41,6 @@ from app.services.auth_service import AuthService
 from app.services.estimate_matching_service import EstimateMatchingService
 from app.services.estimate_parser import EstimateParser
 from app.services.estimate_service import EstimateService
-from app.services.excel_parser import ExcelEstimateParser
 from app.services.matching_service import MatchingService
 from app.services.template_ingest_service import TemplateIngestService
 from app.services.template_parser import TemplateParser
@@ -179,10 +178,6 @@ def build_estimate_matching_service(session: Session) -> EstimateMatchingService
     )
 
 
-def get_parser() -> ExcelEstimateParser:
-    return ExcelEstimateParser()
-
-
 def get_article_service(
     repository: ArticleRepository = Depends(get_repository),
 ) -> ArticleService:
@@ -199,20 +194,6 @@ def get_template_ingest_service(
     repository: ArticleImportRepository = Depends(get_import_repository),
 ) -> TemplateIngestService:
     return TemplateIngestService(parser=TemplateParser(), repository=repository)
-
-
-def get_matching_service(
-    repository: ArticleRepository = Depends(get_repository),
-    embedder: Embedder = Depends(get_embedder),
-    llm_matcher: LLMMatcher = Depends(get_llm_matcher),
-    settings: Settings = Depends(get_settings),
-) -> MatchingService:
-    return MatchingService(
-        repository=repository,
-        embedder=embedder,
-        llm_matcher=llm_matcher,
-        confidence_threshold=settings.confidence_threshold,
-    )
 
 
 def get_estimate_parser() -> EstimateParser:
