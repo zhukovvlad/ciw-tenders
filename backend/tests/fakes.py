@@ -13,6 +13,7 @@ from app.domain.entities import (
     ExistingArticle,
     ImportPlan,
     MatchableNode,
+    MatchCandidate,
     NewEstimate,
     NodeMatch,
     PendingEmbedding,
@@ -334,7 +335,31 @@ class FakeEstimateRepository(EstimateRepository):
         est = self.estimates.get(estimate_id)
         if est is None or (not is_admin and est.user_id != requester_id):
             return None
-        return est
+        rows = [self._row_entity(r, self.nodes[r.id]) for r in est.rows]
+        return Estimate(
+            id=est.id, user_id=est.user_id, filename=est.filename,
+            status=self.statuses.get(est.id, est.status),
+            created_at=est.created_at, rows=rows,
+            status_detail=self.details.get(est.id),
+        )
+
+    @staticmethod
+    def _row_entity(base: StoredEstimateRow, n: dict) -> StoredEstimateRow:
+        return StoredEstimateRow(
+            id=base.id, code=base.code, name=base.name, parent_code=base.parent_code,
+            section_type=base.section_type, depth=base.depth,
+            embedding_input=base.embedding_input, source_index=base.source_index,
+            status=n["status"], has_embedding=n["embedding"] is not None,
+            matched_article_id=n["matched_article_id"], matched_code=n["matched_code"],
+            matched_name=n["matched_name"], score=n["score"],
+            candidates=[
+                MatchCandidate(id=c.get("id"), code=c["code"], name=c["name"], score=c["score"])
+                for c in n["candidates"]
+            ],
+            review_status=n["review_status"], final_article_id=n["final_article_id"],
+            final_code=n["final_code"], final_name=n["final_name"],
+            reviewed_at=n["reviewed_at"],
+        )
 
     def delete(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> str | None:
         est = self.estimates.get(estimate_id)

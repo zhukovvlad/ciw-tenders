@@ -11,6 +11,7 @@ from app.domain.entities import (
     EstimateStatus,
     EstimateSummary,
     MatchableNode,
+    MatchCandidate,
     NewEstimate,
     NodeMatch,
     PendingEmbedding,
@@ -39,9 +40,19 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             source_index=m.source_index,
             status=m.status,
             has_embedding=m.embedding is not None,
+            matched_article_id=m.matched_article_id,
             matched_code=m.matched_code,
             matched_name=m.matched_name,
             score=m.score,
+            candidates=[
+                MatchCandidate(id=c.get("id"), code=c["code"], name=c["name"], score=c["score"])
+                for c in (m.candidates or [])
+            ],
+            review_status=m.review_status,
+            final_article_id=m.final_article_id,
+            final_code=m.final_code,
+            final_name=m.final_name,
+            reviewed_at=m.reviewed_at,
         )
 
     @classmethod
