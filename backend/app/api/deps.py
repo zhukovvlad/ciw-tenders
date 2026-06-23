@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
 
 from fastapi import Depends, HTTPException, status
@@ -12,7 +13,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.domain.entities import Role, User
+from app.domain.entities import EstimateStatus, Role, User
 from app.domain.errors import TokenError
 from app.domain.ports import (
     ArticleImportRepository,
@@ -239,3 +240,39 @@ def get_estimate_export_service(
     storage: ObjectStorage = Depends(get_object_storage),
 ) -> EstimateExportService:
     return EstimateExportService(estimates=repository, storage=storage)
+
+
+def _do_sweep(repo: EstimateRepository, estimate_id: int, max_age_seconds: int) -> bool:
+    """Общая логика sweep: лок = арбитр живости (занят → воркер жив → no-op)."""
+    if not repo.is_stale_running(estimate_id, max_age_seconds):
+        return False
+    if not repo.try_matching_lock(estimate_id):
+        return False
+    try:
+        repo.set_status(
+            estimate_id, EstimateStatus.PENDING, detail="сброшено после сбоя воркера"
+        )
+        return True
+    finally:
+        repo.release_matching_lock(estimate_id)
+
+
+def sweep_stale_running(estimate_id: int, max_age_seconds: int) -> bool:
+    """Сброс зависшего running→pending на ВЫДЕЛЕННОМ коннекте (как Celery-обёртка tasks.py):
+    try_lock → set_status → release держатся на ОДНОМ коннекте, иначе commit вернёт его в пул
+    и release/lock утекут (грабли SP2 на новом call-site)."""
+    from app.infrastructure.db.session import SessionLocal, engine
+
+    conn = engine.connect()
+    try:
+        session = SessionLocal(bind=conn)  # bind=conn → commit() не вернёт коннект в пул
+        try:
+            return _do_sweep(SqlAlchemyEstimateRepository(session), estimate_id, max_age_seconds)
+        finally:
+            session.close()  # внешний conn НЕ закрывает
+    finally:
+        conn.close()  # лок уже снят в _do_sweep → коннект в пул чистым
+
+
+def get_stale_sweeper() -> Callable[[int, int], bool]:
+    return sweep_stale_running

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session
 
 from app.domain.entities import (
@@ -185,6 +185,15 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
         return self._session.scalar(
             select(EstimateModel.status).where(EstimateModel.id == estimate_id)
         )
+
+    def is_stale_running(self, estimate_id: int, max_age_seconds: int) -> bool:
+        stmt = select(EstimateModel.id).where(
+            EstimateModel.id == estimate_id,
+            EstimateModel.status == "running",
+            EstimateModel.updated_at
+            < func.now() - (text(":age * interval '1 second'").bindparams(age=max_age_seconds)),
+        )
+        return self._session.scalar(stmt) is not None
 
     def fetch_unembedded_nodes(
         self, estimate_id: int, after_id: int, limit: int

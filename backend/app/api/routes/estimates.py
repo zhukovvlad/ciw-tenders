@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 
@@ -12,6 +14,7 @@ from app.api.deps import (
     get_estimate_review_service,
     get_estimate_service,
     get_settings,
+    get_stale_sweeper,
     get_task_queue,
 )
 from app.api.schemas import (
@@ -42,16 +45,24 @@ def retrigger_match(
     user: User = Depends(get_current_user),
     repository: EstimateRepository = Depends(get_estimate_repository),
     task_queue: TaskQueue = Depends(get_task_queue),
+    settings: Settings = Depends(get_settings),
+    sweeper: Callable[[int, int], bool] = Depends(get_stale_sweeper),
 ) -> dict[str, str]:
     est = repository.get(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN)
     if est is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
-    # Ре-триггер разрешён из ЛЮБОГО статуса своей сметы (осознанно шире, чем ранний список):
-    # из ready это доматчит no_match-строки после расширения справочника; matchable-фильтр
-    # (status ∈ {pending,error,no_match}) гарантирует иммутабельность confident/needs_review.
+
+    # Зависший running после жёсткого краша воркера: sweeper на выделенном коннекте берёт
+    # advisory-лок как арбитр живости (занят → воркер жив → no-op) и сбрасывает running→pending.
+    swept = est.status == "running" and sweeper(estimate_id, settings.task_time_limit_s)
+
     task_queue.enqueue_match(estimate_id)
-    # честный ответ: если идёт — задача-дубль возьмёт no-op (живой держатель) / дозаберёт (зависла)
-    detail = "уже выполняется" if est.status == "running" else "поставлено в очередь"
+    if swept:
+        detail = "перезапущено после сбоя"
+    elif est.status == "running":
+        detail = "уже выполняется"
+    else:
+        detail = "поставлено в очередь"
     return {"status": "accepted", "detail": detail}
 
 

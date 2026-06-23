@@ -341,6 +341,7 @@ class FakeEstimateRepository(EstimateRepository):
         self.details: dict[int, str | None] = {}
         self.touch_count: dict[int, int] = {}
         self._locks: set[int] = set()
+        self.stale_running: set[int] = set()
         self._node_seq = 0
 
     def create(self, new: NewEstimate, nodes: list[EstimateNode]) -> Estimate:
@@ -470,6 +471,12 @@ class FakeEstimateRepository(EstimateRepository):
 
     def get_status(self, estimate_id: int) -> str | None:
         return self.statuses.get(estimate_id)
+
+    def is_stale_running(self, estimate_id: int, max_age_seconds: int) -> bool:
+        return (
+            self.statuses.get(estimate_id) == "running"
+            and estimate_id in self.stale_running
+        )
 
     def fetch_unembedded_nodes(
         self, estimate_id: int, after_id: int, limit: int

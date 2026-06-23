@@ -67,9 +67,13 @@ def client(estimate_repo):
     article_repo (она переопределяет get_estimate_review_service с нужным репо).
     """
     from app.api.deps import (
+        _do_sweep,
         get_current_user,
+        get_estimate_repository,
         get_estimate_review_service,
         get_estimate_service,
+        get_stale_sweeper,
+        get_task_queue,
     )
     from app.main import app
     from app.services.estimate_parser import EstimateParser
@@ -90,6 +94,11 @@ def client(estimate_repo):
     app.dependency_overrides[get_current_user] = _make_user(uid=1)
     app.dependency_overrides[get_estimate_service] = _svc
     app.dependency_overrides[get_estimate_review_service] = _review_svc
+    app.dependency_overrides[get_estimate_repository] = lambda: estimate_repo
+    app.dependency_overrides[get_task_queue] = lambda: queue
+    app.dependency_overrides[get_stale_sweeper] = lambda: (
+        lambda eid, age: _do_sweep(estimate_repo, eid, age)
+    )
     c = TestClient(app)
     yield c
     app.dependency_overrides.clear()

@@ -204,6 +204,11 @@ class EstimateRepository(ABC):
     def get_status(self, estimate_id: int) -> str | None: ...
 
     @abstractmethod
+    def is_stale_running(self, estimate_id: int, max_age_seconds: int) -> bool:
+        """True, если status='running' и updated_at старше max_age_seconds (мёртвый прогон)."""
+        ...
+
+    @abstractmethod
     def fetch_unembedded_nodes(
         self, estimate_id: int, after_id: int, limit: int
     ) -> list[PendingEmbedding]:
