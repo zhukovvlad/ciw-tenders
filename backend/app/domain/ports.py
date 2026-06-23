@@ -135,6 +135,14 @@ class EmbeddingQueueRepository(ABC):
         """Compare-and-swap: пишет вектор только если embedding_input не изменился."""
         ...
 
+    @abstractmethod
+    def try_embed_lock(self) -> bool:
+        """Неблокирующий singleton-лок эмбеддинга справочника (константный ключ). False → занят."""
+        ...
+
+    @abstractmethod
+    def release_embed_lock(self) -> None: ...
+
 
 class TaskQueue(ABC):
     """Постановка фоновых задач (Celery). Методы → None (без task-id — абстракция не течёт)."""
