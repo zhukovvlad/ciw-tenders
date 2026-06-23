@@ -1669,6 +1669,9 @@ def _setup_stale_running() -> None:
     # pyformat-параметры (%(name)s) в exec_driver_sql.
     conn = engine.connect()
     try:
+        # идемпотентно: чистим остаток упавшего ранее прогона, иначе ON CONFLICT оставил бы
+        # status='pending' от прошлого sweep → is_stale=False → assert ... is True упал бы.
+        conn.exec_driver_sql("DELETE FROM estimates WHERE id = %(eid)s", {"eid": _EID})
         conn.exec_driver_sql(
             "INSERT INTO users(id, email, password_hash, role, is_active) "
             "VALUES (%(uid)s, %(email)s, 'x', 'user', true) ON CONFLICT (id) DO NOTHING",
@@ -1677,7 +1680,7 @@ def _setup_stale_running() -> None:
         conn.exec_driver_sql(
             "INSERT INTO estimates(id, user_id, filename, original_object_key, status, "
             "created_at, updated_at) VALUES (%(eid)s, %(uid)s, 'f.xlsx', 'k', 'running', "
-            "now(), now() - interval '1 hour') ON CONFLICT (id) DO NOTHING",
+            "now(), now() - interval '1 hour')",
             {"eid": _EID, "uid": _UID},
         )
         conn.commit()
