@@ -54,9 +54,9 @@ describe("reviewState", () => {
       type: "manualPick",
       row: r,
       candidate: {
+        id: null,
         article_code: "СМР-99-999",
         name: "Ручная",
-        section_name: "X",
         score: 0,
       },
     })

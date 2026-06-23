@@ -1,7 +1,11 @@
 // frontend/src/pages/estimate/EstimateFlow.tsx
-import { useEffect, useReducer, useState } from "react"
+import { useEffect, useReducer, useRef, useState } from "react"
 import type { Progress } from "@/lib/mock/api"
-import { downloadCsv, exportEstimateCsv, matchEstimate } from "@/lib/mock/api"
+import {
+  exportEstimate,
+  pollEstimate,
+  uploadEstimate,
+} from "@/lib/api/estimates"
 import { initReview, progress, reviewReducer } from "@/lib/reviewState"
 import { clearReview, loadReview, saveReview } from "@/lib/session"
 import { StartScreen } from "@/pages/estimate/StartScreen"
@@ -29,6 +33,8 @@ export function EstimateFlow() {
     undefined,
     () => loadReview() ?? initReview("", [])
   )
+  // estimateId is stored for export calls
+  const estimateIdRef = useRef<number | null>(null)
 
   // персист ревью на каждое изменение
   useEffect(() => {
@@ -51,9 +57,21 @@ export function EstimateFlow() {
     setFileName(file.name)
     setPhase("processing")
     try {
-      const rows = await matchEstimate(file, setProg)
-      // Чистая загрузка нового состояния в reducer (без мутаций): action "load" из Task 5.
-      const fresh = initReview(file.name, rows)
+      // SP1: upload → get id, then poll until ready
+      const id = await uploadEstimate(file)
+      estimateIdRef.current = id
+      setProg({ phase: "parsing", done: 0, total: 0, etaSeconds: null })
+
+      const { fileName: serverFileName, rows } = await pollEstimate(
+        id,
+        (status, done, total) => {
+          const mappedPhase: Progress["phase"] =
+            status === "running" ? "matching" : "parsing"
+          setProg({ phase: mappedPhase, done, total, etaSeconds: null })
+        }
+      )
+
+      const fresh = initReview(serverFileName || file.name, rows)
       dispatch({ type: "load", state: fresh })
       saveReview(fresh)
       setPhase("review")
@@ -64,16 +82,27 @@ export function EstimateFlow() {
   }
 
   function handleNew() {
+    estimateIdRef.current = null
     clearReview()
     setFileName("")
     setPhase("start")
   }
 
-  function handleExport() {
-    downloadCsv(
-      `${fileName.replace(/\.[^.]+$/, "")}_сопоставлено.csv`,
-      exportEstimateCsv(state)
-    )
+  async function handleExport() {
+    const id = estimateIdRef.current
+    if (id !== null) {
+      try {
+        const blob = await exportEstimate(id)
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `${fileName.replace(/\.[^.]+$/, "")}_сопоставлено.xlsx`
+        a.click()
+        URL.revokeObjectURL(url)
+      } catch (err) {
+        console.error(err)
+      }
+    }
     setPhase("done")
   }
 

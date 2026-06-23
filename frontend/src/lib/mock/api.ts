@@ -50,8 +50,7 @@ export async function searchArticles(query: string): Promise<Candidate[]> {
   return MOCK_ARTICLES.filter(
     (c) =>
       c.name.toLowerCase().includes(q) ||
-      c.article_code.toLowerCase().includes(q) ||
-      c.section_name.toLowerCase().includes(q)
+      c.article_code.toLowerCase().includes(q)
   )
 }
 

@@ -2,7 +2,7 @@ import { useState } from "react"
 import { ChevronDown, Search } from "lucide-react"
 import type { Candidate, Decision, MatchRow } from "@/lib/types"
 import { statusLabel } from "@/lib/reviewState"
-import { searchArticles } from "@/lib/mock/api"
+import { searchArticles } from "@/lib/api/articles"
 
 interface ReviewRowProps {
   row: MatchRow
@@ -82,14 +82,6 @@ export function ReviewRow({
             colSpan={5}
             className="bg-[color-mix(in_srgb,var(--primary)_5%,transparent)] px-12 py-3"
           >
-            {row.rationale && (
-              <p className="mb-2 text-sm text-[var(--ds-text-2)]">
-                <span className="mr-1 text-xs tracking-wide text-muted-foreground uppercase">
-                  Почему:
-                </span>
-                {row.rationale}
-              </p>
-            )}
             {row.candidates.map((c, i) => {
               const sel = c.article_code === chosenCode
               return (

@@ -4,6 +4,21 @@ import userEvent from "@testing-library/user-event"
 import { ReviewRow } from "@/pages/estimate/ReviewRow"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
 
+// Mock the real articles API so tests don't hit the network
+vi.mock("@/lib/api/articles", () => ({
+  searchArticles: async (q: string) => {
+    const query = q.toLowerCase()
+    return [
+      {
+        id: 11,
+        article_code: "СМР-07-060",
+        name: "Устройство кровли",
+        score: 0,
+      },
+    ].filter((a) => a.name.toLowerCase().includes(query))
+  },
+}))
+
 function tableWrap(ui: React.ReactNode) {
   return (
     <table>
@@ -14,7 +29,7 @@ function tableWrap(ui: React.ReactNode) {
 const reviewRow = MOCK_ROWS.find((r) => r.status === "needs_review")!
 
 describe("ReviewRow", () => {
-  it("раскрытая спорная строка показывает rationale и 3 кандидата", () => {
+  it("раскрытая спорная строка показывает 3 кандидата", () => {
     render(
       tableWrap(
         <ReviewRow
@@ -28,7 +43,6 @@ describe("ReviewRow", () => {
         />
       )
     )
-    expect(screen.getByText(reviewRow.rationale!)).toBeInTheDocument()
     expect(screen.getAllByRole("button", { name: /СМР-/ })).toHaveLength(3)
   })
 
