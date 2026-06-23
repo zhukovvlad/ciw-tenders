@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # LLM-арбитр матчинга — переключаемый провайдер.
     llm_provider: str = "openrouter"  # "openrouter" | "anthropic"
     openrouter_llm_model: str = "anthropic/claude-sonnet-4.6"  # слаг OpenRouter (проверен)
-    anthropic_llm_model: str = "claude-3-5-sonnet-20240620"    # нативный id Anthropic
+    anthropic_llm_model: str = "claude-sonnet-4-6"             # нативный id Anthropic
     openrouter_base_url: str = "https://openrouter.ai/api/v1"  # только для OpenRouter-матчера
     llm_model: str | None = None  # DEPRECATED: задано → ошибка в валидаторе (см. ниже)
     embedding_dim: int = 768

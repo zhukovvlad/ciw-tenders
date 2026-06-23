@@ -29,7 +29,7 @@ class AnthropicLLMMatcher(LLMMatcher):
     def __init__(
         self,
         api_key: str,
-        model: str = "claude-3-5-sonnet-20240620",
+        model: str = "claude-sonnet-4-6",
         timeout_s: float = 30.0,
         retry_budget: int = 3,
         *,
