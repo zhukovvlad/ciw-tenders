@@ -21,6 +21,7 @@
 - **Только обычные chat-модели** (малый `max_tokens`); reasoning вне объёма.
 - **Вне объёма:** эмбеддер, Google-адаптер, любые правки SP3.
 - **Перед мерджем (человек):** сверить актуальный слаг `anthropic/claude-3.5-sonnet` на стороне OpenRouter.
+- **[Операционно, критично] Убрать `LLM_MODEL`** из `backend/.env` и CI-секретов ДО мерджа: депрекация-валидатор роняет `Settings` при любом заданном `LLM_MODEL`, а `conftest` инстанцирует `Settings` для **каждого** теста → застрянет НЕ только конфиг-тест, а **весь** `pytest` (Task 5 Step 5 «полный прогон зелёный» недостижим на грязной среде). Код верен — это гигиена окружения.
 
 ## File Structure
 
@@ -360,6 +361,8 @@ git commit -m "refactor(matching): AnthropicLLMMatcher на llm_matching_common 
 - Consumes: `SYSTEM_PROMPT`, `build_user_prompt`, `parse_choice` (Task 1); `retry_transient`; `TransientError`; `LLMMatcher` порт.
 - Produces: `OpenRouterLLMMatcher(api_key, base_url="https://openrouter.ai/api/v1", model="anthropic/claude-3.5-sonnet", *, client=None, timeout_s=30.0, retry_budget=3)`; `choose_best(...) -> TemplateArticle | None`; private `_BodyError(message, *, transient: bool)`.
 
+> **Подтверждённый контракт `retry_transient`** (проверено по [retry.py](../../../backend/app/infrastructure/retry.py), от него зависят 2 теста ниже): неклассифицированное исключение (`classify→False`) пробрасывается **как оригинал, немедленно** (нет обёртки) → перманентный `_BodyError(transient=False)` всплывает как `_BodyError`. Исчерпанный бюджет на классифицированном (`classify→True`) → `TransientError(str(last))`. `budget=1` = один вызов, ноль ретраев, без `sleep`. Менять `retry.py` НЕ нужно.
+
 - [ ] **Step 1: Failing-тест** (инъекция фейкового `httpx.Client`)
 
 Create `backend/tests/test_openrouter_matcher.py`:
@@ -443,6 +446,16 @@ def test_body_error_permanent_is_loud_not_transient() -> None:
     with pytest.raises(_BodyError) as exc:  # перманент — НЕ TransientError, не None
         matcher.choose_best("q", _cands())
     assert not exc.value.transient and "model not found" in str(exc.value)
+
+
+def test_unexpected_choice_structure_is_loud_permanent() -> None:
+    # есть choices, но без message.content (некоторые модели/прокси) → НЕ голый KeyError,
+    # а перманентный _BodyError с логом (единообразно с error-веткой, без «глухого» partial_error)
+    client = _FakeClient(data={"choices": [{"message": {}}]})
+    matcher = OpenRouterLLMMatcher(api_key="k", client=client, retry_budget=1)
+    with pytest.raises(_BodyError) as exc:
+        matcher.choose_best("q", _cands())
+    assert not exc.value.transient
 
 
 def test_empty_candidates_returns_none() -> None:
@@ -563,7 +576,16 @@ class OpenRouterLLMMatcher(LLMMatcher):
         choices = data.get("choices")
         if not choices:
             raise _BodyError("OpenRouter: ответ без choices", transient=True)
-        return choices[0]["message"]["content"] or "0"
+        try:
+            content = choices[0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            # choices есть, но структура неожиданная — не глотать голым KeyError,
+            # привести к перманентному _BodyError с логом (как error-ветка)
+            logger.error("OpenRouter: неожиданная структура ответа: %r", data)
+            raise _BodyError(
+                f"OpenRouter: неожиданная структура ответа: {exc}", transient=False
+            ) from exc
+        return content or "0"
 
     @staticmethod
     def _raise_body_error(error: dict) -> None:
@@ -740,6 +762,8 @@ def test_factory_openrouter(monkeypatch) -> None:
 
 
 def test_factory_anthropic(monkeypatch) -> None:
+    # зависит от ANTHROPIC_API_KEY из conftest (иначе валидатор уронит на missing-key,
+    # а не на ассерте типа) — см. Global Constraints.
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     _reset_caches()
     try:
