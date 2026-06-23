@@ -7,10 +7,18 @@ import pytest
 from app.infrastructure.db.estimate_repository import SqlAlchemyEstimateRepository
 from app.infrastructure.db.session import SessionLocal, engine
 
-_REAL_DB = os.environ.get("DATABASE_URL", "").startswith(("postgresql", "postgres"))
+# Opt-in: requires a REAL reachable Postgres. conftest sets a FAKE DATABASE_URL
+# (postgresql+psycopg://test:test@localhost/test) that is unreachable, so gating on
+# DATABASE_URL alone would make this test FAIL (ConnectionTimeout) instead of skip.
+# Run deliberately:
+#   RUN_LOCK_INTEGRATION=1 DATABASE_URL=<real-postgres> uv run pytest \
+#       tests/test_estimate_lock_integration.py
+_RUN_INTEGRATION = os.environ.get("RUN_LOCK_INTEGRATION") == "1"
+
+_SKIP_REASON = "нужен реальный Postgres: RUN_LOCK_INTEGRATION=1 + реальный DATABASE_URL"
 
 
-@pytest.mark.skipif(not _REAL_DB, reason="нужен реальный Postgres (advisory-lock не фейкается)")
+@pytest.mark.skipif(not _RUN_INTEGRATION, reason=_SKIP_REASON)
 def test_advisory_lock_is_exclusive_across_connections() -> None:
     c1, c2 = engine.connect(), engine.connect()
     try:
