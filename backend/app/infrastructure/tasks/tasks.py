@@ -56,7 +56,7 @@ def match_estimate_task(self, estimate_id: int) -> None:
 
 @celery_app.task
 def embed_articles_task() -> None:
-    from app.api.deps import build_embedder  # ленивый импорт
+    from app.api.deps import get_embedder  # ленивый импорт
 
     conn = engine.connect()                 # пиннутый коннект (singleton-лок переживёт коммиты)
     try:
@@ -66,7 +66,7 @@ def embed_articles_task() -> None:
             if not queue.try_embed_lock():
                 return  # singleton → no-op
             try:
-                drain_articles(queue, build_embedder())
+                drain_articles(queue, get_embedder())
             finally:
                 queue.release_embed_lock()
         finally:

@@ -142,37 +142,24 @@ def get_task_queue() -> TaskQueue:
     return CeleryTaskQueue()
 
 
-def build_embedder() -> Embedder:
-    settings = get_settings()
-    return OpenRouterEmbedder(
-        api_key=settings.openrouter_api_key,
-        base_url=settings.embedding_base_url,
-        model=settings.embedding_model,
-        dimensions=settings.embedding_dim,
-        timeout_s=settings.ai_call_timeout_s,
-        retry_budget=settings.transient_retry_budget,
-    )
-
-
 def build_estimate_matching_service(session: Session) -> EstimateMatchingService:
-    """Фабрика для Celery-задачи (вне FastAPI DI): собирает сервис на переданной сессии."""
+    """Фабрика для Celery-задачи (вне FastAPI DI): репозитории — на ПЕРЕДАННОЙ сессии
+    (пиннутый коннект задачи), а embedder/LLM-матчер берём из кэшированных синглтонов
+    `get_embedder()`/`get_llm_matcher()`. Они stateless (конфиг + HTTP-клиент), поэтому
+    переиспользуются процессом воркера — без создания нового httpx-клиента на каждую
+    задачу и каждый gate-retry (иначе течёт пул сокетов на долгоживущем воркере)."""
     settings = get_settings()
     articles = SqlAlchemyArticleRepository(session)
     estimates = SqlAlchemyEstimateRepository(session)
     matcher = MatchingService(
         articles,
         embedder=None,
-        llm_matcher=AnthropicLLMMatcher(
-            api_key=settings.anthropic_api_key,
-            model=settings.llm_model,
-            timeout_s=settings.ai_call_timeout_s,
-            retry_budget=settings.transient_retry_budget,
-        ),
+        llm_matcher=get_llm_matcher(),
         confidence_threshold=settings.confidence_threshold,
     )
     return EstimateMatchingService(
         matcher=matcher,
-        embedder=build_embedder(),
+        embedder=get_embedder(),
         estimates=estimates,
         articles=articles,
     )

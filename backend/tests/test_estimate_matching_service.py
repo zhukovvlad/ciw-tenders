@@ -116,3 +116,22 @@ def test_mark_blocked_sets_blocked_when_not_terminal() -> None:
     est = repo.create(NewEstimate(1, "a.xlsx", "k"), [_node("1")])
     _service(repo, _ready_articles([])).mark_blocked(est.id, "timeout")
     assert repo.get_status(est.id) == EstimateStatus.BLOCKED
+
+
+def test_unexpected_error_sets_partial_error_and_reraises() -> None:
+    import pytest
+
+    repo = FakeEstimateRepository()
+    est = repo.create(NewEstimate(1, "a.xlsx", "k"), [_node("1")])
+    art = _ready_articles([ArticleCandidate(_article(1, "1.1"), 0.5)])
+
+    class _BugLLM(FakeLLMMatcher):
+        def choose_best(self, query, candidates):
+            raise ValueError("неожиданный баг")  # НЕ транзиент и не gate
+
+    with pytest.raises(ValueError):
+        _service(repo, art, llm=_BugLLM()).match_estimate(est.id)
+    # смета не залипла в running — переведена в partial_error
+    assert repo.get_status(est.id) == EstimateStatus.PARTIAL_ERROR
+    # лок отпущен в finally → можно взять снова
+    assert repo.try_matching_lock(est.id) is True

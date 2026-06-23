@@ -51,6 +51,13 @@ class EstimateMatchingService:
                 )
             else:
                 self._estimates.set_status(estimate_id, EstimateStatus.READY)
+        except DictionaryNotReadyError:
+            raise  # gate: обёртка ретраит/блокирует — статус не трогаем
+        except Exception as exc:  # noqa: BLE001 — непредвиденный сбой не оставляем в running
+            self._estimates.set_status(
+                estimate_id, EstimateStatus.PARTIAL_ERROR, detail=f"unexpected: {exc}"
+            )
+            raise
         finally:
             self._estimates.release_matching_lock(estimate_id)
 

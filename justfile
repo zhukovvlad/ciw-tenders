@@ -63,6 +63,12 @@ build:
 create-admin:
     cd {{backend}}; uv run python -m app.scripts.create_admin
 
-# Celery-воркер: матчинг смет + эмбеддинг справочника (dev: solo-pool для Windows).
-celery-worker:
-    cd {{backend}}; uv run celery -A app.infrastructure.tasks.celery_app worker --pool=solo --loglevel=info
+# Celery-воркер: матчинг смет + эмбеддинг справочника. По умолчанию solo-pool (Windows).
+# Прод (Linux): just celery-worker "--pool=prefork --concurrency=4 --loglevel=info"
+celery-worker *args="--pool=solo --loglevel=info":
+    cd {{backend}}; uv run celery -A app.infrastructure.tasks.celery_app worker {{args}}
+
+# MinIO (S3-хранилище оригиналов смет): API на :9000, консоль на :9001, данные в ./minio-data (gitignored).
+# Учётки по умолчанию minioadmin/minioadmin — держать в согласии с S3_ACCESS_KEY/S3_SECRET_KEY в backend/.env.
+minio:
+    minio server minio-data --console-address ":9001"
