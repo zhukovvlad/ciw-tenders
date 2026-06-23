@@ -50,7 +50,7 @@ class OpenRouterLLMMatcher(LLMMatcher):
         self,
         api_key: str,
         base_url: str = "https://openrouter.ai/api/v1",
-        model: str = "anthropic/claude-3.5-sonnet",
+        model: str = "anthropic/claude-sonnet-4.6",
         *,
         client: httpx.Client | None = None,
         timeout_s: float = 30.0,
