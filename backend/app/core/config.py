@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,7 +25,12 @@ class Settings(BaseSettings):
     confidence_threshold: float = 0.90
     embedding_base_url: str = "https://openrouter.ai/api/v1"
     embedding_model: str = "google/gemini-embedding-2"
-    llm_model: str = "claude-3-5-sonnet-20240620"
+    # LLM-арбитр матчинга — переключаемый провайдер.
+    llm_provider: str = "openrouter"  # "openrouter" | "anthropic"
+    openrouter_llm_model: str = "anthropic/claude-3.5-sonnet"  # слаг OpenRouter (сверить перед мерджем)  # noqa: E501
+    anthropic_llm_model: str = "claude-3-5-sonnet-20240620"    # нативный id Anthropic
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"  # только для OpenRouter-матчера
+    llm_model: str | None = None  # DEPRECATED: задано → ошибка в валидаторе (см. ниже)
     embedding_dim: int = 768
 
     frontend_origin: str = "http://localhost:5173"
@@ -58,6 +64,23 @@ class Settings(BaseSettings):
     # Bounded gate-retry: ожидание готовности справочника (DictionaryNotReadyError → self.retry).
     gate_retry_max: int = 30
     gate_retry_backoff_s: float = 20.0
+
+    @model_validator(mode="after")
+    def _validate_llm(self) -> Settings:
+        if self.llm_model is not None:
+            raise ValueError(
+                "LLM_MODEL устарел → задайте OPENROUTER_LLM_MODEL и/или ANTHROPIC_LLM_MODEL"
+            )
+        valid = {"openrouter", "anthropic"}
+        if self.llm_provider not in valid:
+            raise ValueError(
+                f"LLM_PROVIDER должен быть из {valid}, получено: {self.llm_provider!r}"
+            )
+        if self.llm_provider == "openrouter" and not self.openrouter_api_key:
+            raise ValueError("LLM_PROVIDER=openrouter требует OPENROUTER_API_KEY")
+        if self.llm_provider == "anthropic" and not self.anthropic_api_key:
+            raise ValueError("LLM_PROVIDER=anthropic требует ANTHROPIC_API_KEY")
+        return self
 
 
 @lru_cache

@@ -17,6 +17,9 @@ def test_jwt_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_embedding_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    # LLM-провайдер переключаем на anthropic, чтобы валидатор не требовал OPENROUTER_API_KEY
+    # при проверке embedding-дефолтов (conftest кладёт ANTHROPIC_API_KEY=test).
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     settings = Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
     assert settings.openrouter_api_key == ""
     assert settings.embedding_model == "google/gemini-embedding-2"
@@ -43,3 +46,46 @@ def test_settings_have_celery_and_matching_knobs() -> None:
     assert s.transient_retry_budget >= 1
     assert s.gate_retry_max >= 1
     assert s.gate_retry_backoff_s > 0
+
+
+def test_llm_provider_defaults_to_openrouter() -> None:
+    from app.core.config import Settings
+
+    s = Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
+    assert s.llm_provider == "openrouter"
+    assert s.openrouter_llm_model and s.anthropic_llm_model
+    assert s.openrouter_base_url == "https://openrouter.ai/api/v1"
+
+
+def test_unknown_provider_fails(monkeypatch) -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    with pytest.raises(ValidationError):
+        Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
+
+
+def test_missing_key_for_provider_fails(monkeypatch) -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(ValidationError):
+        Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
+
+
+def test_deprecated_llm_model_fails(monkeypatch) -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    monkeypatch.setenv("LLM_MODEL", "claude-3-5-sonnet-20240620")
+    with pytest.raises(ValidationError):
+        Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
