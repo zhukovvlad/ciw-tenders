@@ -1659,23 +1659,79 @@ from app.infrastructure.db.session import SessionLocal, engine
 _RUN = os.environ.get("RUN_LOCK_INTEGRATION") == "1"
 _SKIP = "нужен реальный Postgres: RUN_LOCK_INTEGRATION=1 + реальный DATABASE_URL"
 
+_EID = 990_001
+_UID = 990_001
+
+
+def _setup_stale_running() -> None:
+    # sweep трогает только таблицу estimates (advisory-лок — без таблиц). Нужна строка users
+    # (FK estimates.user_id) + застрявшая running-смета (updated_at в прошлом). psycopg3 →
+    # pyformat-параметры (%(name)s) в exec_driver_sql.
+    conn = engine.connect()
+    try:
+        conn.exec_driver_sql(
+            "INSERT INTO users(id, email, password_hash, role, is_active) "
+            "VALUES (%(uid)s, %(email)s, 'x', 'user', true) ON CONFLICT (id) DO NOTHING",
+            {"uid": _UID, "email": f"sweep-{_UID}@test.local"},
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO estimates(id, user_id, filename, original_object_key, status, "
+            "created_at, updated_at) VALUES (%(eid)s, %(uid)s, 'f.xlsx', 'k', 'running', "
+            "now(), now() - interval '1 hour') ON CONFLICT (id) DO NOTHING",
+            {"eid": _EID, "uid": _UID},
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _teardown() -> None:
+    conn = engine.connect()
+    try:
+        conn.exec_driver_sql("DELETE FROM estimates WHERE id = %(eid)s", {"eid": _EID})
+        conn.exec_driver_sql("DELETE FROM users WHERE id = %(uid)s", {"uid": _UID})
+        conn.commit()
+        conn.exec_driver_sql("SELECT pg_advisory_unlock_all()")
+    finally:
+        conn.close()
+
 
 @pytest.mark.skipif(not _RUN, reason=_SKIP)
-def test_sweep_does_not_strand_lock() -> None:
-    # sweep на несуществующей смете: is_stale=False → лок НЕ берётся. Главное — критическая
-    # секция на выделенном коннекте не оставляет лок занятым (повтор грабель SP2 = утечка).
+def test_sweep_resets_stale_running_and_releases_lock() -> None:
+    # ПОЛНЫЙ сценарий: критическая секция try_lock → set_status(COMMIT) → release ДОЛЖНА
+    # исполниться. На багованной версии (sweep на пуловой сессии / без bind=conn) release
+    # ушёл бы на сменившийся коннект → лок остался бы занят → probe.try_lock=False → падёж.
+    _setup_stale_running()
+    try:
+        assert sweep_stale_running(_EID, max_age_seconds=60) is True  # лок взят, pending, release
+        probe = engine.connect()
+        try:
+            r = SqlAlchemyEstimateRepository(SessionLocal(bind=probe))
+            assert r.try_matching_lock(_EID) is True   # лок СВОБОДЕН → release сработал
+            r.release_matching_lock(_EID)
+            assert r.get_status(_EID) == "pending"     # set_status закоммичен
+        finally:
+            probe.exec_driver_sql("SELECT pg_advisory_unlock_all()")
+            probe.close()
+    finally:
+        _teardown()
+
+
+@pytest.mark.skipif(not _RUN, reason=_SKIP)
+def test_sweep_noop_does_not_strand_lock() -> None:
+    # вторичный: на несуществующей смете is_stale=False → лок НЕ берётся, ничего не застревает.
     assert sweep_stale_running(999_999, max_age_seconds=0) is False
     probe = engine.connect()
     try:
         r = SqlAlchemyEstimateRepository(SessionLocal(bind=probe))
-        assert r.try_matching_lock(999_999) is True  # лок свободен — ничего не застряло
+        assert r.try_matching_lock(999_999) is True
         r.release_matching_lock(999_999)
     finally:
         probe.exec_driver_sql("SELECT pg_advisory_unlock_all()")
         probe.close()
 ```
 
-> Страж того, что критическая секция sweep не стрэндит лок (повтор грабель SP2). Полный сценарий «реальная running-смета → sweep берёт лок на c1, set_status COMMIT, release; c2 видит свободу» — опционально расширить при наличии смета-фикстуры; минимум выше уже ловит утечку коннекта.
+> `test_sweep_resets_stale_running_and_releases_lock` — **обязательный** страж: исполняет ту самую критическую секцию (acquire → COMMIT pending → release на пиннутом коннекте) и падает на регрессии класса SP2 (release на сменившемся коннекте → лок занят). Фикстура — сырой `INSERT` (users + estimates; estimate_rows не нужны, sweep их не трогает). Второй тест — лёгкий no-op-страж.
 
 - [ ] **Step 9: Ruff + полный бэк-прогон + коммит**
 
@@ -1686,7 +1742,7 @@ git add backend/app/domain/ports.py backend/app/infrastructure/db/estimate_repos
 git commit -m "feat(sp3): staleness-sweep на ре-триггере — running→pending на выделенном коннекте (лок не течёт)"
 ```
 
-Expected полного прогона: всё passed (2 skipped — lock-интеграция SP2 + sweep-интеграция SP3).
+Expected полного прогона: всё passed (3 skipped — lock-интеграция SP2 + 2 sweep-интеграции SP3).
 
 ---
 
