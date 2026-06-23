@@ -136,3 +136,42 @@ def test_delete_removes_object() -> None:
 def test_requires_auth() -> None:
     client = TestClient(app)
     assert client.get("/api/estimates").status_code == 401
+
+
+def test_retrigger_match_enqueues_for_owner() -> None:
+    from app.api.deps import get_estimate_repository, get_task_queue
+    from tests.fakes import FakeTaskQueue
+
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    EstimateService(EstimateParser(), repo, storage, task_queue=FakeTaskQueue()).ingest(
+        _xlsx(), "a.xlsx", owner_id=2)
+    queue = FakeTaskQueue()
+    app.dependency_overrides[get_current_user] = _user(uid=2)
+    app.dependency_overrides[get_estimate_repository] = lambda: repo
+    app.dependency_overrides[get_task_queue] = lambda: queue
+    client = TestClient(app)
+    resp = client.post("/api/estimates/1/match")
+    assert resp.status_code == 202 and queue.match_calls == [1]
+
+
+def test_retrigger_foreign_estimate_404() -> None:
+    from app.api.deps import get_estimate_repository, get_task_queue
+    from tests.fakes import FakeTaskQueue
+
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    EstimateService(EstimateParser(), repo, storage, task_queue=FakeTaskQueue()).ingest(
+        _xlsx(), "a.xlsx", owner_id=2)
+    app.dependency_overrides[get_current_user] = _user(uid=9)  # чужой
+    app.dependency_overrides[get_estimate_repository] = lambda: repo
+    app.dependency_overrides[get_task_queue] = lambda: FakeTaskQueue()
+    client = TestClient(app)
+    assert client.post("/api/estimates/1/match").status_code == 404
+
+
+def test_old_match_route_removed() -> None:
+    app.dependency_overrides[get_current_user] = _user()
+    client = TestClient(app)
+    resp = client.post("/api/estimates/match", files={"file": ("a.xlsx", _xlsx(), _XLSX)})
+    # FastAPI совпадает с /{estimate_id} и отдаёт 405 (нет POST для этого паттерна) —
+    # оба кода (404/405) подтверждают, что синхронный stateless-матч снят.
+    assert resp.status_code in (404, 405)

@@ -134,12 +134,16 @@ class EstimateRowOut(BaseModel):
     section_type: str | None
     depth: int
     status: str
+    matched_code: str | None = None
+    matched_name: str | None = None
+    score: float | None = None
 
     @classmethod
     def from_entity(cls, r: StoredEstimateRow) -> EstimateRowOut:
         return cls(
             code=r.code, name=r.name, parent_code=r.parent_code,
             section_type=r.section_type, depth=r.depth, status=r.status,
+            matched_code=r.matched_code, matched_name=r.matched_name, score=r.score,
         )
 
 
@@ -147,14 +151,15 @@ class EstimateDetailOut(BaseModel):
     id: int
     filename: str
     status: str
+    status_detail: str | None = None
     created_at: datetime
     rows: list[EstimateRowOut]
 
     @classmethod
     def from_entity(cls, e: Estimate) -> EstimateDetailOut:
         return cls(
-            id=e.id, filename=e.filename, status=e.status, created_at=e.created_at,
-            rows=[EstimateRowOut.from_entity(r) for r in e.rows],
+            id=e.id, filename=e.filename, status=e.status, status_detail=e.status_detail,
+            created_at=e.created_at, rows=[EstimateRowOut.from_entity(r) for r in e.rows],
         )
 
 

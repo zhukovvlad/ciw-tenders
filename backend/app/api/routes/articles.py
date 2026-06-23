@@ -7,11 +7,13 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from app.api.deps import (
     get_article_service,
     get_current_user,
+    get_task_queue,
     get_template_ingest_service,
     require_admin,
 )
 from app.api.schemas import ArticleCreate, ArticleOut, DeleteAllResponse, ImportReportOut
 from app.domain.errors import DeletionGuardError, DuplicateError, TemplateValidationError
+from app.domain.ports import TaskQueue
 from app.services.article_service import ArticleService
 from app.services.template_ingest_service import TemplateIngestService
 
@@ -27,11 +29,19 @@ def list_articles(
     return [ArticleOut.from_entity(a) for a in service.list(limit=limit, offset=offset)]
 
 
+@router.post("/embed", status_code=status.HTTP_202_ACCEPTED,
+             dependencies=[Depends(require_admin)])
+def embed_articles(task_queue: TaskQueue = Depends(get_task_queue)) -> dict[str, str]:
+    task_queue.enqueue_articles_embed()
+    return {"status": "accepted"}
+
+
 @router.post("", response_model=ArticleOut, status_code=status.HTTP_201_CREATED,
              dependencies=[Depends(require_admin)])
 def create_article(
     payload: ArticleCreate,
     service: ArticleService = Depends(get_article_service),
+    task_queue: TaskQueue = Depends(get_task_queue),
 ) -> ArticleOut:
     try:
         article = service.create(
@@ -43,6 +53,7 @@ def create_article(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except TemplateValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    task_queue.enqueue_articles_embed()
     return ArticleOut.from_entity(article)
 
 
@@ -68,6 +79,7 @@ async def import_template(
     dry_run: bool = False,
     force: bool = False,
     service: TemplateIngestService = Depends(get_template_ingest_service),
+    task_queue: TaskQueue = Depends(get_task_queue),
 ) -> ImportReportOut:
     content = await file.read()
     try:
@@ -79,4 +91,5 @@ async def import_template(
             status_code=status.HTTP_409_CONFLICT,
             detail={"message": str(exc), "force_required": True, "deleted": exc.deleted},
         ) from exc
+    task_queue.enqueue_articles_embed()
     return ImportReportOut.from_entity(report)

@@ -39,6 +39,9 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             source_index=m.source_index,
             status=m.status,
             has_embedding=m.embedding is not None,
+            matched_code=m.matched_code,
+            matched_name=m.matched_name,
+            score=m.score,
         )
 
     @classmethod
@@ -50,6 +53,7 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             status=m.status,
             created_at=m.created_at,
             rows=[cls._row_to_entity(r) for r in rows],
+            status_detail=m.status_detail,
         )
 
     def create(self, new: NewEstimate, nodes: list[EstimateNode]) -> Estimate:

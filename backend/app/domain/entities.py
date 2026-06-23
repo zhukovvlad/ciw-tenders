@@ -216,6 +216,9 @@ class StoredEstimateRow:
     source_index: int
     status: str
     has_embedding: bool = False
+    matched_code: str | None = None
+    matched_name: str | None = None
+    score: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +231,7 @@ class Estimate:
     status: str
     created_at: datetime
     rows: list[StoredEstimateRow] = field(default_factory=list)
+    status_detail: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
