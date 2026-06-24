@@ -7,7 +7,8 @@ import { ProcessingScreen } from "@/pages/estimate/ProcessingScreen"
 describe("StartScreen", () => {
   it("выбор файла вызывает onFile", async () => {
     const onFile = vi.fn()
-    render(<StartScreen onFile={onFile} />)
+    const onOpen = vi.fn()
+    render(<StartScreen onFile={onFile} onOpen={onOpen} />)
     const input = screen.getByLabelText(/файл сметы/i) as HTMLInputElement
     await userEvent.upload(input, new File(["x"], "смета.xlsx"))
     expect(onFile).toHaveBeenCalled()
