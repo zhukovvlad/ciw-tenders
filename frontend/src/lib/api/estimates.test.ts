@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest"
-import { rowFromDto } from "@/lib/api/estimates"
+import { describe, expect, it, vi } from "vitest"
+import * as client from "@/lib/api/client"
+import {
+  deleteEstimate,
+  listEstimates,
+  rowFromDto,
+} from "@/lib/api/estimates"
 
 describe("rowFromDto", () => {
   it("maps DTO to MatchRow (id→row_number, code→article_code)", () => {
@@ -21,5 +26,41 @@ describe("rowFromDto", () => {
     expect(row.source_name).toBe("Кладка")
     expect(row.candidates[0].article_code).toBe("2.1")
     expect(row.review_status).toBe("unreviewed")
+  })
+})
+
+describe("estimates api list/delete", () => {
+  it("listEstimates маппит snake_case DTO в camelCase", async () => {
+    vi.spyOn(client, "apiGet").mockResolvedValue([
+      {
+        id: 1,
+        filename: "a.xlsx",
+        status: "ready",
+        nodes_count: 12,
+        created_at: "2026-06-24T10:00:00Z",
+      },
+    ])
+    const items = await listEstimates()
+    expect(items).toEqual([
+      {
+        id: 1,
+        filename: "a.xlsx",
+        status: "ready",
+        nodesCount: 12,
+        createdAt: "2026-06-24T10:00:00Z",
+      },
+    ])
+  })
+
+  it("listEstimates ходит на GET /estimates", async () => {
+    const spy = vi.spyOn(client, "apiGet").mockResolvedValue([])
+    await listEstimates()
+    expect(spy).toHaveBeenCalledWith("/estimates")
+  })
+
+  it("deleteEstimate шлёт DELETE по id", async () => {
+    const spy = vi.spyOn(client, "apiSend").mockResolvedValue(undefined)
+    await deleteEstimate(7)
+    expect(spy).toHaveBeenCalledWith("DELETE", "/estimates/7")
   })
 })
