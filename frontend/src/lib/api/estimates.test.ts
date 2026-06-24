@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import * as client from "@/lib/api/client"
 import {
   deleteEstimate,
   listEstimates,
   rowFromDto,
 } from "@/lib/api/estimates"
+
+afterEach(() => vi.restoreAllMocks())
 
 describe("rowFromDto", () => {
   it("maps DTO to MatchRow (id→row_number, code→article_code)", () => {

@@ -20,17 +20,19 @@ const getEstimate = vi.fn(async (_id?: number) => {
   void _id
   return { fileName: "смета.xlsx", rows: MOCK_ROWS }
 })
-const pollEstimate = vi.fn(async (_id?: number, _onProgress?: unknown) => {
-  void _id
-  void _onProgress
-  return { fileName: "смета.xlsx", rows: MOCK_ROWS }
-})
+const pollEstimate = vi.fn(
+  async (_id?: number, _onProgress?: (status: string, done: number, total: number) => void) => {
+    void _id
+    void _onProgress
+    return { fileName: "смета.xlsx", rows: MOCK_ROWS }
+  }
+)
 
 // Mock the real estimates API so tests don't hit the network. Функции
 // вызываются лениво (через arrow) — иначе хойст vi.mock поймает TDZ const-ов.
 vi.mock("@/lib/api/estimates", () => ({
   uploadEstimate: async () => 1,
-  pollEstimate: (id: number, onProgress: unknown) => pollEstimate(id, onProgress),
+  pollEstimate: (id: number, onProgress?: (status: string, done: number, total: number) => void) => pollEstimate(id, onProgress),
   exportEstimate: (id: number) => exportEstimate(id),
   getEstimate: (id: number) => getEstimate(id),
   listEstimates: () => listEstimates(),
