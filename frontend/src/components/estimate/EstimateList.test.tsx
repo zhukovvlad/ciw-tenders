@@ -87,7 +87,7 @@ describe("EstimateList", () => {
 
   it("на ошибке загрузки показывает сообщение", async () => {
     vi.spyOn(estimatesApi, "listEstimates").mockRejectedValue(
-      new ApiError(500, "сбой загрузки")
+      new ApiError(500, "Не удалось загрузить сметы")
     )
     render(<EstimateList onOpen={vi.fn()} />)
     expect(await screen.findByText(/не удалось загрузить/i)).toBeInTheDocument()

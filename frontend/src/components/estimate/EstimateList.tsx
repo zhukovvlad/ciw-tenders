@@ -80,7 +80,6 @@ export function EstimateList({ onOpen }: EstimateListProps) {
   const [reloadKey, setReloadKey] = useState(0)
 
   const triggerReload = useCallback(() => {
-    setItems(null)
     setError(null)
     setReloadKey((k) => k + 1)
   }, [])
@@ -91,8 +90,13 @@ export function EstimateList({ onOpen }: EstimateListProps) {
       .then((data) => {
         if (!cancelled) setItems(data)
       })
-      .catch(() => {
-        if (!cancelled) setError("Не удалось загрузить сметы")
+      .catch((err) => {
+        if (!cancelled)
+          setError(
+            err instanceof ApiError
+              ? err.message
+              : "Не удалось загрузить сметы"
+          )
       })
     return () => {
       cancelled = true
