@@ -938,6 +938,28 @@ def test_classify_excludes_org_and_strips_breadcrumb() -> None:
     # потомок-работа выжил, а ORG-предок вырезан из крошки
     assert rows["1.1"].status == "pending"
     assert rows["1.1"].embedding_input == "Устройство кровли"
+
+
+def test_llm_org_verdict_on_mixed_also_excludes() -> None:
+    # ORG из ВЕРДИКТА LLM (а не лексики) тоже обязан давать excluded.
+    repo = FakeEstimateRepository()
+    articles = FakeRepository(candidates=[])
+    est = repo.create(
+        NewEstimate(user_id=1, filename="f.xlsx", original_object_key="k"),
+        [EstimateNode(code="1", name="Гостиница Заря 1 Этап", parent_code=None,
+                      section_type=None, embedding_input="Гостиница Заря 1 Этап",
+                      source_index=0, depth=1)],
+    )
+    # «… 1 Этап» — смесь (оргтокен + голова «Гостиница») → UNSURE лексикой → LLM.
+    clf = FakeWorkTypeClassifier(verdicts={"Гостиница Заря 1 Этап": WorkClass.ORG})
+    matcher = MatchingService(articles, embedder=None, llm_matcher=None, confidence_threshold=0.9)
+    svc = EstimateMatchingService(
+        matcher=matcher, embedder=FakeEmbedder(), estimates=repo,
+        articles=articles, classifier=clf,
+    )
+    svc._classify_nodes(est.id)  # noqa: SLF001
+    assert repo.get(est.id, 1, is_admin=True).rows[0].status == "excluded"
+    assert clf.calls  # LLM действительно вызван по смеси
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -993,6 +1015,8 @@ from app.domain.ports import (
                 if a in name_by_code
             ]
             crumb = build_embedding_input(n.name, ancestors)
+            # ORG из ЛЮБОГО источника (лексика row-2 ИЛИ вердикт LLM) → excluded:
+            # cls_by_code уже содержит финальный класс после прохода 1b.
             self._estimates.apply_node_classification(
                 id_by_code[n.code],
                 excluded=cls_by_code[n.code] is WorkClass.ORG,
@@ -1099,6 +1123,8 @@ git commit -m "$(printf 'test(estimates): excluded → пустая «Стать
   3. В выдаче `GET /api/estimates/{id}`: узлы «1 Этап ЖК», «Корпус …» имеют `status='excluded'`; «I и 2 Этапы БЦ и ЖК» больше НЕ матчится в «Прочее».
   4. У выживших работных узлов `embedding_input` не содержит «Этап»/«Корпус»/«ЖК»/«БЦ» из предков.
   5. Выгрузка: у excluded-строк столбец «Статья СМР» пуст.
+  6. Краевой случай: смета целиком из орг-узлов → `ready`, `nodes_count=0` —
+     фронтовый список и экран проверки не падают на «готово, пусто».
 
 ## DoD-гейты из спеки (повторная проверка глазами)
 
