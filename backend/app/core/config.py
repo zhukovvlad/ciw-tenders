@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     llm_provider: str = "openrouter"  # "openrouter" | "anthropic"
     openrouter_llm_model: str = "anthropic/claude-sonnet-4.6"  # слаг OpenRouter (проверен)
     anthropic_llm_model: str = "claude-sonnet-4-6"             # нативный id Anthropic
+    # Классификатор вид-работ/оргструктура — дешёвая модель через OpenRouter, отдельно от арбитра.
+    # NB: слаг OpenRouter — сверить с каталогом (как openrouter_llm_model); правится через env.
+    classifier_model: str = "anthropic/claude-haiku-4.5"
+    classifier_batch_size: int = 40
     openrouter_base_url: str = "https://openrouter.ai/api/v1"  # только для OpenRouter-матчера
     llm_model: str | None = None  # DEPRECATED: задано → ошибка в валидаторе (см. ниже)
     embedding_dim: int = 768
