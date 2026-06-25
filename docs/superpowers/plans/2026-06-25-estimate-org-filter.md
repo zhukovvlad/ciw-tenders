@@ -1017,6 +1017,29 @@ def test_llm_org_verdict_on_mixed_also_excludes() -> None:
     svc._classify_nodes(est.id)  # noqa: SLF001
     assert repo.get(est.id, 1, is_admin=True).rows[0].status == "excluded"
     assert clf.calls  # LLM действительно вызван по смеси
+
+
+def test_duplicate_code_excludes_only_scaffold() -> None:
+    # Две строки с ОДНИМ кодом: работа + каркас. Класс по id, не по коду →
+    # исключается только каркас, «Земляные работы» НЕ теряются молча.
+    repo = FakeEstimateRepository()
+    articles = FakeRepository(candidates=[])
+    est = repo.create(
+        NewEstimate(user_id=1, filename="f.xlsx", original_object_key="k"),
+        [
+            EstimateNode(code="1.2", name="Земляные работы", parent_code="1",
+                         section_type=None, embedding_input="Земляные работы",
+                         source_index=0, depth=2),
+            EstimateNode(code="1.2", name="1 Этап ЖК", parent_code="1",
+                         section_type=None, embedding_input="1 Этап ЖК",
+                         source_index=1, depth=2),
+        ],
+    )
+    svc = _service(repo, articles)  # FakeWorkTypeClassifier(default=WorkClass.WORK)
+    svc._classify_nodes(est.id)  # noqa: SLF001
+    by_name = {r.name: r for r in repo.get(est.id, 1, is_admin=True).rows}
+    assert by_name["Земляные работы"].status == "pending"   # работа выжила
+    assert by_name["1 Этап ЖК"].status == "excluded"        # каркас исключён
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1031,7 +1054,9 @@ Expected: FAIL — `TypeError: __init__() got an unexpected keyword argument 'cl
 
 # (1) импорты:
 from app.domain.classification import build_embedding_input, classify_lexical
-from app.domain.entities import NodeClassification, NodeToClassify, WorkClass
+from app.domain.entities import (
+    ClassifiableNode, NodeClassification, NodeToClassify, WorkClass,
+)
 from app.domain.ports import (
     ArticleRepository, Embedder, EstimateRepository, WorkTypeClassifier,
 )
@@ -1041,46 +1066,55 @@ from app.domain.ports import (
 # (3) match_estimate — вставить ПЕРЕД self._embed_nodes(estimate_id):
         self._classify_nodes(estimate_id)
 
-# (4) новый метод. NB: иерархия предков — по СЕГМЕНТАМ КОДА, точно как в
-#     estimate_parser.py:76-84 (крошка там тоже по segments, НЕ по parent_code) —
-#     единый механизм, крошка совпадёт байт-в-байт. Персист — по n.id (не по code:
-#     коды могут дублироваться — парсер лишь предупреждает, но строки пишет обе).
+# (4) новый метод.
+#  - Иерархия предков — по СЕГМЕНТАМ КОДА, точно как в estimate_parser.py:76-84
+#    (крошка там тоже по segments, НЕ по parent_code) → совпадёт байт-в-байт.
+#  - СОБСТВЕННЫЙ класс узла держим по n.id (cls_by_id), НЕ по коду: коды могут
+#    дублироваться (парсер лишь предупреждает, но пишет обе строки), а ключ по коду
+#    схлопнул бы их — и решение excluded утекло бы с одной строки на другую (тихий
+#    пропуск работы). По коду — только представитель для имён/классов ПРЕДКОВ крошки
+#    (первое вхождение, как name_by_code у парсера).
     def _classify_nodes(self, estimate_id: int) -> None:
         nodes = self._estimates.fetch_all_nodes(estimate_id)
         if not nodes:
             return
-        name_by_code = {n.code: n.name for n in nodes}
-        # Проход 1: лексика. UNSURE копим для LLM.
-        cls_by_code: dict[str, WorkClass] = {}
-        unsure: list[str] = []  # codes
+        # Представители по коду (первое вхождение) — только для крошки предков.
+        name_by_code: dict[str, str] = {}
+        repr_id_by_code: dict[str, int] = {}
+        for n in nodes:
+            name_by_code.setdefault(n.code, n.name)
+            repr_id_by_code.setdefault(n.code, n.id)
+        # Проход 1: лексика. Собственный класс — по id. UNSURE копим для LLM.
+        cls_by_id: dict[int, WorkClass] = {}
+        unsure: list[ClassifiableNode] = []
         for n in nodes:
             cls = classify_lexical(n.name)
-            cls_by_code[n.code] = cls
+            cls_by_id[n.id] = cls
             if cls is WorkClass.UNSURE:
-                unsure.append(n.code)
+                unsure.append(n)
         # Проход 1b: LLM по неоднозначным (UNSURE-вердикт остаётся = keep).
         if unsure:
             items = [
-                NodeToClassify(name_by_code[c], self._ancestor_names(c, name_by_code))
-                for c in unsure
+                NodeToClassify(n.name, self._ancestor_names(n.code, name_by_code))
+                for n in unsure
             ]
-            for code, verdict in zip(unsure, self._classifier.classify(items), strict=True):
-                cls_by_code[code] = verdict
+            for n, verdict in zip(unsure, self._classifier.classify(items), strict=True):
+                cls_by_id[n.id] = verdict
         # Проход 2: собрать результаты + пересборка крошки (ORG-предки выброшены) → bulk-запись.
         results: list[NodeClassification] = []
         for n in nodes:
             ancestors = [
-                (name_by_code[a], cls_by_code[a])
+                (name_by_code[a], cls_by_id[repr_id_by_code[a]])
                 for a in self._ancestor_codes(n.code)
                 if a in name_by_code
             ]
             crumb = build_embedding_input(n.name, ancestors)
-            # ORG из ЛЮБОГО источника (лексика row-2 ИЛИ вердикт LLM) → excluded:
-            # cls_by_code уже содержит финальный класс после прохода 1b.
+            # ORG из ЛЮБОГО источника (лексика row-2 ИЛИ вердикт LLM) → excluded.
+            # Класс берём по n.id — дубли кода НЕ схлопываются.
             results.append(
                 NodeClassification(
                     node_id=n.id,
-                    excluded=cls_by_code[n.code] is WorkClass.ORG,
+                    excluded=cls_by_id[n.id] is WorkClass.ORG,
                     embedding_input=crumb,
                 )
             )
