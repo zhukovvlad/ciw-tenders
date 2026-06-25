@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from app.domain.entities import (
     ArticleCandidate,
+    ClassifiableNode,
     Estimate,
     EstimateNode,
     EstimateStatus,
@@ -15,6 +16,7 @@ from app.domain.entities import (
     MatchableNode,
     MatchCandidate,
     NewEstimate,
+    NodeClassification,
     NodeMatch,
     NodeToClassify,
     PendingEmbedding,
@@ -408,7 +410,9 @@ class FakeEstimateRepository(EstimateRepository):
                 id=e.id,
                 filename=e.filename,
                 status=self.statuses.get(e.id, e.status),
-                nodes_count=len(e.rows),
+                nodes_count=sum(
+                    1 for r in e.rows if self.nodes[r.id]["status"] != "excluded"
+                ),
                 created_at=e.created_at,
             )
             for e in self.estimates.values()
@@ -491,6 +495,7 @@ class FakeEstimateRepository(EstimateRepository):
                 if n["estimate_id"] == estimate_id
                 and n["embedding"] is None
                 and n["id"] > after_id
+                and n["status"] != "excluded"
             ),
             key=lambda n: n["id"],
         )
@@ -565,6 +570,25 @@ class FakeEstimateRepository(EstimateRepository):
         if est is None or (not is_admin and est.user_id != requester_id):
             return None
         return self._keys.get(estimate_id)
+
+    def fetch_all_nodes(self, estimate_id: int) -> list[ClassifiableNode]:
+        base = {r.id: r for e in self.estimates.values() for r in e.rows}
+        rows = sorted(
+            (n for n in self.nodes.values() if n["estimate_id"] == estimate_id),
+            key=lambda n: n["id"],
+        )
+        return [
+            ClassifiableNode(id=n["id"], code=base[n["id"]].code, name=base[n["id"]].name)
+            for n in rows
+        ]
+
+    def save_node_classifications(self, results: list[NodeClassification]) -> None:
+        for r in results:
+            n = self.nodes[r.node_id]
+            if n["status"] not in ("pending", "excluded"):
+                continue  # охрана: матч-статус неприкосновенен
+            n["status"] = "excluded" if r.excluded else "pending"
+            n["embedding_input"] = r.embedding_input
 
 
 class FakeWorkTypeClassifier(WorkTypeClassifier):

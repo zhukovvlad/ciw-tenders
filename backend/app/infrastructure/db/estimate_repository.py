@@ -6,13 +6,16 @@ from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session
 
 from app.domain.entities import (
+    ClassifiableNode,
     Estimate,
     EstimateNode,
+    EstimateRowStatus,
     EstimateStatus,
     EstimateSummary,
     MatchableNode,
     MatchCandidate,
     NewEstimate,
+    NodeClassification,
     NodeMatch,
     PendingEmbedding,
     StoredEstimateRow,
@@ -109,6 +112,7 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 EstimateRowModel.estimate_id,
                 func.count().label("n"),
             )
+            .where(EstimateRowModel.status != "excluded")
             .group_by(EstimateRowModel.estimate_id)
             .subquery()
         )
@@ -204,6 +208,7 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 EstimateRowModel.estimate_id == estimate_id,
                 EstimateRowModel.embedding.is_(None),
                 EstimateRowModel.id > after_id,
+                EstimateRowModel.status != "excluded",
             )
             .order_by(EstimateRowModel.id)
             .limit(limit)
@@ -320,3 +325,28 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
         if est is None or (not is_admin and est.user_id != requester_id):
             return None
         return est.original_object_key
+
+    def fetch_all_nodes(self, estimate_id: int) -> list[ClassifiableNode]:
+        stmt = (
+            select(EstimateRowModel.id, EstimateRowModel.code, EstimateRowModel.name)
+            .where(EstimateRowModel.estimate_id == estimate_id)
+            .order_by(EstimateRowModel.source_index)
+        )
+        return [
+            ClassifiableNode(id=r.id, code=r.code, name=r.name)
+            for r in self._session.execute(stmt)
+        ]
+
+    def save_node_classifications(self, results: list[NodeClassification]) -> None:
+        # Охрана: только pending↔excluded. Терминальные матч-статусы и ревью неприкосновенны.
+        for r in results:
+            target = EstimateRowStatus.EXCLUDED if r.excluded else EstimateRowStatus.PENDING
+            self._session.execute(
+                update(EstimateRowModel)
+                .where(
+                    EstimateRowModel.id == r.node_id,
+                    EstimateRowModel.status.in_(("pending", "excluded")),
+                )
+                .values(status=str(target), embedding_input=r.embedding_input)
+            )
+        self._session.commit()  # один commit на весь проход (атомарность + латентность)

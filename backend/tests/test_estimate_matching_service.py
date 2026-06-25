@@ -5,6 +5,7 @@ from app.domain.entities import (
     EstimateNode,
     EstimateStatus,
     NewEstimate,
+    NodeClassification,
     TemplateArticle,
 )
 from app.domain.errors import DictionaryNotReadyError, TransientError
@@ -135,3 +136,57 @@ def test_unexpected_error_sets_partial_error_and_reraises() -> None:
     assert repo.get_status(est.id) == EstimateStatus.PARTIAL_ERROR
     # лок отпущен в finally → можно взять снова
     assert repo.try_matching_lock(est.id) is True
+
+
+# ---------------------------------------------------------------------------
+# Task 7: fake_repo tests for NodeClassification persistence
+# ---------------------------------------------------------------------------
+
+
+def _seed_one(repo: FakeEstimateRepository, name: str) -> int:
+    est = repo.create(
+        NewEstimate(user_id=1, filename="f.xlsx", original_object_key="k"),
+        [EstimateNode(code="1", name=name, parent_code=None, section_type=None,
+                      embedding_input=name, source_index=0, depth=1)],
+    )
+    return est.rows[0].id
+
+
+def test_fake_repo_excludes_marked_org() -> None:
+    repo = FakeEstimateRepository()
+    nid = _seed_one(repo, "1 Этап ЖК")
+    repo.save_node_classifications(
+        [NodeClassification(nid, excluded=True, embedding_input="1 Этап ЖК")]
+    )
+    assert repo.fetch_unembedded_nodes(1, after_id=0, limit=10) == []
+    assert repo.count_unfinished_nodes(1) == 0
+    assert repo.list_for_owner(1, is_admin=True)[0].nodes_count == 0
+
+
+def test_fake_repo_survivor_keeps_pending_and_new_breadcrumb() -> None:
+    repo = FakeEstimateRepository()
+    nid = _seed_one(repo, "x")
+    repo.save_node_classifications(
+        [NodeClassification(nid, excluded=False, embedding_input="Чистая крошка")]
+    )
+    pend = repo.fetch_unembedded_nodes(1, after_id=0, limit=10)
+    assert pend[0].embedding_input == "Чистая крошка"
+    assert repo.count_unfinished_nodes(1) == 1
+
+
+def test_fake_repo_classification_never_clobbers_matched_status() -> None:
+    # охрана: переклассификация на повторном прогоне не трогает терминальный матч-статус
+    repo = FakeEstimateRepository()
+    nid = _seed_one(repo, "Устройство кровли")
+    repo.nodes[nid]["status"] = "confident"  # как будто уже сматчено
+    repo.save_node_classifications([NodeClassification(nid, excluded=True, embedding_input="x")])
+    assert repo.get(1, 1, is_admin=True).rows[0].status == "confident"
+
+
+def test_fake_repo_excluded_flips_back_to_pending() -> None:
+    # узел, ошибочно исключённый в прошлый прогон, на этом возвращается в матчинг
+    repo = FakeEstimateRepository()
+    nid = _seed_one(repo, "x")
+    repo.save_node_classifications([NodeClassification(nid, excluded=True, embedding_input="x")])
+    repo.save_node_classifications([NodeClassification(nid, excluded=False, embedding_input="x")])
+    assert repo.count_unfinished_nodes(1) == 1  # снова pending

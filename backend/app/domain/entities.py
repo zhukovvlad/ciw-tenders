@@ -121,6 +121,7 @@ class EstimateRowStatus(StrEnum):
     """Статус узла сметы при матчинге (слаг — для хранения; рус.подписи в API-DTO)."""
 
     PENDING = "pending"
+    EXCLUDED = "excluded"  # чистый орг-заголовок: исключён из матчинга (обратимо)
     CONFIDENT = "confident"
     NEEDS_REVIEW = "needs_review"
     NO_MATCH = "no_match"
@@ -268,6 +269,24 @@ class MatchableNode:
 
     id: int
     embedding: list[float]
+    embedding_input: str
+
+
+@dataclass(frozen=True, slots=True)
+class ClassifiableNode:
+    """Узел для прохода классификации: id + код (для дерева) + имя."""
+
+    id: int
+    code: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class NodeClassification:
+    """Результат классификации одной строки (для bulk-записи)."""
+
+    node_id: int
+    excluded: bool
     embedding_input: str
 
 
