@@ -200,6 +200,42 @@ def test_fake_repo_excluded_flips_back_to_pending() -> None:
     assert repo.count_unfinished_nodes(1) == 1  # снова pending
 
 
+def test_fake_repo_reclassifies_error_node_to_excluded() -> None:
+    # охрана расширена до error/no_match: орг-строка, осевшая в error на прошлом прогоне,
+    # на этом переклассифицируется в excluded (иначе осталась бы матчабельной и засоряла).
+    repo = FakeEstimateRepository()
+    nid = _seed_one(repo, "1 Этап ЖК")
+    repo.nodes[nid]["status"] = "error"
+    repo.save_node_classifications(
+        [NodeClassification(nid, excluded=True, embedding_input="1 Этап ЖК")]
+    )
+    assert repo.get(1, 1, is_admin=True).rows[0].status == "excluded"
+
+
+def test_fake_repo_reclassify_clears_vector_when_breadcrumb_changes() -> None:
+    # уже сэмбедженный узел + изменившаяся крошка (флип вердикта предка на ре-прогоне) →
+    # старый вектор сбрасывается, узел снова попадает в очередь эмбеддинга (нет дрейфа).
+    repo = FakeEstimateRepository()
+    nid = _seed_one(repo, "x")
+    repo.nodes[nid]["embedding"] = [1.0, 0.0, 0.0]
+    repo.save_node_classifications(
+        [NodeClassification(nid, excluded=False, embedding_input="Новая крошка")]
+    )
+    assert repo.nodes[nid]["embedding"] is None
+    pend = repo.fetch_unembedded_nodes(1, after_id=0, limit=10)
+    assert pend and pend[0].embedding_input == "Новая крошка"
+
+
+def test_fake_repo_reclassify_keeps_vector_when_breadcrumb_unchanged() -> None:
+    # крошка не изменилась → вектор сохраняется, лишний пере-эмбед не провоцируется.
+    repo = FakeEstimateRepository()
+    nid = _seed_one(repo, "x")  # embedding_input == "x"
+    repo.nodes[nid]["embedding"] = [1.0, 0.0, 0.0]
+    repo.save_node_classifications([NodeClassification(nid, excluded=False, embedding_input="x")])
+    assert repo.nodes[nid]["embedding"] == [1.0, 0.0, 0.0]
+    assert repo.fetch_unembedded_nodes(1, after_id=0, limit=10) == []
+
+
 # ---------------------------------------------------------------------------
 # Task 8: classify_nodes orchestration tests
 # ---------------------------------------------------------------------------

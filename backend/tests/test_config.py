@@ -16,12 +16,11 @@ def test_jwt_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_embedding_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    # LLM-провайдер переключаем на anthropic, чтобы валидатор не требовал OPENROUTER_API_KEY
-    # при проверке embedding-дефолтов (conftest кладёт ANTHROPIC_API_KEY=test).
+    # OpenRouter-ключ нужен всегда (эмбеддер + классификатор — openrouter-only), поэтому
+    # задаём фиктивный и проверяем именно embedding-дефолты, а не отсутствие ключа.
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     settings = Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
-    assert settings.openrouter_api_key == ""
     assert settings.embedding_model == "google/gemini-embedding-2"
     assert settings.embedding_base_url == "https://openrouter.ai/api/v1"
     assert settings.embedding_dim == 768
@@ -80,6 +79,34 @@ def test_missing_key_for_provider_fails(monkeypatch) -> None:
     with pytest.raises(ValidationError) as exc:
         Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
     assert "OPENROUTER_API_KEY" in str(exc.value)
+
+
+def test_classifier_requires_openrouter_key_even_on_anthropic(monkeypatch) -> None:
+    # Классификатор оргзаголовков ВСЕГДА через OpenRouter (независимо от llm_provider) —
+    # без ключа он молча деградировал бы в UNSURE (401), поэтому валидатор обязан падать.
+    import pytest
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(ValidationError) as exc:
+        Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
+    assert "OPENROUTER_API_KEY" in str(exc.value)
+
+
+def test_nonpositive_classifier_batch_size_fails(monkeypatch) -> None:
+    # batch_size <= 0 → range(..., step=0) в classify() упал бы в рантайме → fail-fast.
+    import pytest
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    monkeypatch.setenv("CLASSIFIER_BATCH_SIZE", "0")
+    with pytest.raises(ValidationError) as exc:
+        Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
+    assert "CLASSIFIER_BATCH_SIZE" in str(exc.value)
 
 
 def test_deprecated_llm_model_fails(monkeypatch) -> None:

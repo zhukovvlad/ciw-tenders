@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import case, delete, func, select, text, update
 from sqlalchemy.orm import Session
 
 from app.domain.entities import (
@@ -338,15 +338,26 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
         ]
 
     def save_node_classifications(self, results: list[NodeClassification]) -> None:
-        # Охрана: только pending↔excluded. Терминальные матч-статусы и ревью неприкосновенны.
+        # Охрана: pending/excluded + retryable error/no_match (они матчабельны → орг среди них
+        # должен переехать в excluded). Терминальные/ревью-статусы (confident/needs_review/
+        # confirmed/overridden) неприкосновенны.
+        # Вектор сбрасываем ТОЛЬКО при смене крошки: иначе уже сэмбедженный узел остался бы со
+        # старым вектором при новом embedding_input (дрейф на ре-прогоне после флипа вердикта).
         for r in results:
             target = EstimateRowStatus.EXCLUDED if r.excluded else EstimateRowStatus.PENDING
             self._session.execute(
                 update(EstimateRowModel)
                 .where(
                     EstimateRowModel.id == r.node_id,
-                    EstimateRowModel.status.in_(("pending", "excluded")),
+                    EstimateRowModel.status.in_(("pending", "excluded", "error", "no_match")),
                 )
-                .values(status=str(target), embedding_input=r.embedding_input)
+                .values(
+                    status=str(target),
+                    embedding_input=r.embedding_input,
+                    embedding=case(
+                        (EstimateRowModel.embedding_input != r.embedding_input, None),
+                        else_=EstimateRowModel.embedding,
+                    ),
+                )
             )
         self._session.commit()  # один commit на весь проход (атомарность + латентность)

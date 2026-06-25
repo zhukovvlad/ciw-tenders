@@ -90,6 +90,17 @@ class Settings(BaseSettings):
             raise ValueError("LLM_PROVIDER=anthropic требует ANTHROPIC_API_KEY")
         if self.llm_provider == "anthropic" and not self.anthropic_llm_model.strip():
             raise ValueError("LLM_PROVIDER=anthropic требует непустой ANTHROPIC_LLM_MODEL")
+        # Классификатор оргзаголовков — ВСЕГДА OpenRouter, НЕЗАВИСИМО от llm_provider
+        # (как и эмбеддер). Без этих настроек он молча деградировал бы в UNSURE (401) или
+        # упал бы на range(..., step=0) в classify() — поэтому fail-fast здесь.
+        if not self.openrouter_api_key:
+            raise ValueError("Классификатор/эмбеддер требуют OPENROUTER_API_KEY")
+        if not self.openrouter_base_url.strip():
+            raise ValueError("Классификатор требует непустой OPENROUTER_BASE_URL")
+        if not self.classifier_model.strip():
+            raise ValueError("Классификатор требует непустой CLASSIFIER_MODEL")
+        if self.classifier_batch_size <= 0:
+            raise ValueError("CLASSIFIER_BATCH_SIZE должен быть > 0")
         return self
 
 

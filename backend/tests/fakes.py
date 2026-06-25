@@ -585,8 +585,10 @@ class FakeEstimateRepository(EstimateRepository):
     def save_node_classifications(self, results: list[NodeClassification]) -> None:
         for r in results:
             n = self.nodes[r.node_id]
-            if n["status"] not in ("pending", "excluded"):
-                continue  # охрана: матч-статус неприкосновенен
+            if n["status"] not in ("pending", "excluded", "error", "no_match"):
+                continue  # охрана: терминальные матч/ревью-статусы неприкосновенны
+            if n["embedding_input"] != r.embedding_input:
+                n["embedding"] = None  # крошка изменилась → пере-эмбед на чистой (нет дрейфа)
             n["status"] = "excluded" if r.excluded else "pending"
             n["embedding_input"] = r.embedding_input
 
