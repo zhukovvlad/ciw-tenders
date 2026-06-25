@@ -8,6 +8,28 @@
 
 ---
 
+## 🟢 Фильтр оргзаголовков: реклассификация на каждом прогоне + непокрытые body-error пути адаптера
+
+**Что:** (1) `EstimateMatchingService._classify_nodes` гоняет полный лексический проход + LLM на
+КАЖДЫЙ вызов `match_estimate`, включая каждый gate-retry ожидания готовности справочника. На
+смете, ретраящейся N раз, это N полных LLM-проходов классификации (~3 батча каждый) — реальная
+трата токенов, не только латентность. (2) `test_openrouter_classifier.py` не покрывает body-error
+пути `_call` (`error` в теле → `_raise_body_error`, пустой `choices`, кривой `choices[0].message`) —
+именно ветки transient-vs-permanent, решающие retry-поведение. Фолбэк всё равно даёт UNSURE (никогда
+ORG), так что корректность не регрессирует — непроверена только эффективность ретраев.
+
+**Почему отложено:** дизайн (spec, раздел «Вне области») явно откладывает персистентный кэш
+классификации на phase 2; для stateless-v1 стоимость приемлема. Body-error тесты — низкий риск
+(фейл-сейф). Ловить здесь — gold-plating поверх зелёной фичи.
+
+**Как чинить:** (1) гейт «классифицировать только на первом прогоне» — пропустить, если все узлы уже
+в пост-классификационном состоянии (нет `pending` без `embedding_input`?), или persistent
+`ClassificationCache` (phase 2). (2) добавить стаб-варианты `{"error":{"code":429,...}}` и
+`{"choices":[]}` в тест адаптера. См. [estimate_matching_service.py](../backend/app/services/estimate_matching_service.py),
+[openrouter_classifier.py](../backend/app/infrastructure/ai/openrouter_classifier.py).
+
+---
+
 ## 🟢 SP2-матчинг: пул коннектов vs concurrency воркера + drain на каждый `create_article`
 
 **Что:** (1) `engine` на дефолтном QueuePool (5+10). Каждая running-задача пинит коннект до
