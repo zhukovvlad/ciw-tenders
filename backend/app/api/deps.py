@@ -26,8 +26,10 @@ from app.domain.ports import (
     TaskQueue,
     TokenService,
     UserRepository,
+    WorkTypeClassifier,
 )
 from app.infrastructure.ai.anthropic_matcher import AnthropicLLMMatcher
+from app.infrastructure.ai.openrouter_classifier import OpenRouterWorkClassifier
 from app.infrastructure.ai.openrouter_embedder import OpenRouterEmbedder
 from app.infrastructure.ai.openrouter_matcher import OpenRouterLLMMatcher
 from app.infrastructure.auth.jwt_token_service import JwtTokenService
@@ -157,6 +159,19 @@ def get_task_queue() -> TaskQueue:
     return CeleryTaskQueue()
 
 
+@lru_cache
+def get_work_classifier() -> WorkTypeClassifier:
+    settings = get_settings()
+    return OpenRouterWorkClassifier(
+        api_key=settings.openrouter_api_key,
+        base_url=settings.openrouter_base_url,
+        model=settings.classifier_model,
+        batch_size=settings.classifier_batch_size,
+        timeout_s=settings.ai_call_timeout_s,
+        retry_budget=settings.transient_retry_budget,
+    )
+
+
 def build_estimate_matching_service(session: Session) -> EstimateMatchingService:
     """Фабрика для Celery-задачи (вне FastAPI DI): репозитории — на ПЕРЕДАННОЙ сессии
     (пиннутый коннект задачи), а embedder/LLM-матчер берём из кэшированных синглтонов
@@ -177,6 +192,7 @@ def build_estimate_matching_service(session: Session) -> EstimateMatchingService
         embedder=get_embedder(),
         estimates=estimates,
         articles=articles,
+        classifier=get_work_classifier(),
     )
 
 

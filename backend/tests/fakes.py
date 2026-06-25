@@ -436,7 +436,7 @@ class FakeEstimateRepository(EstimateRepository):
         return StoredEstimateRow(
             id=base.id, code=base.code, name=base.name, parent_code=base.parent_code,
             section_type=base.section_type, depth=base.depth,
-            embedding_input=base.embedding_input, source_index=base.source_index,
+            embedding_input=n["embedding_input"], source_index=base.source_index,
             status=n["status"], has_embedding=n["embedding"] is not None,
             matched_article_id=n["matched_article_id"], matched_code=n["matched_code"],
             matched_name=n["matched_name"], score=n["score"],
