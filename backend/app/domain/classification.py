@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from app.domain.entities import WorkClass
+
 # Оргтокены — маленькое закрытое множество. Стемы заякорены на начало слова и
 # матчат русские окончания (этап→этапы/этапов); «этап» НЕ ловит «этаж».
 # ВАЖНО: «пусков» матчит «пусковой», но не «пусконаладочные» (это работа).
@@ -71,3 +73,12 @@ def has_work_word(name: str) -> bool:
         if len(token) >= 3 or _is_abbrev(token):
             return True
     return False
+
+
+def classify_lexical(name: str) -> WorkClass:
+    """Каскад: нет оргтокена → WORK; орг + нет головы → ORG; орг + голова → UNSURE."""
+    if not contains_org_token(name):
+        return WorkClass.WORK
+    if has_work_word(name):
+        return WorkClass.UNSURE
+    return WorkClass.ORG

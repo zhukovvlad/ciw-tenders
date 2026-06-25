@@ -14,6 +14,14 @@ class Role(StrEnum):
     ADMIN = "admin"
 
 
+class WorkClass(StrEnum):
+    """Класс узла сметы по смыслу имени (для фильтрации оргзаголовков). В БД НЕ хранится."""
+
+    WORK = "work"      # вид работ — матчится
+    ORG = "org"        # организационный заголовок — исключается (status='excluded')
+    UNSURE = "unsure"  # неоднозначно — трактуем как WORK (асимметрия ошибок)
+
+
 @dataclass(frozen=True, slots=True)
 class TemplateArticle:
     """Эталонная статья справочника СМР (узел дерева через parent_id)."""
