@@ -93,9 +93,7 @@ export function EstimateList({ onOpen }: EstimateListProps) {
       .catch((err) => {
         if (!cancelled)
           setError(
-            err instanceof ApiError
-              ? err.message
-              : "Не удалось загрузить сметы"
+            err instanceof ApiError ? err.message : "Не удалось загрузить сметы"
           )
       })
     return () => {

@@ -36,7 +36,9 @@ describe("EstimateList", () => {
   it("показывает пустое состояние, когда смет нет", async () => {
     vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue([])
     render(<EstimateList onOpen={vi.fn()} />)
-    expect(await screen.findByText(/пока нет разобранных смет/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/пока нет разобранных смет/i)
+    ).toBeInTheDocument()
   })
 
   it("рисует строки и бейджи статусов", async () => {
