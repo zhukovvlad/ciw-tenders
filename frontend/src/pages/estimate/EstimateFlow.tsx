@@ -4,10 +4,12 @@ import { toast } from "sonner"
 import type { Progress } from "@/lib/mock/api"
 import {
   exportEstimate,
+  getEstimate,
   patchRowReview,
   pollEstimate,
   uploadEstimate,
 } from "@/lib/api/estimates"
+import type { EstimateListItem } from "@/lib/api/estimates"
 import { initReview, progress, reviewReducer } from "@/lib/reviewState"
 import type { ReviewActionKind } from "@/pages/estimate/ReviewScreen"
 import {
@@ -94,6 +96,55 @@ export function EstimateFlow() {
     }
   }
 
+  // Открыть ранее разобранную смету из списка. Готовые (ready/partial_error) —
+  // сразу в review; ещё считающиеся (pending/running) — в processing с
+  // возобновлением poll. blocked сюда не приходит (некликабелен в списке).
+  async function handleOpen(item: EstimateListItem) {
+    estimateIdRef.current = item.id
+    saveEstimateId(item.id)
+    setFileName(item.filename)
+
+    if (item.status === "pending" || item.status === "running") {
+      setPhase("processing")
+      setProg({ phase: "parsing", done: 0, total: 0, etaSeconds: null })
+      try {
+        const { fileName: serverFileName, rows } = await pollEstimate(
+          item.id,
+          (status, done, total) => {
+            const mappedPhase: Progress["phase"] =
+              status === "running" ? "matching" : "parsing"
+            setProg({ phase: mappedPhase, done, total, etaSeconds: null })
+          }
+        )
+        const fresh = initReview(serverFileName || item.filename, rows)
+        dispatch({ type: "load", state: fresh })
+        saveReview(fresh)
+        setPhase("review")
+      } catch (err) {
+        console.error(err)
+        toast.error(
+          err instanceof Error ? err.message : "Не удалось обработать смету"
+        )
+        setPhase("start")
+      }
+      return
+    }
+
+    try {
+      const { fileName: serverFileName, rows } = await getEstimate(item.id)
+      const fresh = initReview(serverFileName || item.filename, rows)
+      dispatch({ type: "load", state: fresh })
+      saveReview(fresh)
+      setPhase("review")
+    } catch (err) {
+      console.error(err)
+      toast.error(
+        err instanceof Error ? err.message : "Не удалось открыть смету"
+      )
+      setPhase("start")
+    }
+  }
+
   function handleNew() {
     estimateIdRef.current = null
     clearReview()
@@ -151,7 +202,8 @@ export function EstimateFlow() {
       })
   }
 
-  if (phase === "start") return <StartScreen onFile={handleFile} />
+  if (phase === "start")
+    return <StartScreen onFile={handleFile} onOpen={handleOpen} />
   if (phase === "processing")
     return <ProcessingScreen fileName={fileName} progress={prog} />
   if (phase === "done")

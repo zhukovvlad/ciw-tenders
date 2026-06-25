@@ -123,3 +123,34 @@ export async function patchRowReview(
 export async function exportEstimate(id: number): Promise<Blob> {
   return apiGetBlob(`/estimates/${id}/export`)
 }
+
+interface SummaryDto {
+  id: number
+  filename: string
+  status: string
+  nodes_count: number
+  created_at: string // ISO
+}
+
+export interface EstimateListItem {
+  id: number
+  filename: string
+  status: string
+  nodesCount: number
+  createdAt: string // ISO — форматируется в UI
+}
+
+export async function listEstimates(): Promise<EstimateListItem[]> {
+  const dtos = await apiGet<SummaryDto[]>("/estimates")
+  return dtos.map((d) => ({
+    id: d.id,
+    filename: d.filename,
+    status: d.status,
+    nodesCount: d.nodes_count,
+    createdAt: d.created_at,
+  }))
+}
+
+export async function deleteEstimate(id: number): Promise<void> {
+  await apiSend("DELETE", `/estimates/${id}`)
+}
