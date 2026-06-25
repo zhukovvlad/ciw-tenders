@@ -82,3 +82,30 @@ def classify_lexical(name: str) -> WorkClass:
     if has_work_word(name):
         return WorkClass.UNSURE
     return WorkClass.ORG
+
+
+def _normalize_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
+
+
+def _collapse_consecutive(parts: list[str]) -> list[str]:
+    out: list[str] = []
+    for part in parts:
+        if not out or out[-1] != part:
+            out.append(part)
+    return out
+
+
+def build_embedding_input(
+    self_name: str,
+    ancestors: list[tuple[str, WorkClass]],
+    *,
+    separator: str = ". ",
+    collapse_repeats: bool = True,
+) -> str:
+    """Крошка root→узел; ORG-предки выброшены (справочник org-free, не загрязняем вектор)."""
+    parts = [_normalize_ws(name) for name, cls in ancestors if cls is not WorkClass.ORG]
+    parts.append(_normalize_ws(self_name))
+    if collapse_repeats:
+        parts = _collapse_consecutive(parts)
+    return separator.join(parts)

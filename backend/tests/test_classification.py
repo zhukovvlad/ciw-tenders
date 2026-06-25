@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.domain.classification import classify_lexical, contains_org_token, has_work_word
+from app.domain.classification import (
+    build_embedding_input,
+    classify_lexical,
+    contains_org_token,
+    has_work_word,
+)
 from app.domain.entities import WorkClass
 
 
@@ -65,3 +70,20 @@ def test_has_work_word_false(name: str) -> None:
 )
 def test_classify_lexical(name: str, expected: WorkClass) -> None:
     assert classify_lexical(name) is expected
+
+
+def test_build_embedding_input_drops_org_ancestors() -> None:
+    ancestors = [
+        ("1 Этап ЖК", WorkClass.ORG),
+        ("Фасадные работы", WorkClass.WORK),
+    ]
+    assert build_embedding_input("Устройство навесных фасадов", ancestors) == (
+        "Фасадные работы. Устройство навесных фасадов"
+    )
+
+
+def test_build_embedding_input_normalizes_and_collapses() -> None:
+    ancestors = [("Устройство  заполнения", WorkClass.WORK)]  # двойной пробел
+    assert build_embedding_input("Устройство  заполнения", ancestors) == (
+        "Устройство заполнения"  # повтор схлопнут, пробелы нормализованы
+    )
