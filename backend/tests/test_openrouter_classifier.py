@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import httpx
+
 from app.domain.entities import NodeToClassify, WorkClass
 from app.infrastructure.ai.openrouter_classifier import (
     OpenRouterWorkClassifier,
+    _strip_fences,
     parse_classifications,
 )
 
@@ -60,3 +63,19 @@ def test_broken_json_falls_back_to_unsure() -> None:
     clf = OpenRouterWorkClassifier(api_key="x", client=client)
     items = [NodeToClassify("a", ()), NodeToClassify("b", ())]
     assert clf.classify(items) == [WorkClass.UNSURE, WorkClass.UNSURE]
+
+
+class _RaisingClient:
+    def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+        raise httpx.TransportError("boom")
+
+
+def test_transport_error_falls_back_to_unsure() -> None:
+    clf = OpenRouterWorkClassifier(api_key="x", client=_RaisingClient())
+    items = [NodeToClassify("a", ()), NodeToClassify("b", ())]
+    assert clf.classify(items) == [WorkClass.UNSURE, WorkClass.UNSURE]
+
+
+def test_strip_fences_tolerates_trailing_text() -> None:
+    text = '```json\n[{"i": 0, "class": "org"}]\n```\nкомментарий после рамки'
+    assert parse_classifications(_strip_fences(text), 1) == [WorkClass.ORG]

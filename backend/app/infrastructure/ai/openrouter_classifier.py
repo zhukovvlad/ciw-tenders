@@ -54,15 +54,20 @@ def build_batch_prompt(items: list[NodeToClassify]) -> str:
 
 
 def _strip_fences(text: str) -> str:
-    """Снять markdown-ограждение ```json … ``` — модель иногда оборачивает вопреки промпту."""
+    """Снять markdown-ограждение ```json … ``` — модель иногда оборачивает вопреки промпту.
+
+    Закрывающую рамку ищем как ПОСЛЕДНЕЕ вхождение ``` (модель может дописать
+    комментарий после рамки) — иначе сырой ``` утёк бы в json.loads → весь батч UNSURE.
+    """
     s = text.strip()
     if not s.startswith("```"):
         return s
     s = s[3:]
     if s[:4].lower() == "json":
         s = s[4:]
-    if s.endswith("```"):
-        s = s[:-3]
+    end = s.rfind("```")
+    if end != -1:
+        s = s[:end]
     return s.strip()
 
 
