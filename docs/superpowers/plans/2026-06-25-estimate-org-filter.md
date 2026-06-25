@@ -1,5 +1,11 @@
 # Фильтрация организационных заголовков (lean v1) — Implementation Plan
 
+> ⚠️ **ДЕВИАЦИЯ ПРИ РЕАЛИЗАЦИИ (источник правды о задеплоенном — девлог):** этот план описывает
+> LLM-классификатор через **Anthropic SDK** (Task 6, «Tech Stack»), но по директиве заказчика он
+> реализован **OpenRouter-only** (`OpenRouterWorkClassifier`, провайдер проекта по умолчанию). План —
+> замороженный дизайн-документ, задним числом не переписывается; что реально отгружено — см.
+> [docs/devlog/2026-06-25-estimate-org-filter.md](../../devlog/2026-06-25-estimate-org-filter.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** До эмбеддинга классифицировать узлы сметы в WORK/ORG/UNSURE по смыслу имени, обратимо исключить чистые орг-заголовки из эмбеддинга/матчинга (статусом `excluded`) и вырезать ORG-предков из крошки `embedding_input`.
