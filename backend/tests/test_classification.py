@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.domain.classification import contains_org_token
+from app.domain.classification import contains_org_token, has_work_word
 
 
 @pytest.mark.parametrize(
@@ -30,3 +30,22 @@ def test_contains_org_token_true(name: str) -> None:
 )
 def test_contains_org_token_false(name: str) -> None:
     assert contains_org_token(name) is False
+
+
+@pytest.mark.parametrize("name", ["МАФ", "ЗИП", "VRF", "КС", "Устройство кровли"])
+def test_has_work_word_true(name: str) -> None:
+    assert has_work_word(name) is True
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "1 Этап ЖК",        # ЖК — литерал-оргтокен, не голова (до аббрев-правила!)
+        "2 Этап БЦ",
+        "Корпус № 2; 3; 4",
+        "и в том числе",    # стоп-слова
+        "прочее",
+    ],
+)
+def test_has_work_word_false(name: str) -> None:
+    assert has_work_word(name) is False
