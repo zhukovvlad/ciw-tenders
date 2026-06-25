@@ -87,3 +87,15 @@ def test_build_embedding_input_normalizes_and_collapses() -> None:
     assert build_embedding_input("Устройство  заполнения", ancestors) == (
         "Устройство заполнения"  # повтор схлопнут, пробелы нормализованы
     )
+
+
+def test_fake_classifier_aligns_output_to_input() -> None:
+    from app.domain.entities import NodeToClassify
+    from tests.fakes import FakeWorkTypeClassifier
+
+    clf = FakeWorkTypeClassifier(verdicts={"Гостиница Заря": WorkClass.ORG})
+    items = [
+        NodeToClassify(name="Гостиница Заря", ancestors=("Фасадные работы",)),
+        NodeToClassify(name="что-то ещё", ancestors=()),
+    ]
+    assert clf.classify(items) == [WorkClass.ORG, WorkClass.UNSURE]

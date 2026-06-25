@@ -269,3 +269,11 @@ class MatchableNode:
     id: int
     embedding: list[float]
     embedding_input: str
+
+
+@dataclass(frozen=True, slots=True)
+class NodeToClassify:
+    """Узел на вход LLM-классификатору: имя + цепочка предков (root→parent) как контекст."""
+
+    name: str
+    ancestors: tuple[str, ...]

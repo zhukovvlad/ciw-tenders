@@ -19,10 +19,12 @@ from app.domain.entities import (
     MatchableNode,
     NewEstimate,
     NodeMatch,
+    NodeToClassify,
     PendingEmbedding,
     TemplateArticle,
     TokenPayload,
     User,
+    WorkClass,
 )
 
 
@@ -279,3 +281,12 @@ class ObjectStorage(ABC):
 
     @abstractmethod
     def delete(self, key: str) -> None: ...
+
+
+class WorkTypeClassifier(ABC):
+    """Порт классификатора вид-работ/оргструктура (дешёвая LLM, отдельно от арбитра)."""
+
+    @abstractmethod
+    def classify(self, items: list[NodeToClassify]) -> list[WorkClass]:
+        """Возврат выровнен по items. При сбое/неоднозначности → WorkClass.UNSURE."""
+        ...

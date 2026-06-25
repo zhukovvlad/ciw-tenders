@@ -16,11 +16,13 @@ from app.domain.entities import (
     MatchCandidate,
     NewEstimate,
     NodeMatch,
+    NodeToClassify,
     PendingEmbedding,
     StoredEstimateRow,
     TemplateArticle,
     TokenPayload,
     User,
+    WorkClass,
 )
 from app.domain.errors import StorageError, TokenError
 from app.domain.ports import (
@@ -34,6 +36,7 @@ from app.domain.ports import (
     TaskQueue,
     TokenService,
     UserRepository,
+    WorkTypeClassifier,
 )
 
 
@@ -562,3 +565,18 @@ class FakeEstimateRepository(EstimateRepository):
         if est is None or (not is_admin and est.user_id != requester_id):
             return None
         return self._keys.get(estimate_id)
+
+
+class FakeWorkTypeClassifier(WorkTypeClassifier):
+    def __init__(
+        self,
+        verdicts: dict[str, WorkClass] | None = None,
+        default: WorkClass = WorkClass.UNSURE,
+    ) -> None:
+        self._verdicts = verdicts or {}
+        self._default = default
+        self.calls: list[list[NodeToClassify]] = []
+
+    def classify(self, items: list[NodeToClassify]) -> list[WorkClass]:
+        self.calls.append(items)
+        return [self._verdicts.get(i.name, self._default) for i in items]
