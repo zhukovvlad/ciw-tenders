@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from app.domain.entities import (
     ArticleCandidate,
+    ClassifiableNode,
     Estimate,
     EstimateNode,
     EstimateStatus,
@@ -15,12 +16,15 @@ from app.domain.entities import (
     MatchableNode,
     MatchCandidate,
     NewEstimate,
+    NodeClassification,
     NodeMatch,
+    NodeToClassify,
     PendingEmbedding,
     StoredEstimateRow,
     TemplateArticle,
     TokenPayload,
     User,
+    WorkClass,
 )
 from app.domain.errors import StorageError, TokenError
 from app.domain.ports import (
@@ -34,6 +38,7 @@ from app.domain.ports import (
     TaskQueue,
     TokenService,
     UserRepository,
+    WorkTypeClassifier,
 )
 
 
@@ -405,7 +410,9 @@ class FakeEstimateRepository(EstimateRepository):
                 id=e.id,
                 filename=e.filename,
                 status=self.statuses.get(e.id, e.status),
-                nodes_count=len(e.rows),
+                nodes_count=sum(
+                    1 for r in e.rows if self.nodes[r.id]["status"] != "excluded"
+                ),
                 created_at=e.created_at,
             )
             for e in self.estimates.values()
@@ -429,7 +436,7 @@ class FakeEstimateRepository(EstimateRepository):
         return StoredEstimateRow(
             id=base.id, code=base.code, name=base.name, parent_code=base.parent_code,
             section_type=base.section_type, depth=base.depth,
-            embedding_input=base.embedding_input, source_index=base.source_index,
+            embedding_input=n["embedding_input"], source_index=base.source_index,
             status=n["status"], has_embedding=n["embedding"] is not None,
             matched_article_id=n["matched_article_id"], matched_code=n["matched_code"],
             matched_name=n["matched_name"], score=n["score"],
@@ -488,6 +495,7 @@ class FakeEstimateRepository(EstimateRepository):
                 if n["estimate_id"] == estimate_id
                 and n["embedding"] is None
                 and n["id"] > after_id
+                and n["status"] != "excluded"
             ),
             key=lambda n: n["id"],
         )
@@ -562,3 +570,39 @@ class FakeEstimateRepository(EstimateRepository):
         if est is None or (not is_admin and est.user_id != requester_id):
             return None
         return self._keys.get(estimate_id)
+
+    def fetch_all_nodes(self, estimate_id: int) -> list[ClassifiableNode]:
+        base = {r.id: r for e in self.estimates.values() for r in e.rows}
+        rows = sorted(
+            (n for n in self.nodes.values() if n["estimate_id"] == estimate_id),
+            key=lambda n: n["id"],
+        )
+        return [
+            ClassifiableNode(id=n["id"], code=base[n["id"]].code, name=base[n["id"]].name)
+            for n in rows
+        ]
+
+    def save_node_classifications(self, results: list[NodeClassification]) -> None:
+        for r in results:
+            n = self.nodes[r.node_id]
+            if n["status"] not in ("pending", "excluded", "error", "no_match"):
+                continue  # охрана: терминальные матч/ревью-статусы неприкосновенны
+            if n["embedding_input"] != r.embedding_input:
+                n["embedding"] = None  # крошка изменилась → пере-эмбед на чистой (нет дрейфа)
+            n["status"] = "excluded" if r.excluded else "pending"
+            n["embedding_input"] = r.embedding_input
+
+
+class FakeWorkTypeClassifier(WorkTypeClassifier):
+    def __init__(
+        self,
+        verdicts: dict[str, WorkClass] | None = None,
+        default: WorkClass = WorkClass.UNSURE,
+    ) -> None:
+        self._verdicts = verdicts or {}
+        self._default = default
+        self.calls: list[list[NodeToClassify]] = []
+
+    def classify(self, items: list[NodeToClassify]) -> list[WorkClass]:
+        self.calls.append(items)
+        return [self._verdicts.get(i.name, self._default) for i in items]

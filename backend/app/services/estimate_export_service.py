@@ -64,6 +64,8 @@ class EstimateExportService:
 
     @staticmethod
     def _cell_value(row: StoredEstimateRow) -> str:
+        if row.status == "excluded":
+            return ""  # орг-заголовок исключён из матчинга → «Статья СМР» всегда пуста
         if row.review_status in ("confirmed", "overridden"):
             return row.final_code or ""  # для confirmed это matched_code (заморожен в правке)
         if row.review_status == "unreviewed" and row.status == "confident":

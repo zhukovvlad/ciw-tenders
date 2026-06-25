@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 
 from app.domain.entities import (
     ArticleCandidate,
+    ClassifiableNode,
     Estimate,
     EstimateNode,
     EstimateStatus,
@@ -18,11 +19,14 @@ from app.domain.entities import (
     ImportPlan,
     MatchableNode,
     NewEstimate,
+    NodeClassification,
     NodeMatch,
+    NodeToClassify,
     PendingEmbedding,
     TemplateArticle,
     TokenPayload,
     User,
+    WorkClass,
 )
 
 
@@ -265,6 +269,17 @@ class EstimateRepository(ABC):
         """original_object_key с проверкой владения (None — не найдена/чужая)."""
         ...
 
+    @abstractmethod
+    def fetch_all_nodes(self, estimate_id: int) -> list[ClassifiableNode]:
+        """Все узлы сметы (id, code, name) по возрастанию source_index."""
+        ...
+
+    @abstractmethod
+    def save_node_classifications(self, results: list[NodeClassification]) -> None:
+        """Bulk, один commit. Охрана: пишет только строки в status IN ('pending','excluded');
+        excluded=True→'excluded', False→'pending'. Терминальные матч-статусы/ревью не трогает."""
+        ...
+
 
 class ObjectStorage(ABC):
     """Объектное хранилище (MinIO/S3) для исходных файлов."""
@@ -279,3 +294,12 @@ class ObjectStorage(ABC):
 
     @abstractmethod
     def delete(self, key: str) -> None: ...
+
+
+class WorkTypeClassifier(ABC):
+    """Порт классификатора вид-работ/оргструктура (дешёвая LLM, отдельно от арбитра)."""
+
+    @abstractmethod
+    def classify(self, items: list[NodeToClassify]) -> list[WorkClass]:
+        """Возврат выровнен по items. При сбое/неоднозначности → WorkClass.UNSURE."""
+        ...
