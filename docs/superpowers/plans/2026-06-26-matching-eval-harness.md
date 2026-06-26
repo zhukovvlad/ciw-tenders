@@ -335,16 +335,33 @@ def test_group_a_matrix_counts_structural_and_matchable_only():
     assert (r.a_tn, r.a_fp, r.a_fn, r.a_tp) == (1, 1, 1, 1)  # no_article НЕ в матрице
 
 
-def test_group_a_prime_no_article_split():
+def test_group_a_prime_no_article_split_is_exhaustive():
     outcomes = [
         _m(expected_kind=BenchmarkKind.NO_ARTICLE, expected_code=None, kept=True, status="no_match"),
         _m(expected_kind=BenchmarkKind.NO_ARTICLE, expected_code=None, kept=True,
            status="confident", matched_code="9.9"),
+        _m(expected_kind=BenchmarkKind.NO_ARTICLE, expected_code=None, kept=True,
+           status="needs_review", matched_code="9.9"),
     ]
     r = compute_metrics(outcomes)
-    assert r.no_article_total == 2
+    assert r.no_article_total == 3
     assert r.no_article_correct_no_match == 1
     assert r.no_article_wrong_confident == 1
+    assert r.no_article_needs_review == 1
+    # бакеты исчерпывающие: сумма реконсилится с total
+    assert (r.no_article_correct_no_match + r.no_article_wrong_confident
+            + r.no_article_needs_review) == r.no_article_total
+
+
+def test_error_status_excluded_from_b_denominator():
+    outcomes = [
+        _m(status="error", matched_code=None, top3_codes=[]),  # транзиентная AI-ошибка
+        _m(matched_code="1.1", top3_codes=["1.1"]),
+    ]
+    r = compute_metrics(outcomes)
+    assert r.b_error == 1
+    assert r.b_total == 1  # error НЕ в знаменателе top-1/top-3
+    assert r.b_top1_hits == 1
 
 
 def test_group_b_top1_top3_only_matchable_kept():
@@ -412,14 +429,16 @@ class EvalReport:
     a_fp: int
     a_fn: int
     a_tp: int
-    # Группа A′ (no_article)
+    # Группа A′ (no_article) — бакеты исчерпывающие
     no_article_total: int
     no_article_correct_no_match: int
     no_article_wrong_confident: int
-    # Группа B (только matchable, kept, код есть в каталоге)
+    no_article_needs_review: int
+    # Группа B (только matchable, kept, код есть в каталоге, НЕ error)
     b_total: int
     b_top1_hits: int
     b_top3_hits: int
+    b_error: int  # matchable+kept+в каталоге, но status='error' — вне знаменателя B
     # Дрейф каталога
     gold_not_in_catalog: int
     article_renamed: int
@@ -437,8 +456,8 @@ def compute_metrics(
     outcomes: Sequence[NodeOutcome], *, confident_statuses: tuple[str, ...] = ("confident",)
 ) -> EvalReport:
     a_tn = a_fp = a_fn = a_tp = 0
-    na_total = na_ok = na_wrong = 0
-    b_total = b_top1 = b_top3 = 0
+    na_total = na_ok = na_wrong = na_review = 0
+    b_total = b_top1 = b_top3 = b_error = 0
     not_in_cat = renamed = 0
 
     for o in outcomes:
@@ -457,24 +476,30 @@ def compute_metrics(
             if not o.catalog_has_code:
                 not_in_cat += 1
             elif o.kept:
-                b_total += 1
-                if o.matched_code == o.expected_code:
-                    b_top1 += 1
-                if o.expected_code in o.top3_codes:
-                    b_top3 += 1
+                if o.status == "error":
+                    b_error += 1   # транзиентная AI-ошибка — не промах, вне знаменателя
+                else:
+                    b_total += 1
+                    if o.matched_code == o.expected_code:
+                        b_top1 += 1
+                    if o.expected_code in o.top3_codes:
+                        b_top3 += 1
         elif o.expected_kind is BenchmarkKind.NO_ARTICLE:
             na_total += 1
             if o.status == "no_match":
                 na_ok += 1
             elif o.status in confident_statuses:
                 na_wrong += 1
+            elif o.status == "needs_review":
+                na_review += 1
 
     return EvalReport(
         a_tn=a_tn, a_fp=a_fp, a_fn=a_fn, a_tp=a_tp,
         no_article_total=na_total,
         no_article_correct_no_match=na_ok,
         no_article_wrong_confident=na_wrong,
-        b_total=b_total, b_top1_hits=b_top1, b_top3_hits=b_top3,
+        no_article_needs_review=na_review,
+        b_total=b_total, b_top1_hits=b_top1, b_top3_hits=b_top3, b_error=b_error,
         gold_not_in_catalog=not_in_cat, article_renamed=renamed,
     )
 ```
@@ -711,6 +736,7 @@ import openpyxl
 
 from app.domain.benchmark import BenchmarkKind
 from app.infrastructure.benchmark_xlsx import read_benchmark_nodes
+from app.services.estimate_parser import EstimateParser
 
 
 def _make_xlsx(path, rows):
@@ -738,6 +764,20 @@ def test_read_nodes_assigns_kinds(tmp_path):
     assert by_code["1.1"].expected_kind == BenchmarkKind.STRUCTURAL.value
     assert by_code["10"].expected_kind == BenchmarkKind.NO_ARTICLE.value
     assert nodes[0].source_index < nodes[1].source_index  # порядок сохранён
+
+
+def test_name_cleaning_matches_parser(tmp_path):
+    # Паритет имён: benchmark_xlsx._clean и EstimateParser._clean_name — две копии,
+    # могут разойтись. Имя узла кормит крошку в проде, поэтому чистка ОБЯЗАНА совпадать,
+    # иначе бенчмарк хранит не тот текст, что эмбеддится в проде (дыра в достоверности).
+    p = tmp_path / "gold.xlsx"
+    _make_xlsx(p, [
+        ["1", "(1) Подготовительные", "Подготовительные  работы\xa0и содержание"],
+        ["1.1", None, "Мобилизация  площадки"],
+    ])
+    seeds = read_benchmark_nodes(str(p))
+    parsed = EstimateParser().parse(p.read_bytes())
+    assert {(s.code, s.name) for s in seeds} == {(n.code, n.name) for n in parsed.nodes}
 ```
 
 - [ ] **Step 2: Запустить — убедиться, что падает**
@@ -1167,11 +1207,13 @@ def _report(seeds, stored, articles, report_path) -> None:
     print(f"TN={r.a_tn}  FP={r.a_fp}  FN={r.a_fn} (молчаливый пропуск работы!)  TP={r.a_tp}")
     print("\n=== Группа A' (no_article) ===")
     print(f"всего={r.no_article_total}  → no_match={r.no_article_correct_no_match}  "
+          f"needs_review={r.no_article_needs_review}  "
           f"ошибочный уверенный матч={r.no_article_wrong_confident}")
     print("\n=== Группа B (матчинг, matchable) ===")
     denom = r.b_total or 1
     print(f"узлов={r.b_total}  top-1={r.b_top1_hits} ({100*r.b_top1_hits/denom:.1f}%)  "
-          f"top-3 retrieval={r.b_top3_hits} ({100*r.b_top3_hits/denom:.1f}%)")
+          f"top-3 retrieval={r.b_top3_hits} ({100*r.b_top3_hits/denom:.1f}%)  "
+          f"[error вне знаменателя: {r.b_error}]")
     print(f"\nдрейф: gold_not_in_catalog={r.gold_not_in_catalog}  article_renamed={r.article_renamed}")
 
     with open(report_path, "w", newline="", encoding="utf-8") as f:
