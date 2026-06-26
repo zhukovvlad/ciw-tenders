@@ -170,7 +170,7 @@ export function ReviewScreen({
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="bg-[var(--ds-surface-sunken)] text-left text-xs tracking-wide text-muted-foreground uppercase">
-            <th className="px-4 py-2.5 font-normal">#</th>
+            <th className="px-4 py-2.5 font-normal">№ раздела</th>
             <th className="px-4 py-2.5 font-normal">Работа из сметы</th>
             <th className="px-4 py-2.5 font-normal">Статья справочника СМР</th>
             <th className="px-4 py-2.5 text-right font-normal">Score</th>

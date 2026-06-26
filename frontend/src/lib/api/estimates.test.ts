@@ -5,9 +5,10 @@ import { deleteEstimate, listEstimates, rowFromDto } from "@/lib/api/estimates"
 afterEach(() => vi.restoreAllMocks())
 
 describe("rowFromDto", () => {
-  it("maps DTO to MatchRow (id→row_number, code→article_code)", () => {
+  it("maps DTO to MatchRow (id→row_number, code→section_code)", () => {
     const row = rowFromDto({
       id: 42,
+      code: "3.2",
       name: "Кладка",
       status: "needs_review",
       score: 0.7,
@@ -21,6 +22,7 @@ describe("rowFromDto", () => {
       final_name: null,
     })
     expect(row.row_number).toBe(42)
+    expect(row.section_code).toBe("3.2")
     expect(row.source_name).toBe("Кладка")
     expect(row.candidates[0].article_code).toBe("2.1")
     expect(row.review_status).toBe("unreviewed")

@@ -107,6 +107,7 @@ function cand(id: number, code: string, score: number): Candidate {
 export const MOCK_ROWS: MatchRow[] = [
   {
     row_number: 2,
+    section_code: "1",
     source_name:
       "Подготовительные работы и содержание площадки (включая содержание прилегающей территории)",
     status: "confident",
@@ -122,6 +123,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 3,
+    section_code: "2",
     source_name: "Устройство котлована",
     status: "needs_review",
     score: 0.83,
@@ -140,6 +142,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 4,
+    section_code: "3",
     source_name: "Устройство гидроизоляции подземной части здания",
     status: "needs_review",
     score: 0.81,
@@ -158,6 +161,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 5,
+    section_code: "4",
     source_name: "Возведение несущих конструкций здания",
     status: "confident",
     score: 0.94,
@@ -172,6 +176,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 6,
+    section_code: "5",
     source_name: "Общестроительные работы - перегородки и стены",
     status: "confident",
     score: 0.92,
@@ -186,6 +191,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 7,
+    section_code: "6",
     source_name: "Устройство фасадов",
     status: "needs_review",
     score: 0.74,
@@ -204,6 +210,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 8,
+    section_code: "7",
     source_name: "Устройство кровли",
     status: "confident",
     score: 0.95,
@@ -218,6 +225,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 9,
+    section_code: "8",
     source_name:
       "Отделка паркинга, технических помещений, МОП, двери, ворота и шлагбаумы",
     status: "confident",
@@ -233,6 +241,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 10,
+    section_code: "9",
     source_name:
       "Лифты и подъемники с использованием системы мониторинга и диспетчеризации",
     status: "confident",
@@ -248,6 +257,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 11,
+    section_code: "10",
     source_name: "Инженерные системы",
     status: "confident",
     score: 0.91,
@@ -262,6 +272,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 12,
+    section_code: "11",
     source_name: "Благоустройство и наружное освещение",
     status: "confident",
     score: 0.95,
@@ -276,6 +287,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 13,
+    section_code: "12",
     source_name:
       "Технологические решения автостоянки, комплекса и арендуемых помещений",
     status: "needs_review",
@@ -295,6 +307,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 14,
+    section_code: "13",
     source_name: "ЗИП",
     status: "no_match",
     score: 0.31,
@@ -309,6 +322,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 15,
+    section_code: "14",
     source_name: "MR - SHELL & CORE",
     status: "no_match",
     score: 0.28,
@@ -323,6 +337,7 @@ export const MOCK_ROWS: MatchRow[] = [
   },
   {
     row_number: 16,
+    section_code: "15",
     source_name: "Работы по реконструкции и реставрации",
     status: "no_match",
     score: 0.35,

@@ -68,7 +68,7 @@ export function ReviewRow({
         data-state={expanded ? "open" : "closed"}
       >
         <td className="px-4 py-2 font-mono text-muted-foreground">
-          {row.row_number}
+          {row.section_code}
         </td>
         <td className="px-4 py-2 text-[var(--ds-text-2)]">{row.source_name}</td>
         <td className="px-4 py-2">
