@@ -48,6 +48,21 @@ def test_name_cleaning_matches_parser(tmp_path):
     assert {(s.code, s.name) for s in seeds} == {(n.code, n.name) for n in parsed.nodes}
 
 
+def test_coded_row_with_empty_name_skipped_like_parser(tmp_path):
+    # Строка с валидным кодом, но пустой ячейкой имени: openpyxl отдаёт None.
+    # Без None→"" в _clean она осела бы как name="None"; EstimateParser (NaN→"nan")
+    # такую строку отбрасывает. Проверяем, что оба читателя дают одинаковый набор.
+    p = tmp_path / "gold.xlsx"
+    _make_xlsx(p, [
+        ["1", "(1) Подготовительные", "Подготовительные работы"],
+        ["2", None, None],  # код есть, имя пустое → должна отсеяться
+    ])
+    seeds = read_benchmark_nodes(str(p))
+    assert {s.code for s in seeds} == {"1"}
+    parsed = EstimateParser().parse(p.read_bytes())
+    assert {(s.code, s.name) for s in seeds} == {(n.code, n.name) for n in parsed.nodes}
+
+
 def test_numeric_typed_codes_match_parser(tmp_path):
     p = tmp_path / "numeric.xlsx"
     wb = openpyxl.Workbook()

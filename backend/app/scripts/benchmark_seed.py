@@ -28,6 +28,8 @@ def main() -> None:
     args = parser.parse_args()
 
     nodes = read_benchmark_nodes(args.gold)
+    if not nodes:
+        raise SystemExit("В xlsx не найдено ни одного валидного узла бенчмарка.")
     name = args.name or os.path.splitext(os.path.basename(args.gold))[0]
 
     kinds = dict.fromkeys(

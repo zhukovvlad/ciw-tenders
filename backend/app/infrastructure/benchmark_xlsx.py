@@ -15,6 +15,11 @@ _NAME_COL = 2         # «Наименование раздела / позици
 
 
 def _clean(value: object) -> str:
+    # None — пустая ячейка openpyxl. Без явной обработки str(None)="None" прошёл бы
+    # гард пустого имени и осел бы как name="None"; EstimateParser (pandas→NaN→"nan")
+    # такую строку отбрасывает — нормализуем None к "" ради паритета (строка отсеется).
+    if value is None:
+        return ""
     return re.sub(r"\s+", " ", str(value).replace("\xa0", " ")).strip()
 
 
@@ -28,28 +33,33 @@ def _is_node_code(raw: object) -> str | None:
 
 
 def read_benchmark_nodes(path: str) -> list[BenchmarkNodeSeed]:
+    # read_only=True держит файловый дескриптор открытым до close() — закрываем
+    # в finally, иначе на Windows handle мешает повторным прогонам и очистке temp.
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
-    ws = wb.worksheets[0]
-    nodes: list[BenchmarkNodeSeed] = []
-    for source_index, row in enumerate(ws.iter_rows(min_row=2, values_only=True)):
-        cells = list(row) + [None] * 3
-        code = _is_node_code(cells[_SECTION_NO_COL])
-        if code is None:
-            continue
-        name = _clean(cells[_NAME_COL])
-        if not name or name.lower() == "nan":
-            continue
-        cell = cells[_ARTICLE_COL]
-        kind = suggest_kind(cell, name)
-        art_code, art_name = parse_gold_cell(cell)
-        nodes.append(
-            BenchmarkNodeSeed(
-                code=code,
-                name=name,
-                source_index=source_index,
-                expected_kind=kind.value,
-                expected_article_code=art_code if kind is BenchmarkKind.MATCHABLE else None,
-                expected_article_name=art_name if kind is BenchmarkKind.MATCHABLE else None,
+    try:
+        ws = wb.worksheets[0]
+        nodes: list[BenchmarkNodeSeed] = []
+        for source_index, row in enumerate(ws.iter_rows(min_row=2, values_only=True)):
+            cells = list(row) + [None] * 3
+            code = _is_node_code(cells[_SECTION_NO_COL])
+            if code is None:
+                continue
+            name = _clean(cells[_NAME_COL])
+            if not name or name.lower() == "nan":
+                continue
+            cell = cells[_ARTICLE_COL]
+            kind = suggest_kind(cell, name)
+            art_code, art_name = parse_gold_cell(cell)
+            nodes.append(
+                BenchmarkNodeSeed(
+                    code=code,
+                    name=name,
+                    source_index=source_index,
+                    expected_kind=kind.value,
+                    expected_article_code=art_code if kind is BenchmarkKind.MATCHABLE else None,
+                    expected_article_name=art_name if kind is BenchmarkKind.MATCHABLE else None,
+                )
             )
-        )
-    return nodes
+        return nodes
+    finally:
+        wb.close()

@@ -133,7 +133,9 @@ def _report(
             "gold_name": seed.expected_article_name or "",
             "kept": row.status != "excluded", "status": row.status,
             "chosen_code": row.matched_code or "", "top3_codes": "|".join(top3),
-            "top1_hit": row.matched_code == seed.expected_article_code,
+            "top1_hit": (row.matched_code == seed.expected_article_code)
+            if seed.expected_article_code
+            else "",
             "top3_hit": (seed.expected_article_code in top3) if seed.expected_article_code else "",
             "article_renamed": catalog_name_norm is not None,
         })
