@@ -24,6 +24,7 @@ os.environ.setdefault("S3_ACCESS_KEY", "test")
 os.environ.setdefault("S3_SECRET_KEY", "test")
 os.environ.setdefault("S3_BUCKET", "estimates")
 os.environ.setdefault("CELERY_BROKER_URL", "redis://localhost:6379/0")
+os.environ.setdefault("LOG_TO_FILE", "0")  # тесты не пишут лог-файлы (только в память/консоль)
 
 # ---------------------------------------------------------------------------
 # SP3 shared fixtures — used by test_estimate_detail_review.py and later tasks

@@ -26,5 +26,8 @@ temp/
 # MinIO (локальное S3-хранилище, just minio)
 minio-data/
 
+# Логи
+backend/logs/
+
 # Superpowers brainstorming artifacts
 .superpowers/
