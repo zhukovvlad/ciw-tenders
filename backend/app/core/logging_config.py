@@ -75,7 +75,7 @@ def setup_logging() -> None:
     id_filter = RequestIdFilter()
     handlers: list[logging.Handler] = []
 
-    console = logging.StreamHandler()
+    console = logging.StreamHandler(sys.stdout)  # на stdout, который выше reconfigure-нут в utf-8
     console.setFormatter(formatter)
     console.setLevel(level)
     console.addFilter(id_filter)
