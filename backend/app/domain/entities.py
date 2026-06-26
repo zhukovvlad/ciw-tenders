@@ -296,3 +296,15 @@ class NodeToClassify:
 
     name: str
     ancestors: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkNodeSeed:
+    """Узел бенчмарка: разметка специалиста относительно версии справочника."""
+
+    code: str
+    name: str
+    source_index: int
+    expected_kind: str  # значение BenchmarkKind
+    expected_article_code: str | None
+    expected_article_name: str | None

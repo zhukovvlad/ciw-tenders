@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 
 from app.domain.entities import (
     ArticleCandidate,
+    BenchmarkNodeSeed,
     ClassifiableNode,
     Estimate,
     EstimateNode,
@@ -302,4 +303,24 @@ class WorkTypeClassifier(ABC):
     @abstractmethod
     def classify(self, items: list[NodeToClassify]) -> list[WorkClass]:
         """Возврат выровнен по items. При сбое/неоднозначности → WorkClass.UNSURE."""
+        ...
+
+
+class BenchmarkRepository(ABC):
+    """Хранилище gold-разметки (бенчмарков) для оффлайн-метрики матчинга."""
+
+    @abstractmethod
+    def create(self, name: str, nodes: list[BenchmarkNodeSeed]) -> int:
+        """Создаёт бенчмарк со всеми узлами, возвращает benchmark_id."""
+        ...
+
+    @abstractmethod
+    def get_by_name(self, name: str) -> int | None: ...
+
+    @abstractmethod
+    def list_benchmarks(self) -> list[tuple[int, str]]: ...
+
+    @abstractmethod
+    def fetch_nodes(self, benchmark_id: int) -> list[BenchmarkNodeSeed]:
+        """Все узлы бенчмарка по возрастанию source_index."""
         ...
