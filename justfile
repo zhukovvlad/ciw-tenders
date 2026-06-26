@@ -63,6 +63,14 @@ build:
 create-admin:
     cd {{backend}}; uv run python -m app.scripts.create_admin
 
+# Засеять бенчмарк gold-разметки из размеченного xlsx: just benchmark-seed "temp/..."
+benchmark-seed gold name="":
+    cd {{backend}}; $env:PYTHONIOENCODING="utf-8"; uv run python -m app.scripts.benchmark_seed --gold "{{justfile_directory()}}/{{gold}}" $(if ("{{name}}") {"--name"; "{{name}}"})
+
+# Оффлайн-метрика матчинга по бенчмарку: just eval-matching [benchmark="<name>"]
+eval-matching benchmark="":
+    cd {{backend}}; $env:PYTHONIOENCODING="utf-8"; uv run python -m app.scripts.eval_matching $(if ("{{benchmark}}") {"--benchmark"; "{{benchmark}}"})
+
 # Celery-воркер: матчинг смет + эмбеддинг справочника. По умолчанию solo-pool (Windows).
 # Доставка задач идёт через списки LPUSH/BRPOP — права на каналы Redis не нужны. Чтобы воркер
 # не падал с "NoPermissionError: No permissions to access a channel" на Redis-ACL без прав на
