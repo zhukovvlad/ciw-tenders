@@ -83,6 +83,33 @@
 - Применение миграций: `just migrate` (`alembic upgrade head`). Откат: `just migrate-down`.
 - Поиск — косинусная близость: `score = 1 - cosine_distance` (порог 0.90 — это similarity).
 
+## Логирование (backend)
+
+Своя централизованная система на stdlib `logging` (без structlog/loguru) — **не изобретать заново
+и не использовать `print` для диагностики**. В любом модуле: `logger = logging.getLogger(__name__)`.
+
+- **Ядро** — [app/core/logging_config.py](backend/app/core/logging_config.py): `setup_logging()`
+  (консоль на stdout + ротируемые `backend/logs/{app.log,errors.log}`; `root=DEBUG`, фильтрация
+  по уровням хендлеров). Идемпотентно; вызывается в точках входа: `create_app()`, сигналы Celery,
+  CLI-скрипты. Конфиг из env (`LOG_LEVEL`/`LOG_TO_FILE`/`LOG_DIR`), **не** из `Settings` (логи не
+  должны зависеть от валидации `DATABASE_URL`/`JWT_SECRET`). `backend/logs/` — в `.gitignore`.
+- **Сквозная корреляция `request_id → task_id`** через `ContextVar` + `RequestIdFilter` (стоит на
+  каждой записи, дефолт `-`). Web: `RequestIdMiddleware` ([api/middleware.py](backend/app/api/middleware.py))
+  генерит/принимает `X-Request-ID` и кладёт в ответ. Celery: сигналы `task_prerun`/`task_postrun`
+  ([infrastructure/tasks/celery_app.py](backend/app/infrastructure/tasks/celery_app.py)) восстанавливают
+  request_id из заголовка задачи (`enqueue_match` его пробрасывает). Не плодить свой контекст —
+  использовать `bind_request_id`/`bind_task_id`/`reset_correlation`.
+- **`extra={...}` — только неймспейснутые ключи** (`provider`, `latency_ms`, `attempts`, `outcome`,
+  `estimate_id`…), НИКОГДА зарезервированные (`name`, `message`, `args`) → `KeyError: Attempt to overwrite`.
+- **AI-вызовы инструментируются через `instrumented_call`**
+  ([infrastructure/ai/_instrumented.py](backend/app/infrastructure/ai/_instrumented.py)): один
+  summary на вызов (provider/model/latency_ms/attempts/outcome, ре-рейз на сбое). Новый AI-адаптер
+  оборачивает `retry_transient` через него, а не зовёт голый retry.
+- **`print` vs `logger`:** диагностика/статус → `logger`; фактический вывод программы (отчёт скрипта
+  в stdout) → остаётся `print`.
+- Прод под Celery prefork (`--concurrency>1`): `RotatingFileHandler` не multiprocess-safe →
+  `LOG_TO_FILE=0` (ротация снаружи). Дев — solo-pool, дефолт `LOG_TO_FILE=1`. См. [docs/TECH_DEBT.md](docs/TECH_DEBT.md).
+
 ## Тесты
 
 - Бэк: pytest + httpx `TestClient`. Юнит-тесты **не ходят в реальную БД/AI** — используют

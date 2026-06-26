@@ -30,3 +30,17 @@ uv run uvicorn app.main:app --reload --port 8260
 uv run ruff check .
 uv run pytest
 ```
+
+## Логирование
+Централизованное логирование на stdlib `logging` (`app/core/logging_config.py`, `setup_logging()`):
+консоль (stdout) + ротируемые файлы `logs/app.log` (DEBUG) и `logs/errors.log` (WARNING+).
+Сквозная корреляция `request_id → task_id` (web-middleware → заголовок Celery) попадает в каждую
+строку лога. AI-вызовы пишут summary (провайдер/модель/латентность/попытки).
+
+Конфиг — через env (не `Settings`):
+- `LOG_LEVEL` — уровень консоли (default `INFO`; файлы фиксированы: app=DEBUG, errors=WARNING).
+- `LOG_TO_FILE` — `1` (default) пишет файлы; `0` — только консоль (прод-агрегатор / Celery prefork).
+- `LOG_DIR` — каталог логов (default `backend/logs`, в `.gitignore`).
+
+В коде: `logger = logging.getLogger(__name__)` — не `print`. Подробности и правила для агентов —
+в [CLAUDE.md](../CLAUDE.md#логирование-backend).
