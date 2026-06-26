@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 from celery import Celery
+from celery.signals import setup_logging as celery_setup_logging
+from celery.signals import task_postrun, task_prerun
 
 from app.core.config import get_settings
+from app.core.logging_config import (
+    bind_request_id,
+    bind_task_id,
+    reset_correlation,
+    setup_logging,
+)
 
 _settings = get_settings()
 
@@ -29,4 +37,26 @@ celery_app.conf.update(
     # remote-control — вместе с `--without-mingle --without-gossip` (justfile) убирает все
     # fanout-подписки, и воркер работает без прав на каналы.
     worker_enable_remote_control=False,
+    worker_hijack_root_logger=False,  # иначе Celery переопределит наш форматтер/фильтр
 )
+
+
+@celery_setup_logging.connect
+def _on_setup_logging(**_kwargs) -> None:
+    # Перехватываем настройку логирования у Celery → наш setup_logging() (с фильтром req/task).
+    setup_logging()
+
+
+@task_prerun.connect
+def _on_task_prerun(task_id=None, task=None, **_kwargs) -> None:
+    bind_task_id(task_id)
+    # Аксессор подтверждён пробой на реальном Redis (celery 5.6.3): кастомный заголовок,
+    # переданный через apply_async(headers={"request_id": ...}), доступен как
+    # task.request.request_id (а также .get("request_id") и в .headers). Берём атрибут.
+    request_id = getattr(task.request, "request_id", None) if task is not None else None
+    bind_request_id(request_id)
+
+
+@task_postrun.connect
+def _on_task_postrun(**_kwargs) -> None:
+    reset_correlation()  # ОБЯЗАТЕЛЬНО: solo-pool переиспользует процесс → иначе id протечёт

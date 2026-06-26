@@ -7,6 +7,10 @@
 
 from __future__ import annotations
 
+import logging
+import time
+from collections import Counter
+
 from app.domain.classification import build_embedding_input, classify_lexical
 from app.domain.entities import (
     ClassifiableNode,
@@ -24,6 +28,8 @@ from app.services.matching_service import MatchingService
 _EMBED_CHUNK = 100
 _HEARTBEAT_EVERY = 50
 _TERMINAL = (EstimateStatus.READY, EstimateStatus.PARTIAL_ERROR)
+
+logger = logging.getLogger(__name__)
 
 
 class EstimateMatchingService:
@@ -44,15 +50,22 @@ class EstimateMatchingService:
     def match_estimate(self, estimate_id: int) -> None:
         if not self._estimates.try_matching_lock(estimate_id):
             return  # конкурент владеет → no-op
+        start = time.monotonic()
+        excluded = 0
+        counts: Counter[EstimateRowStatus] = Counter()
         try:
             self._estimates.set_status(estimate_id, EstimateStatus.RUNNING)  # COMMIT до embed
-            self._classify_nodes(estimate_id)
+            excluded = self._classify_nodes(estimate_id)
+            logger.debug(
+                "Матчинг %s: классификация завершена (ORG-исключено: %d)", estimate_id, excluded
+            )
             self._embed_nodes(estimate_id)
+            logger.debug("Матчинг %s: эмбеддинг завершён", estimate_id)
             total, pending = self._articles.matching_readiness()
             if total == 0 or pending > 0:
-                # обёртка ретраит/блокирует
                 raise DictionaryNotReadyError(total=total, pending=pending)
-            self._match_nodes(estimate_id)
+            counts = self._match_nodes(estimate_id)
+            logger.debug("Матчинг %s: сопоставление завершено", estimate_id)
             errors = self._estimates.count_node_errors(estimate_id)
             unfinished = self._estimates.count_unfinished_nodes(estimate_id)
             if errors or unfinished:
@@ -63,20 +76,53 @@ class EstimateMatchingService:
                 )
             else:
                 self._estimates.set_status(estimate_id, EstimateStatus.READY)
+            self._log_summary(estimate_id, counts, excluded, start)
         except DictionaryNotReadyError:
-            raise  # gate: обёртка ретраит/блокирует — статус не трогаем
+            raise  # gate: обёртка ретраит/блокирует — summary НЕ пишем (не терминал)
         except Exception as exc:  # noqa: BLE001 — непредвиденный сбой не оставляем в running
             self._estimates.set_status(
                 estimate_id, EstimateStatus.PARTIAL_ERROR, detail=f"unexpected: {exc}"
             )
+            self._log_summary(estimate_id, counts, excluded, start)
             raise
         finally:
             self._estimates.release_matching_lock(estimate_id)
 
-    def _classify_nodes(self, estimate_id: int) -> None:
+    def _log_summary(
+        self,
+        estimate_id: int,
+        counts: Counter[EstimateRowStatus],
+        excluded: int,
+        start: float,
+    ) -> None:
+        duration_ms = round((time.monotonic() - start) * 1000)
+        status = self._estimates.get_status(estimate_id)
+        logger.info(
+            "Матчинг сметы %s завершён: статус=%s confident=%d needs_review=%d "
+            "no_match=%d match_error=%d excluded=%d за %d мс",
+            estimate_id,
+            getattr(status, "value", status),
+            counts[EstimateRowStatus.CONFIDENT],
+            counts[EstimateRowStatus.NEEDS_REVIEW],
+            counts[EstimateRowStatus.NO_MATCH],
+            counts[EstimateRowStatus.ERROR],
+            excluded,
+            duration_ms,
+            extra={
+                "estimate_id": estimate_id,
+                "confident": counts[EstimateRowStatus.CONFIDENT],
+                "needs_review": counts[EstimateRowStatus.NEEDS_REVIEW],
+                "no_match": counts[EstimateRowStatus.NO_MATCH],
+                "match_error": counts[EstimateRowStatus.ERROR],
+                "excluded": excluded,
+                "latency_ms": duration_ms,
+            },
+        )
+
+    def _classify_nodes(self, estimate_id: int) -> int:
         nodes = self._estimates.fetch_all_nodes(estimate_id)
         if not nodes:
-            return
+            return 0
         # Представители по коду (первое вхождение) — только для крошки предков.
         name_by_code: dict[str, str] = {}
         repr_id_by_code: dict[str, int] = {}
@@ -118,6 +164,7 @@ class EstimateMatchingService:
                 )
             )
         self._estimates.save_node_classifications(results)  # один commit, охрана статуса
+        return sum(1 for r in results if r.excluded)
 
     @staticmethod
     def _ancestor_codes(code: str) -> list[str]:
@@ -141,15 +188,18 @@ class EstimateMatchingService:
             self._estimates.touch(estimate_id)  # heartbeat
             last_id = chunk[-1].id
 
-    def _match_nodes(self, estimate_id: int) -> None:
+    def _match_nodes(self, estimate_id: int) -> Counter[EstimateRowStatus]:
+        counts: Counter[EstimateRowStatus] = Counter()
         for i, node in enumerate(self._estimates.fetch_matchable_nodes(estimate_id), start=1):
             try:
                 result = self._matcher.match_one(node.embedding, node.embedding_input)
             except TransientError as exc:  # адаптер исчерпал инлайн-бюджет
                 result = NodeMatch(EstimateRowStatus.ERROR, match_error=str(exc))
+            counts[result.status] += 1
             self._estimates.save_node_match(node.id, result)
             if i % _HEARTBEAT_EVERY == 0:
                 self._estimates.touch(estimate_id)
+        return counts
 
     def mark_blocked(self, estimate_id: int, detail: str) -> None:
         """Вызывается обёрткой при исчерпании gate-retry. Под локом, не затирает реальный

@@ -331,3 +331,26 @@ def test_duplicate_code_excludes_only_scaffold() -> None:
     by_name = {r.name: r for r in repo.get(est.id, 1, is_admin=True).rows}
     assert by_name["Земляные работы"].status == "pending"   # работа выжила
     assert by_name["1 Этап ЖК"].status == "excluded"        # каркас исключён
+
+
+# ---------------------------------------------------------------------------
+# Task 7: per-estimate summary logging
+# ---------------------------------------------------------------------------
+
+
+def test_match_estimate_logs_summary(caplog) -> None:
+    import logging
+
+    repo = FakeEstimateRepository()
+    est = repo.create(NewEstimate(1, "a.xlsx", "k"), [_node("1")])
+    art = _ready_articles([ArticleCandidate(_article(1, "1.1"), 0.97)])
+    with caplog.at_level(logging.INFO, logger="app.services.estimate_matching_service"):
+        _service(repo, art).match_estimate(est.id)
+
+    recs = [r for r in caplog.records if hasattr(r, "estimate_id")]
+    assert recs, "summary-запись не найдена"
+    rec = recs[-1]
+    assert rec.estimate_id == est.id
+    assert rec.confident == 1
+    assert rec.needs_review == 0 and rec.no_match == 0 and rec.match_error == 0
+    assert rec.latency_ms >= 0

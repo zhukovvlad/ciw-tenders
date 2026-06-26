@@ -53,6 +53,18 @@
 
 ---
 
+## 🟡 Логи на проде под prefork
+
+**Что:** `RotatingFileHandler` не multiprocess-safe: при `celery --concurrency>1` процессы
+гонят ротацию по одному файлу → гонка/порча.
+
+**Решение:** `LOG_TO_FILE=0` (лог в stdout, ротация снаружи — systemd/journald).
+
+**Когда:** Когда появится агрегатор (Loki/ELK) — заменить текстовый форматтер на JSON в
+`app/core/logging_config.py` (код логирования не трогается).
+
+---
+
 ## 🟡 Матчинг сметы: последовательный арбитр → медленно + риск прод-таймаута на крупных сметах
 
 **Что:** `_match_nodes` ([estimate_matching_service.py:144](../backend/app/services/estimate_matching_service.py#L144))

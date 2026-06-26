@@ -6,12 +6,15 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.middleware import RequestIdMiddleware
 from app.api.routes import articles, auth, estimates
 from app.core.config import get_settings
+from app.core.logging_config import setup_logging
 from app.domain.errors import AuthError, DuplicateError
 
 
 def create_app() -> FastAPI:
+    setup_logging()
     settings = get_settings()
     app = FastAPI(
         title="Автоматизатор строительных смет",
@@ -19,6 +22,8 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
 
+    # RequestIdMiddleware регистрируем ПОСЛЕ CORS → он становится ВНЕШНИМ (ставит request_id
+    # до остальных, лог запроса оборачивает всё).
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[settings.frontend_origin],
@@ -26,6 +31,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestIdMiddleware)
 
     @app.exception_handler(AuthError)
     def _on_auth_error(_: Request, exc: AuthError) -> JSONResponse:

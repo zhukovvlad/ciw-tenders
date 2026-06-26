@@ -19,10 +19,13 @@ def retry_transient(
     budget: int,
     classify: Callable[[Exception], bool],
     sleep: Callable[[float], None] = time.sleep,
+    on_retry: Callable[[int, Exception], None] | None = None,
 ) -> _T:
     """Зовёт fn до budget раз, ретраит только транзиент (classify=True); иначе пробрасывает.
 
     Исчерпан бюджет на транзиенте → TransientError. Бэкофф экспоненциальный (тест мокает sleep).
+    on_retry (опц.) вызывается в гварде «ретрай запланирован» → число вызовов == fn-calls - 1
+    на обоих путях (успех-после-ретраев и исчерпание): даёт наблюдателю честный attempts.
     """
     last: Exception | None = None
     for attempt in range(budget):
@@ -33,5 +36,7 @@ def retry_transient(
                 raise
             last = exc
             if attempt < budget - 1:
+                if on_retry is not None:
+                    on_retry(attempt, exc)
                 sleep(_BACKOFF_BASE_S * (2**attempt))
     raise TransientError(str(last))
