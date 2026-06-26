@@ -29,6 +29,12 @@ def test_parse_gold_cell_empty_and_garbage_return_none():
     assert parse_gold_cell(None) == (None, None)
     assert parse_gold_cell("   ") == (None, None)
     assert parse_gold_cell("без скобок") == (None, None)
+    assert parse_gold_cell("(abc) Название") == (None, None)
+    assert parse_gold_cell("(1a.2) Название") == (None, None)
+
+
+def test_parse_gold_cell_collapses_nbsp_in_name():
+    assert parse_gold_cell("(1.2) Устройство\xa0фасада") == ("1.2", "Устройство фасада")
 
 
 def test_suggest_kind_matchable_when_cell_present():
