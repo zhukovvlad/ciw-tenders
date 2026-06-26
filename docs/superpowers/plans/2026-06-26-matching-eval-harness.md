@@ -254,6 +254,9 @@ def parse_gold_cell(cell: str | None) -> tuple[str | None, str | None]:
     if match is None:
         return (None, None)
     code = norm_code(match.group(1))
+    # Снимок имени — регистр СОХРАНЯЕМ (читаемость + UI Спеки B), НЕ зовём norm_name.
+    # \s покрывает \xa0, так что отличие от norm_name только в .lower(); лоуэркейс
+    # применяется к обеим сторонам лишь при сравнении article_renamed.
     name = re.sub(r"\s+", " ", match.group(2)).strip()
     if not code or not all(seg.isdigit() for seg in code.split(".")):
         return (None, None)
@@ -577,23 +580,23 @@ class BenchmarkRepository(ABC):
 
 - [ ] **Step 2: Написать падающий тест репозитория**
 
-Создать `backend/tests/test_benchmark_repository.py` (реальная БД недоступна юнит-тестам → тестируем чистый маппинг seed↔ORM через фейк-сессию памяти не выйдет; вместо этого проверяем сборку моделей функцией-хелпером маппинга):
+Создать `backend/tests/test_benchmark_repository.py`. Реальная БД юнит-тестам недоступна, поэтому проверяем **чистый маппинг seed↔ORM через публичные функции** `seed_to_model`/`model_to_seed` (без подчёркивания — тест не цепляется к приватным внутренностям; БД-операции `create`/`fetch_nodes` проверяются вживую на прогоне сида в Task 5):
 
 ```python
 from __future__ import annotations
 
 from app.domain.entities import BenchmarkNodeSeed
-from app.infrastructure.db.benchmark_repository import _seed_to_model, _model_to_seed
+from app.infrastructure.db.benchmark_repository import seed_to_model, model_to_seed
 from app.infrastructure.db.models import BenchmarkNodeModel
 
 
-def test_seed_to_model_maps_all_fields():
+def testseed_to_model_maps_all_fields():
     seed = BenchmarkNodeSeed(
         code="6.3.1", name="Подсистема", source_index=42,
         expected_kind="matchable", expected_article_code="6.3.1",
         expected_article_name="Устройство подсистемы фасада",
     )
-    m = _seed_to_model(seed, benchmark_id=7)
+    m = seed_to_model(seed, benchmark_id=7)
     assert m.benchmark_id == 7
     assert m.code == "6.3.1"
     assert m.source_index == 42
@@ -602,13 +605,13 @@ def test_seed_to_model_maps_all_fields():
     assert m.expected_article_name == "Устройство подсистемы фасада"
 
 
-def test_model_to_seed_roundtrip():
+def testmodel_to_seed_roundtrip():
     m = BenchmarkNodeModel(
         benchmark_id=1, source_index=3, code="10", name="Инженерные системы",
         expected_kind="no_article", expected_article_code=None,
         expected_article_name=None,
     )
-    seed = _model_to_seed(m)
+    seed = model_to_seed(m)
     assert seed.code == "10"
     assert seed.expected_kind == "no_article"
     assert seed.expected_article_code is None
@@ -636,7 +639,7 @@ from app.domain.ports import BenchmarkRepository
 from app.infrastructure.db.models import BenchmarkModel, BenchmarkNodeModel
 
 
-def _seed_to_model(seed: BenchmarkNodeSeed, benchmark_id: int) -> BenchmarkNodeModel:
+def seed_to_model(seed: BenchmarkNodeSeed, benchmark_id: int) -> BenchmarkNodeModel:
     return BenchmarkNodeModel(
         benchmark_id=benchmark_id,
         source_index=seed.source_index,
@@ -648,7 +651,7 @@ def _seed_to_model(seed: BenchmarkNodeSeed, benchmark_id: int) -> BenchmarkNodeM
     )
 
 
-def _model_to_seed(m: BenchmarkNodeModel) -> BenchmarkNodeSeed:
+def model_to_seed(m: BenchmarkNodeModel) -> BenchmarkNodeSeed:
     return BenchmarkNodeSeed(
         code=m.code,
         name=m.name,
@@ -668,7 +671,7 @@ class SqlAlchemyBenchmarkRepository(BenchmarkRepository):
             bench = BenchmarkModel(name=name)
             self._session.add(bench)
             self._session.flush()  # bench.id
-            self._session.add_all([_seed_to_model(n, bench.id) for n in nodes])
+            self._session.add_all([seed_to_model(n, bench.id) for n in nodes])
             self._session.commit()
             return bench.id
         except Exception:
@@ -692,7 +695,7 @@ class SqlAlchemyBenchmarkRepository(BenchmarkRepository):
             .where(BenchmarkNodeModel.benchmark_id == benchmark_id)
             .order_by(BenchmarkNodeModel.source_index)
         ).scalars().all()
-        return [_model_to_seed(m) for m in rows]
+        return [model_to_seed(m) for m in rows]
 ```
 
 - [ ] **Step 5: Запустить — убедиться, что проходят**
