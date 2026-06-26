@@ -57,27 +57,34 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+
 import app.core.logging_config as lc
 
 
-def _reset() -> None:
+@pytest.fixture()
+def fresh_logging(monkeypatch):
+    """setup_logging() с чистого листа; teardown ВОЗВРАЩАЕТ _configured=True.
+
+    Иначе оставленный _configured=False позволит повторному setup_logging() в других
+    модулях снести caplog-хендлер (root.handlers.clear()) → тихо пустой caplog. Footgun.
+    """
+    monkeypatch.setenv("LOG_TO_FILE", "0")
     lc._configured = False
     logging.getLogger().handlers.clear()
+    yield lc
+    lc._configured = True  # повторный setup_logging() → no-op, root.handlers не трогается
 
 
-def test_setup_idempotent_no_duplicate_handlers(monkeypatch) -> None:
-    monkeypatch.setenv("LOG_TO_FILE", "0")
-    _reset()
-    lc.setup_logging()
+def test_setup_idempotent_no_duplicate_handlers(fresh_logging) -> None:
+    fresh_logging.setup_logging()
     n = len(logging.getLogger().handlers)
-    lc.setup_logging()  # второй вызов — no-op
+    fresh_logging.setup_logging()  # второй вызов — no-op
     assert len(logging.getLogger().handlers) == n
 
 
-def test_root_level_is_debug(monkeypatch) -> None:
-    monkeypatch.setenv("LOG_TO_FILE", "0")
-    _reset()
-    lc.setup_logging()
+def test_root_level_is_debug(fresh_logging) -> None:
+    fresh_logging.setup_logging()
     assert logging.getLogger().level == logging.DEBUG
 
 
@@ -813,6 +820,33 @@ def test_enqueue_match_propagates_request_id(monkeypatch) -> None:
         lc.reset_correlation()
     assert captured["args"] == (7,)
     assert captured["headers"] == {"request_id": "req-42"}
+
+
+def test_request_id_live_in_enqueue_through_threadpool(client, seed_estimate, auth_headers) -> None:
+    """Сквозная цепочка: middleware bind → sync-роут (threadpool) → enqueue видит request_id.
+
+    Покрывает нетривиальное: retrigger — sync-эндпоинт, FastAPI гонит его в threadpool;
+    полагаемся на то, что anyio копирует contextvar в воркер-тред. Искусственный bind
+    (тест выше) этого НЕ проверяет — здесь bind делает реальный middleware.
+    """
+    from app.api.deps import get_task_queue
+    from app.core.logging_config import get_request_id
+    from app.main import app
+
+    eid, _ = seed_estimate
+    captured: dict = {}
+
+    class _CapturingQueue:
+        def enqueue_match(self, estimate_id: int) -> None:
+            captured["rid"] = get_request_id()  # читаем contextvar внутри роут-вызова
+
+        def enqueue_articles_embed(self) -> None:
+            pass
+
+    app.dependency_overrides[get_task_queue] = lambda: _CapturingQueue()
+    r = client.post(f"/api/estimates/{eid}/match", headers=auth_headers)
+    assert r.status_code == 202
+    assert captured["rid"] == r.headers["x-request-id"]  # тот же id, не '-' и не None
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -887,21 +921,41 @@ class CeleryTaskQueue(TaskQueue):
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `cd backend && uv run pytest tests/test_celery_correlation.py -v`
-Expected: PASS (3 теста).
+Expected: PASS (4 теста — включая интеграционный через threadpool).
 
-- [ ] **Step 6: Интеграционная проверка аксессора на РЕАЛЬНОМ брокере (open item, НЕ eager)**
+- [ ] **Step 6: ЧЕСТНАЯ проба аксессора на РЕАЛЬНОМ брокере (open item, НЕ eager)**
 
-`task_always_eager` сериализует заголовок иначе доставки через Redis — eager пропустит тихую дыру. Проверить вручную (нужен запущенный Redis из `CELERY_BROKER_URL`):
+Юнит-тест Step 1 проверяет лишь механику `getattr` — он позеленеет независимо от того, куда реальный Celery 5.6.3 кладёт кастомный заголовок. `task_always_eager` тоже бесполезен (сериализует заголовок иначе доставки через Redis). Поэтому проба должна **сама показать** рабочее поле, а не угадываться. Текущий дефолт `getattr(task.request, "request_id", None)` с высокой вероятностью даст `req=-` (кастомные ключи едут в headers сообщения, и `Context` не обязан промотить их в атрибут).
+
+Сделать пробу высокосигнальной — временно расширить `_on_task_prerun` (логируется в `task_prerun`, который срабатывает ДО тела задачи → краш несуществующей сметы пробе НЕ мешает):
+
+```python
+@task_prerun.connect
+def _on_task_prerun(task_id=None, task=None, **_kwargs) -> None:
+    bind_task_id(task_id)
+    # --- ВРЕМЕННАЯ ПРОБА (убрать после фиксации аксессора) ---
+    logging.getLogger(__name__).info(
+        "prerun probe: attr=%r get=%r headers=%r",
+        getattr(task.request, "request_id", None),
+        task.request.get("request_id") if hasattr(task.request, "get") else "<no get>",
+        getattr(task.request, "headers", None),
+    )
+    # --- /ПРОБА ---
+    request_id = getattr(task.request, "request_id", None) if task is not None else None
+    bind_request_id(request_id)
+```
+
+Нужен запущенный Redis из `CELERY_BROKER_URL`.
 
 Терминал 1 — воркер:
-`cd backend && PYTHONIOENCODING=utf-8 LOG_LEVEL=DEBUG uv run celery -A app.infrastructure.tasks.celery_app worker --pool=solo --loglevel=info --without-mingle --without-gossip`
+`cd backend && PYTHONIOENCODING=utf-8 uv run celery -A app.infrastructure.tasks.celery_app worker --pool=solo --loglevel=info --without-mingle --without-gossip`
 
-Терминал 2 — поставить задачу с заголовком:
+Терминал 2 — поставить задачу с заголовком (смета может не существовать — тело упадёт, но `task_prerun` уже отлогирует пробу):
 ```bash
 cd backend && uv run python -c "from app.core.logging_config import bind_request_id; from app.infrastructure.tasks.task_queue import CeleryTaskQueue; bind_request_id('probe-123'); CeleryTaskQueue().enqueue_match(999999)"
 ```
 
-Ожидаемо: в логе воркера строки задачи содержат `req=probe-123`. Если `req=-` — аксессор не тот: заменить `getattr(task.request, "request_id", None)` на чтение из `task.request.headers` (или `task.request.get("request_id")`) и повторить. Зафиксировать рабочий аксессор комментарием в коде.
+В логе воркера строка `prerun probe: ...` покажет, какое из трёх полей несёт `probe-123`. Зафиксировать рабочий аксессор в `_on_task_prerun` (`getattr(...)` ИЛИ `task.request.get("request_id")` ИЛИ из `task.request.headers`), **удалить блок ПРОБЫ**, добавить однострочный комментарий с подтверждённым полем. Перепрогнать `tests/test_celery_correlation.py` (при смене аксессора подправить фейк в Step 1 под реальную форму).
 
 - [ ] **Step 7: Commit**
 
