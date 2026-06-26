@@ -15,7 +15,7 @@ import tempfile
 from app.api.deps import build_estimate_matching_service
 from app.core.logging_config import setup_logging
 from app.domain.benchmark import BenchmarkKind, NodeOutcome, compute_metrics, norm_name
-from app.domain.entities import NewEstimate
+from app.domain.entities import BenchmarkNodeSeed, Estimate, NewEstimate
 from app.infrastructure.db.article_repository import SqlAlchemyArticleRepository
 from app.infrastructure.db.benchmark_repository import SqlAlchemyBenchmarkRepository
 from app.infrastructure.db.estimate_repository import SqlAlchemyEstimateRepository
@@ -86,7 +86,12 @@ def main() -> None:
         session.close()
 
 
-def _report(seeds, stored, articles, report_path) -> None:
+def _report(
+    seeds: list[BenchmarkNodeSeed],
+    stored: Estimate,
+    articles: SqlAlchemyArticleRepository,
+    report_path: str,
+) -> None:
     # Ключ — source_index, НЕ code: коды раздела дублируются между этапами
     # (3.1.4.1 встречается дважды как разные строки). seed_by_code схлопнул бы дубли
     # и приписал обоим эталон одного — тот же провал, что cls_by_code в org-filter.
@@ -146,6 +151,13 @@ def _report(seeds, stored, articles, report_path) -> None:
         f"\nдрейф: gold_not_in_catalog={r.gold_not_in_catalog}  "
         f"article_renamed={r.article_renamed}"
     )
+
+    if not rows_csv:
+        logger.warning(
+            "Ни одна строка результата не сопоставилась с gold по source_index — "
+            "проверь, что source_index протянут seed→EstimateNode→estimate_rows."
+        )
+        return
 
     with open(report_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows_csv[0].keys()))
