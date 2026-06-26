@@ -27,7 +27,7 @@ def _sanitize(raw: str) -> str:
 
 def _incoming_request_id(scope: Scope) -> str:
     for key, value in scope.get("headers", []):
-        if key == b"x-request-id":
+        if key.lower() == b"x-request-id":
             rid = _sanitize(value.decode("latin-1"))
             if rid:  # непустой после вычистки — переиспользуем; иначе фоллбэк ниже
                 return rid
