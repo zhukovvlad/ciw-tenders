@@ -13,7 +13,7 @@ import httpx
 
 from app.domain.entities import NodeToClassify, WorkClass
 from app.domain.ports import WorkTypeClassifier
-from app.infrastructure.retry import retry_transient
+from app.infrastructure.ai._instrumented import instrumented_call
 
 logger = logging.getLogger(__name__)
 
@@ -128,10 +128,10 @@ class OpenRouterWorkClassifier(WorkTypeClassifier):
     def _classify_chunk(self, chunk: list[NodeToClassify]) -> list[WorkClass]:
         prompt = build_batch_prompt(chunk)
         try:
-            text = retry_transient(
-                lambda: self._call(prompt),
-                budget=self._retry_budget,
-                classify=_is_transient,
+            text = instrumented_call(
+                provider="openrouter", model=self._model,
+                fn=lambda: self._call(prompt),
+                budget=self._retry_budget, classify=_is_transient,
             )
         except Exception:  # noqa: BLE001 — фолбэк по асимметрии: сбой → UNSURE, не ORG
             logger.warning("Классификатор: сбой батча (%d имён) → UNSURE", len(chunk))

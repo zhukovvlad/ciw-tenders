@@ -13,12 +13,12 @@ import httpx
 
 from app.domain.entities import ArticleCandidate, TemplateArticle
 from app.domain.ports import LLMMatcher
+from app.infrastructure.ai._instrumented import instrumented_call
 from app.infrastructure.ai.llm_matching_common import (
     SYSTEM_PROMPT,
     build_user_prompt,
     parse_choice,
 )
-from app.infrastructure.retry import retry_transient
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +68,10 @@ class OpenRouterLLMMatcher(LLMMatcher):
         if not candidates:
             return None
         user_prompt = build_user_prompt(query, candidates)
-        text = retry_transient(
-            lambda: self._call(user_prompt),
-            budget=self._retry_budget,
-            classify=_is_transient,
+        text = instrumented_call(
+            provider="openrouter", model=self._model,
+            fn=lambda: self._call(user_prompt),
+            budget=self._retry_budget, classify=_is_transient,
         )
         return parse_choice(text, candidates)
 

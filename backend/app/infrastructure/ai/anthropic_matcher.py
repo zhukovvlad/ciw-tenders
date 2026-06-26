@@ -7,12 +7,12 @@ import httpx
 
 from app.domain.entities import ArticleCandidate, TemplateArticle
 from app.domain.ports import LLMMatcher
+from app.infrastructure.ai._instrumented import instrumented_call
 from app.infrastructure.ai.llm_matching_common import (
     SYSTEM_PROMPT,
     build_user_prompt,
     parse_choice,
 )
-from app.infrastructure.retry import retry_transient
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -56,5 +56,8 @@ class AnthropicLLMMatcher(LLMMatcher):
             )
             return response.content[0].text if response.content else "0"
 
-        text = retry_transient(_call_llm, budget=self._retry_budget, classify=_is_transient)
+        text = instrumented_call(
+            provider="anthropic", model=self._model,
+            fn=_call_llm, budget=self._retry_budget, classify=_is_transient,
+        )
         return parse_choice(text, candidates)

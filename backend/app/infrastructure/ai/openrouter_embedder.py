@@ -9,7 +9,7 @@ from __future__ import annotations
 import httpx
 
 from app.domain.ports import Embedder
-from app.infrastructure.retry import retry_transient
+from app.infrastructure.ai._instrumented import instrumented_call
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -52,10 +52,10 @@ class OpenRouterEmbedder(Embedder):
         return [item["embedding"] for item in resp.json()["data"]]
 
     def _post_with_retry(self, value: str | list[str]) -> list[list[float]]:
-        return retry_transient(
-            lambda: self._post(value),
-            budget=self._retry_budget,
-            classify=_is_transient,
+        return instrumented_call(
+            provider="openrouter", model=self._model,
+            fn=lambda: self._post(value),
+            budget=self._retry_budget, classify=_is_transient,
         )
 
     def embed(self, text: str) -> list[float]:
