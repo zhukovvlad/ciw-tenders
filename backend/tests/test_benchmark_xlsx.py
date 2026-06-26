@@ -1,0 +1,48 @@
+from __future__ import annotations
+
+import openpyxl
+
+from app.domain.benchmark import BenchmarkKind
+from app.infrastructure.benchmark_xlsx import read_benchmark_nodes
+from app.services.estimate_parser import EstimateParser
+
+
+def _make_xlsx(path, rows):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["№ раздела", "Статья СМР", "Наименование раздела / позиции"])
+    for r in rows:
+        ws.append(r)
+    wb.save(path)
+
+
+def test_read_nodes_assigns_kinds(tmp_path):
+    p = tmp_path / "gold.xlsx"
+    _make_xlsx(p, [
+        ["1", "(1) Подготовительные работы", "Подготовительные работы"],  # matchable
+        ["1.1", None, "1 Этап ЖК"],                                       # structural
+        ["10", None, "Инженерные системы"],                               # no_article
+        [None, None, "листовая позиция"],                                 # пропуск (не узел)
+    ])
+    nodes = read_benchmark_nodes(str(p))
+    by_code = {n.code: n for n in nodes}
+    assert set(by_code) == {"1", "1.1", "10"}
+    assert by_code["1"].expected_kind == BenchmarkKind.MATCHABLE.value
+    assert by_code["1"].expected_article_code == "1"
+    assert by_code["1.1"].expected_kind == BenchmarkKind.STRUCTURAL.value
+    assert by_code["10"].expected_kind == BenchmarkKind.NO_ARTICLE.value
+    assert nodes[0].source_index < nodes[1].source_index  # порядок сохранён
+
+
+def test_name_cleaning_matches_parser(tmp_path):
+    # Паритет имён: benchmark_xlsx._clean и EstimateParser._clean_name — две копии,
+    # могут разойтись. Имя узла кормит крошку в проде, поэтому чистка ОБЯЗАНА совпадать,
+    # иначе бенчмарк хранит не тот текст, что эмбеддится в проде (дыра в достоверности).
+    p = tmp_path / "gold.xlsx"
+    _make_xlsx(p, [
+        ["1", "(1) Подготовительные", "Подготовительные  работы\xa0и содержание"],
+        ["1.1", None, "Мобилизация  площадки"],
+    ])
+    seeds = read_benchmark_nodes(str(p))
+    parsed = EstimateParser().parse(p.read_bytes())
+    assert {(s.code, s.name) for s in seeds} == {(n.code, n.name) for n in parsed.nodes}
