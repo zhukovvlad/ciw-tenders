@@ -47,7 +47,7 @@ class RequestIdMiddleware:
         request_id = _incoming_request_id(scope)
         bind_request_id(request_id)
         start = time.monotonic()
-        status = {"code": 0}
+        status = {"code": 500}  # 500 = ответ так и не начался (необработанный краш downstream)
 
         async def _send(message: Message) -> None:
             if message["type"] == "http.response.start":

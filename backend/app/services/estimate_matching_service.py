@@ -99,7 +99,7 @@ class EstimateMatchingService:
         status = self._estimates.get_status(estimate_id)
         logger.info(
             "Матчинг сметы %s завершён: статус=%s confident=%d needs_review=%d "
-            "no_match=%d error=%d excluded=%d за %d мс",
+            "no_match=%d match_error=%d excluded=%d за %d мс",
             estimate_id,
             getattr(status, "value", status),
             counts[EstimateRowStatus.CONFIDENT],
