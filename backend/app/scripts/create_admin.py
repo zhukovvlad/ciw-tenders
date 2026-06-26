@@ -6,14 +6,20 @@
 
 from __future__ import annotations
 
+import logging
+
 from app.core.config import get_settings
+from app.core.logging_config import setup_logging
 from app.domain.entities import Role
 from app.infrastructure.auth.password_hasher import Argon2PasswordHasher
 from app.infrastructure.db.models import UserModel
 from app.infrastructure.db.session import SessionLocal
 
+logger = logging.getLogger(__name__)
+
 
 def main() -> None:
+    setup_logging()
     settings = get_settings()
     if not settings.admin_email or not settings.admin_password:
         raise SystemExit("Задайте ADMIN_EMAIL и ADMIN_PASSWORD в backend/.env")
@@ -28,9 +34,11 @@ def main() -> None:
             if existing.role != Role.ADMIN.value:
                 existing.role = Role.ADMIN.value
                 session.commit()
-                print(f"Роль пользователя {email} повышена до admin (пароль не изменён).")
+                logger.info(
+                    "Роль пользователя %s повышена до admin (пароль не изменён).", email
+                )
             else:
-                print(f"Админ {email} уже существует — изменений нет.")
+                logger.info("Админ %s уже существует — изменений нет.", email)
             return
 
         hasher = Argon2PasswordHasher()
@@ -43,7 +51,7 @@ def main() -> None:
             )
         )
         session.commit()
-        print(f"Создан администратор {email}.")
+        logger.info("Создан администратор %s.", email)
     finally:
         session.close()
 

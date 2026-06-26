@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 
+from app.core.logging_config import setup_logging
 from app.infrastructure.db.import_repository import SqlAlchemyArticleImportRepository
 from app.infrastructure.db.session import SessionLocal
 from app.services.template_ingest_service import TemplateIngestService
@@ -19,6 +20,7 @@ from app.services.template_parser import TemplateParser
 
 
 def main() -> None:
+    setup_logging()
     path = sys.argv[1]
     with open(path, "rb") as fh:
         content = fh.read()
