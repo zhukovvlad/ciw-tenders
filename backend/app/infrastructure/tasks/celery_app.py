@@ -50,8 +50,9 @@ def _on_setup_logging(**_kwargs) -> None:
 @task_prerun.connect
 def _on_task_prerun(task_id=None, task=None, **_kwargs) -> None:
     bind_task_id(task_id)
-    # ВНИМАНИЕ (open item, см. spec §2): точный аксессор кастомного заголовка версионно-зависим
-    # в celery 5.6.3. Отказ тихий — request_id останется None. Проверить на реальном Redis (Step 6).
+    # Аксессор подтверждён пробой на реальном Redis (celery 5.6.3): кастомный заголовок,
+    # переданный через apply_async(headers={"request_id": ...}), доступен как
+    # task.request.request_id (а также .get("request_id") и в .headers). Берём атрибут.
     request_id = getattr(task.request, "request_id", None) if task is not None else None
     bind_request_id(request_id)
 
