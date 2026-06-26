@@ -126,3 +126,35 @@ class EstimateRowModel(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class BenchmarkModel(Base):
+    __tablename__ = "benchmark"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class BenchmarkNodeModel(Base):
+    __tablename__ = "benchmark_node"
+    __table_args__ = (
+        CheckConstraint(
+            "expected_kind IN ('matchable', 'structural', 'no_article')",
+            name="benchmark_node_kind_check",
+        ),
+        UniqueConstraint("benchmark_id", "source_index", name="uq_benchmark_node_source"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    benchmark_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("benchmark.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    expected_article_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    expected_article_name: Mapped[str | None] = mapped_column(Text, nullable=True)
