@@ -46,3 +46,18 @@ def test_name_cleaning_matches_parser(tmp_path):
     seeds = read_benchmark_nodes(str(p))
     parsed = EstimateParser().parse(p.read_bytes())
     assert {(s.code, s.name) for s in seeds} == {(n.code, n.name) for n in parsed.nodes}
+
+
+def test_numeric_typed_codes_match_parser(tmp_path):
+    p = tmp_path / "numeric.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["№ раздела", "Статья СМР", "Наименование раздела / позиции"])
+    ws.append([1, "(1) Подготовительные", "Подготовительные работы"])     # int
+    ws.append([10, None, "Инженерные системы"])                           # int
+    ws.cell(row=4, column=1, value=1.1)                                   # float
+    ws.cell(row=4, column=3, value="Мобилизация")
+    wb.save(p)
+    seeds = read_benchmark_nodes(str(p))
+    parsed = EstimateParser().parse(p.read_bytes())
+    assert {(s.code, s.name) for s in seeds} == {(n.code, n.name) for n in parsed.nodes}

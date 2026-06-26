@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 def _pick_benchmark(repo: SqlAlchemyBenchmarkRepository, name: str | None) -> int:
     items = repo.list_benchmarks()
     if not items:
-        raise SystemExit("Нет бенчмарков. Сначала: just benchmark-seed gold=\"...\"")
+        raise SystemExit("Нет бенчмарков. Сначала: just benchmark-seed \"...\"")
     if name is not None:
         bid = repo.get_by_name(name)
         if bid is None:
@@ -76,6 +76,9 @@ def main() -> None:
             nodes,
         )
         try:
+            # Харнес использует обычный SessionLocal() без пула — advisory-lock-leak
+            # из estimate_repository здесь не применим: процесс однократный, при выходе
+            # соединение закрывается и pg_advisory_lock освобождается автоматически.
             build_estimate_matching_service(session).match_estimate(estimate.id)
             stored = estimates.get(estimate.id, user_id, is_admin=True)
             _report(seeds, stored, articles, args.report)
@@ -141,7 +144,8 @@ def _report(
     print("\n=== Группа A' (no_article) ===")
     print(f"всего={r.no_article_total}  → no_match={r.no_article_correct_no_match}  "
           f"needs_review={r.no_article_needs_review}  "
-          f"ошибочный уверенный матч={r.no_article_wrong_confident}")
+          f"ошибочный уверенный матч={r.no_article_wrong_confident}  "
+          f"прочее(excluded/error)={r.no_article_other}")
     print("\n=== Группа B (матчинг, matchable) ===")
     denom = r.b_total or 1
     print(f"узлов={r.b_total}  top-1={r.b_top1_hits} ({100*r.b_top1_hits/denom:.1f}%)  "

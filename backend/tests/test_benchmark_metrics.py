@@ -119,3 +119,25 @@ def test_article_renamed_flagged_when_catalog_name_differs():
     o = _m(catalog_name_norm="другое имя")  # снимок отличается → renamed
     r = compute_metrics([o])
     assert r.article_renamed == 1
+
+
+def test_no_article_excluded_status_lands_in_other_bucket():
+    outcomes = [
+        _m(
+            expected_kind=BenchmarkKind.NO_ARTICLE,
+            expected_code=None,
+            kept=False,
+            status="excluded",
+        ),
+        _m(
+            expected_kind=BenchmarkKind.NO_ARTICLE,
+            expected_code=None,
+            kept=True,
+            status="no_match",
+        ),
+    ]
+    r = compute_metrics(outcomes)
+    assert r.no_article_total == 2
+    assert r.no_article_other == 1
+    assert (r.no_article_correct_no_match + r.no_article_wrong_confident
+            + r.no_article_needs_review + r.no_article_other) == r.no_article_total

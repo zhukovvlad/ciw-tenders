@@ -79,6 +79,8 @@ class EvalReport:
     no_article_correct_no_match: int
     no_article_wrong_confident: int
     no_article_needs_review: int
+    # no_article с прочим статусом (excluded/error) — иначе тихо выпадал из разбивки
+    no_article_other: int
     # Группа B (только matchable, kept, код есть в каталоге, НЕ error)
     b_total: int
     b_top1_hits: int
@@ -101,7 +103,7 @@ def compute_metrics(
     outcomes: Sequence[NodeOutcome], *, confident_statuses: tuple[str, ...] = ("confident",)
 ) -> EvalReport:
     a_tn = a_fp = a_fn = a_tp = 0
-    na_total = na_ok = na_wrong = na_review = 0
+    na_total = na_ok = na_wrong = na_review = na_other = 0
     b_total = b_top1 = b_top3 = b_error = 0
     not_in_cat = renamed = 0
 
@@ -137,6 +139,8 @@ def compute_metrics(
                 na_wrong += 1
             elif o.status == "needs_review":
                 na_review += 1
+            else:
+                na_other += 1
 
     return EvalReport(
         a_tn=a_tn, a_fp=a_fp, a_fn=a_fn, a_tp=a_tp,
@@ -144,6 +148,7 @@ def compute_metrics(
         no_article_correct_no_match=na_ok,
         no_article_wrong_confident=na_wrong,
         no_article_needs_review=na_review,
+        no_article_other=na_other,
         b_total=b_total, b_top1_hits=b_top1, b_top3_hits=b_top3, b_error=b_error,
         gold_not_in_catalog=not_in_cat, article_renamed=renamed,
     )
