@@ -6,8 +6,9 @@ __pycache__/
 .ruff_cache/
 
 # Node / Vite
-frontend/node_modules/
+node_modules/
 frontend/dist/
+.vite/
 
 # Окружение и секреты
 .env

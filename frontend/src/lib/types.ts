@@ -13,7 +13,8 @@ export interface Candidate {
 }
 
 export interface MatchRow {
-  row_number: number // ← row.id из бэка
+  row_number: number // ← row.id из бэка (идентичность строки: key/навигация/PATCH)
+  section_code: string // ← row.code: «№ раздела» из сметы (для показа в UI)
   source_name: string // ← row.name
   status: MatchStatus
   score: number

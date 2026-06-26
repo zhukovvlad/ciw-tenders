@@ -8,6 +8,7 @@ import { apiGet, apiGetBlob, apiSend, apiUpload } from "./client"
 
 interface RowDto {
   id: number
+  code: string
   name: string
   status: MatchStatus
   score: number | null
@@ -36,6 +37,7 @@ interface CreateDto {
 export function rowFromDto(r: RowDto): MatchRow {
   return {
     row_number: r.id,
+    section_code: r.code,
     source_name: r.name,
     status: r.status,
     score: r.score ?? 0,
