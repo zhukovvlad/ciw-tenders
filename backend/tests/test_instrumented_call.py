@@ -59,6 +59,7 @@ def test_transient_exhausted_warns_and_reraises(caplog) -> None:
         )
     rec = _summary(caplog)
     assert rec.outcome == "transient_exhausted" and rec.levelno == logging.WARNING
+    assert rec.attempts == 2
 
 
 def test_permanent_error_logged_and_reraised(caplog) -> None:
@@ -72,3 +73,4 @@ def test_permanent_error_logged_and_reraised(caplog) -> None:
         )
     rec = _summary(caplog)
     assert rec.outcome == "error" and rec.levelno == logging.WARNING
+    assert rec.attempts == 1
