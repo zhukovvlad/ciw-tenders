@@ -11,7 +11,7 @@ import logging
 import time
 from collections import Counter
 
-from app.domain.classification import build_embedding_input, classify_lexical
+from app.domain.classification import build_embedding_input, classify_lexical, is_excluded
 from app.domain.entities import (
     ClassifiableNode,
     EstimateRowStatus,
@@ -145,26 +145,39 @@ class EstimateMatchingService:
             ]
             for n, verdict in zip(unsure, self._classifier.classify(items), strict=True):
                 cls_by_id[n.id] = verdict
-        # Проход 2: собрать результаты + пересборка крошки (ORG-предки выброшены) → bulk-запись.
+        # Проход 2: override (код-based лист + non-org предок) + крошка с выбросом своего org → bulk
+        parent_codes = {p for n in nodes if (p := self._parent_of(n.code))}
         results: list[NodeClassification] = []
         for n in nodes:
+            # ancestors — ПОЛНЫЙ (name, cls) по всем предкам, БЕЗ предварительной фильтрации ORG:
+            # has_non_org_anc и build_embedding_input фильтруют ORG изнутри (эквивалентность инв.2).
             ancestors = [
                 (name_by_code[a], cls_by_id[repr_id_by_code[a]])
                 for a in self._ancestor_codes(n.code)
                 if a in name_by_code
             ]
-            crumb = build_embedding_input(n.name, ancestors)
-            # ORG из ЛЮБОГО источника (лексика row-2 ИЛИ вердикт LLM) → excluded.
-            # Класс берём по n.id — дубли кода НЕ схлопываются.
-            results.append(
-                NodeClassification(
-                    node_id=n.id,
-                    excluded=cls_by_id[n.id] is WorkClass.ORG,
-                    embedding_input=crumb,
+            own = cls_by_id[n.id]
+            is_leaf = n.code not in parent_codes
+            has_non_org_anc = any(cls is not WorkClass.ORG for _, cls in ancestors)
+            excluded = is_excluded(own, is_leaf=is_leaf, has_non_org_ancestor=has_non_org_anc)
+            crumb = build_embedding_input(n.name, ancestors, self_class=own)
+            # Инвариант 2: kept-узел ОБЯЗАН иметь непустую крошку. Не ловит логику _classify_nodes
+            # (она такого не породит), а ловит будущий рассинхрон is_excluded↔build_embedding_input.
+            if not excluded and not crumb:
+                logger.error(
+                    "kept-узел с пустой крошкой: id=%s code=%s class=%s", n.id, n.code, own
                 )
+                raise AssertionError(f"kept node with empty crumb: {n.id} {n.code} {own}")
+            results.append(
+                NodeClassification(node_id=n.id, excluded=excluded, embedding_input=crumb)
             )
         self._estimates.save_node_classifications(results)  # один commit, охрана статуса
         return sum(1 for r in results if r.excluded)
+
+    @staticmethod
+    def _parent_of(code: str) -> str | None:
+        segs = code.split(".")
+        return ".".join(segs[:-1]) or None
 
     @staticmethod
     def _ancestor_codes(code: str) -> list[str]:

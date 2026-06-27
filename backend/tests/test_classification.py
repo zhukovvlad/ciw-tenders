@@ -99,3 +99,54 @@ def test_fake_classifier_aligns_output_to_input() -> None:
         NodeToClassify(name="что-то ещё", ancestors=()),
     ]
     assert clf.classify(items) == [WorkClass.ORG, WorkClass.UNSURE]
+
+
+def test_build_embedding_input_drops_self_when_org() -> None:
+    crumb = build_embedding_input(
+        "Корпус 8", [("Гидроизоляция фундаментной плиты", WorkClass.WORK)], self_class=WorkClass.ORG
+    )
+    assert crumb == "Гидроизоляция фундаментной плиты"  # своё org-имя выброшено
+
+
+def test_build_embedding_input_keeps_self_by_default() -> None:
+    crumb = build_embedding_input("Монтаж", [("Раздел", WorkClass.WORK)])
+    assert crumb == "Раздел. Монтаж"  # дефолт self_class=WORK — поведение прежнее
+
+
+def test_build_embedding_input_empty_when_all_org_including_self() -> None:
+    crumb = build_embedding_input(
+        "Корпус 8", [("1 Этап ЖК", WorkClass.ORG)], self_class=WorkClass.ORG
+    )
+    assert crumb == ""
+
+
+def test_build_embedding_input_keeps_unsure_ancestor_and_self() -> None:
+    crumb = build_embedding_input(
+        "Лифты", [("Раздел", WorkClass.UNSURE)], self_class=WorkClass.WORK
+    )
+    assert crumb == "Раздел. Лифты"  # UNSURE-предок остаётся (фильтруется только ORG)
+
+
+def test_is_excluded_org_leaf_with_non_org_ancestor_kept() -> None:
+    from app.domain.classification import is_excluded
+
+    assert is_excluded(WorkClass.ORG, is_leaf=True, has_non_org_ancestor=True) is False
+
+
+def test_is_excluded_org_nonleaf_excluded() -> None:
+    from app.domain.classification import is_excluded
+
+    assert is_excluded(WorkClass.ORG, is_leaf=False, has_non_org_ancestor=True) is True
+
+
+def test_is_excluded_org_leaf_without_non_org_ancestor_excluded() -> None:
+    from app.domain.classification import is_excluded
+
+    assert is_excluded(WorkClass.ORG, is_leaf=True, has_non_org_ancestor=False) is True
+
+
+def test_is_excluded_work_and_unsure_kept() -> None:
+    from app.domain.classification import is_excluded
+
+    assert is_excluded(WorkClass.WORK, is_leaf=True, has_non_org_ancestor=False) is False
+    assert is_excluded(WorkClass.UNSURE, is_leaf=False, has_non_org_ancestor=False) is False

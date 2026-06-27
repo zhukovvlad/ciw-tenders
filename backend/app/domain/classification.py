@@ -84,6 +84,14 @@ def classify_lexical(name: str) -> WorkClass:
     return WorkClass.ORG
 
 
+def is_excluded(own_class: WorkClass, *, is_leaf: bool, has_non_org_ancestor: bool) -> bool:
+    """Решение exclude/keep с учётом структуры дерева. ORG исключаем, КРОМЕ листа с non-org
+    предком (работа, разбитая по корпусам/этапам, чьё имя совпало с оргтокеном)."""
+    if own_class is not WorkClass.ORG:
+        return False
+    return not (is_leaf and has_non_org_ancestor)
+
+
 def _normalize_ws(text: str) -> str:
     return re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
 
@@ -100,12 +108,16 @@ def build_embedding_input(
     self_name: str,
     ancestors: list[tuple[str, WorkClass]],
     *,
+    self_class: WorkClass = WorkClass.WORK,
     separator: str = ". ",
     collapse_repeats: bool = True,
 ) -> str:
-    """Крошка root→узел; ORG-предки выброшены (справочник org-free, не загрязняем вектор)."""
+    """Крошка root→узел; ORG-предки выброшены (справочник org-free, не загрязняем вектор).
+    Если узел сам ORG (self_class=ORG) — его собственное имя тоже выброшено (спасённый org-лист
+    эмбедится по чистому work-контексту предков)."""
     parts = [_normalize_ws(name) for name, cls in ancestors if cls is not WorkClass.ORG]
-    parts.append(_normalize_ws(self_name))
+    if self_class is not WorkClass.ORG:
+        parts.append(_normalize_ws(self_name))
     if collapse_repeats:
         parts = _collapse_consecutive(parts)
     return separator.join(parts)
