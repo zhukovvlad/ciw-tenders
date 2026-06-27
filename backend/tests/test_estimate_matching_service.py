@@ -338,6 +338,88 @@ def test_duplicate_code_excludes_only_scaffold() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Task 2: org-leaf rescue — override в _classify_nodes
+# ---------------------------------------------------------------------------
+
+
+def _seed_tree(repo: FakeEstimateRepository, tree: list[tuple[str, str, str | None]]):
+    """tree: список (code, name, parent_code) в порядке сметы (source_index = индекс)."""
+    nodes = [
+        EstimateNode(code=c, name=nm, parent_code=p, section_type=None,
+                     embedding_input=nm, source_index=i, depth=c.count(".") + 1)
+        for i, (c, nm, p) in enumerate(tree)
+    ]
+    return repo.create(NewEstimate(user_id=1, filename="f.xlsx", original_object_key="k"), nodes)
+
+
+def _classify_svc(repo, *, classifier):
+    art = _ready_articles([])
+    matcher = MatchingService(art, embedder=None, llm_matcher=FakeLLMMatcher())
+    return EstimateMatchingService(matcher=matcher, embedder=_Embedder(),
+                                   estimates=repo, articles=art, classifier=classifier)
+
+
+def test_classify_rescues_org_leaf_under_work():
+    repo = FakeEstimateRepository()
+    est = _seed_tree(repo, [
+        ("1", "Подготовительные работы", None),   # WORK (лексика)
+        ("1.1", "Корпус 8", "1"),                  # ORG-лист под work → СПАСТИ
+        ("2", "1 Этап ЖК", None),                  # ORG, нет work-предка → excluded
+        ("2.1", "Монтаж кровли", "2"),             # WORK-ребёнок 2 (делает 2 не-листом)
+    ])
+    svc = _classify_svc(repo, classifier=FakeWorkTypeClassifier(default=WorkClass.WORK))
+    svc._classify_nodes(est.id)
+    by_code = {r.code: r for r in repo.get(est.id, 1, is_admin=True).rows}
+    assert by_code["1.1"].status == "pending"                    # спасён (не excluded)
+    assert by_code["1.1"].embedding_input == "Подготовительные работы"  # свой org-токен выброшен
+    assert by_code["2"].status == "excluded"                     # не-лист org-разделитель
+    assert by_code["1"].status == "pending" and by_code["2.1"].status == "pending"
+    assert by_code["2.1"].embedding_input == "Монтаж кровли"      # ORG-предок «1 Этап ЖК» выброшен
+
+
+def test_classify_org_leaf_without_work_ancestor_excluded():
+    repo = FakeEstimateRepository()
+    est = _seed_tree(repo, [
+        ("1", "1 Этап ЖК", None),     # ORG-корень (нет предков)
+        ("1.1", "Корпус 8", "1"),     # ORG-лист, единственный предок ORG → нет non-org → excluded
+    ])
+    svc = _classify_svc(repo, classifier=FakeWorkTypeClassifier(default=WorkClass.WORK))
+    svc._classify_nodes(est.id)
+    by_code = {r.code: r for r in repo.get(est.id, 1, is_admin=True).rows}
+    assert by_code["1.1"].status == "excluded"
+
+
+def test_classify_unsure_ancestor_counts_as_non_org():
+    # регресс: предок UNSURE (НЕ WORK) — non-org, спасение org-листа под ним должно сработать.
+    repo = FakeEstimateRepository()
+    est = _seed_tree(repo, [
+        ("1", "Смешанный узел ЖК", None),   # орг-токен ЖК + голова → UNSURE → классификатор
+        ("1.1", "Корпус 8", "1"),           # ORG-лист под UNSURE-предком → СПАСТИ
+    ])
+    clf = FakeWorkTypeClassifier(
+        verdicts={"Смешанный узел ЖК": WorkClass.UNSURE}, default=WorkClass.UNSURE
+    )
+    svc = _classify_svc(repo, classifier=clf)
+    svc._classify_nodes(est.id)
+    by_code = {r.code: r for r in repo.get(est.id, 1, is_admin=True).rows}
+    assert by_code["1.1"].status == "pending"   # спасён через UNSURE-предка
+    assert by_code["1.1"].embedding_input == "Смешанный узел ЖК"  # UNSURE-предок в крошке, свой org вне  # noqa: E501
+
+
+def test_classify_invariant_kept_node_empty_crumb_raises(monkeypatch):
+    # Защитный инвариант (точка A3): рассинхрон is_excluded↔build_embedding_input ловится.
+    import app.services.estimate_matching_service as svc_mod
+    repo = FakeEstimateRepository()
+    est = _seed_tree(repo, [("1", "Подготовительные работы", None), ("1.1", "Корпус 8", "1")])
+    # Индуцируем рассинхрон: крошка всегда пустая, при этом 1.1 спасается (kept) → инвариант бьёт.
+    monkeypatch.setattr(svc_mod, "build_embedding_input", lambda *a, **k: "")
+    svc = _classify_svc(repo, classifier=FakeWorkTypeClassifier(default=WorkClass.WORK))
+    import pytest
+    with pytest.raises(AssertionError):
+        svc._classify_nodes(est.id)
+
+
 def test_match_estimate_logs_summary(caplog) -> None:
     import logging
 
