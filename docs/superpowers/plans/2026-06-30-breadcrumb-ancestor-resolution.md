@@ -1,5 +1,9 @@
 # Позиционный резолв предков крошки (фикс Кейса D) — Implementation Plan
 
+> ⚠️ **SUPERSEDED (2026-06-30)** — поглощён дизайном
+> [позиционный резолв иерархии (outline + fallback)](../specs/2026-06-30-positional-hierarchy-resolution-design.md).
+> План будет переписан под позиционный стек по глубине. Код по этому плану не писался.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Чинить тихую контаминацию крошки (`embedding_input`) на многоэтапных сметах — резолвить имена предков по ближайшему предшествующему вхождению кода, а не по глобальному словарю первого вхождения.
