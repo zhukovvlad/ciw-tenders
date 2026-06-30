@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
+import openpyxl
 import pandas as pd
 import pytest
 
@@ -18,6 +19,28 @@ def _xlsx(rows: list[tuple[object, object, object]]) -> bytes:
     df = pd.DataFrame(rows, columns=[_NO, _NAME, _TYPE])
     buf = io.BytesIO()
     df.to_excel(buf, index=False, engine="openpyxl")
+    return buf.getvalue()
+
+
+def _xlsx_with_outline(
+    rows: list[tuple[object, object, object]],
+    outline_levels: list[int],
+) -> bytes:
+    """Как _xlsx, но дополнительно проставляет outline_level строкам данных через openpyxl.
+
+    outline_levels[i] — уровень группировки для i-й строки данных (0-based).
+    Физическая строка данных = source_index + 2 (строка 1 — заголовок).
+    Создаёт файл, где file_has_outline=True → _read_outline идёт по не-плоскому пути.
+    """
+    base = _xlsx(rows)
+    wb = openpyxl.load_workbook(io.BytesIO(base))
+    ws = wb.worksheets[0]
+    for i, level in enumerate(outline_levels):
+        physical_row = i + 2  # строка 1 — заголовок
+        ws.row_dimensions[physical_row].outline_level = level
+    buf = io.BytesIO()
+    wb.save(buf)
+    wb.close()
     return buf.getvalue()
 
 
@@ -104,6 +127,8 @@ def test_duplicate_code_uses_nearest_preceding_parent() -> None:
     child = next(n for n in parsed.nodes if n.code == "1.1.1")
     assert child.embedding_input == "Первый. Имя-Б. Дитя"   # было «Имя-А» (первое вхождение)
     assert any(a.kind == "duplicate_code" for a in parsed.anomalies)
+    # оба дубля-узла с кодом «1.1» остаются в дереве (не дедуплицируются)
+    assert sum(n.code == "1.1" for n in parsed.nodes) == 2
 
 
 def test_parent_below_does_not_pull_context_from_below() -> None:
@@ -129,12 +154,45 @@ def test_outline_overrides_zero_on_flat_file() -> None:
     assert parsed.outline_overrides == 0
 
 
+def test_outline_round_trip_non_flat() -> None:
+    # Покрывает НЕ-плоский путь (_read_outline): файл содержит реальную группировку строк,
+    # поэтому file_has_outline=True и outline_overrides считается из фактических outline_level.
+    # Две проверки вместе доказывают, что outline ЧИТАЕТСЯ и КОРРЕКТНО питает счётчик:
+    #   1) выровненный файл (outline_level+1 == len(segments)) → overrides == 0;
+    #   2) РАССОГЛАСОВАННЫЙ файл (один узел с outline_level+1 != len(segments)) → overrides == 1.
+    # Без кейса (2) тест прошёл бы и при молчаливом сбое чтения outline (файл выглядел бы
+    # плоским → file_has_outline guard → overrides=0), не доказывая фактического чтения.
+    rows: list[tuple[object, object, object]] = [
+        ("1", "Раздел", "СМР"),
+        ("1.1", "Подраздел", None),
+        ("1.1.1", "Работа", None),
+    ]
+
+    # (1) Выровнено: outline_level[i] = глубина-1 (0,1,2) → совпадает с len(segments) → overrides 0.
+    aligned = _xlsx_with_outline(rows, [0, 1, 2])
+    parsed_aligned = EstimateParser().parse(aligned)
+    assert len(parsed_aligned.nodes) == 3
+    assert not any("рассинхрон" in w for w in parsed_aligned.warnings)
+    assert parsed_aligned.outline_overrides == 0
+
+    # (2) Рассогласовано: у «1.1.1» (глубина 3) outline_level=1 → 1+1=2 != 3 → ровно ОДИН override.
+    # Положительная (>0) проверка доказывает, что outline_level реально прочитан и учтён в счётчике.
+    misaligned = _xlsx_with_outline(rows, [0, 1, 1])
+    parsed_misaligned = EstimateParser().parse(misaligned)
+    assert len(parsed_misaligned.nodes) == 3
+    assert not any("рассинхрон" in w for w in parsed_misaligned.warnings)
+    assert parsed_misaligned.outline_overrides == 1
+
+
 def test_desync_warns_and_disables_outline_not_raises() -> None:
     # При рассинхроне pandas↔openpyxl: warning + outline_overrides отключён (==0/None),
     # но ingest НЕ падает, а крошка из кодов строится корректно. Сценарий рассинхрона
     # эмпирически недостижим через _xlsx() — pandas и openpyxl видят строки одинаково.
     # Тест фиксирует, что сверка СТОИТ и НЕ ложно-срабатывает на чистом файле:
     # outline_overrides не обнулён ложно, warning про рассинхрон отсутствует.
+    # Примечание: outline_overrides==0 здесь проходит через ветку file_has_outline=False
+    # (df.to_excel не создаёт группировку), а не через ветку desync — ветка desync
+    # эмпирически недостижима через _xlsx() при корректном pandas↔openpyxl.
     content = _xlsx([("1", "Раздел", "СМР"), ("1.1", "Под", None)])
     parsed = EstimateParser().parse(content)
     # Нет ложного рассинхрона — предупреждение про outline-детекцию не должно быть

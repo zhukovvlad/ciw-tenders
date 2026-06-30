@@ -142,17 +142,21 @@ class EstimateParser:
         НЕ read_only: нужен доступ к row_dimensions.outline_level.
         Возвращает (outline_by_si, code_by_si) где si — 0-based строка данных (как df.iterrows).
         """
+        # openpyxl.Workbook не реализует __exit__ → try/finally для гарантированного закрытия
         wb = load_workbook(io.BytesIO(content))  # НЕ read_only: нужен row_dimensions.outline_level
-        ws = wb.worksheets[0]  # тот же лист, что pandas read_excel (sheet_name=0), НЕ wb.active
-        header = [cell.value for cell in ws[1]]
         try:
-            col = header.index(SECTION_NO_COLUMN) + 1
-        except ValueError:  # pandas уже бы упал; перестраховка
-            return {}, {}
-        outline_by_si: dict[int, int] = {}
-        code_by_si: dict[int, object] = {}
-        for er in range(2, ws.max_row + 1):
-            si = er - 2
-            outline_by_si[si] = ws.row_dimensions[er].outline_level
-            code_by_si[si] = ws.cell(row=er, column=col).value
+            ws = wb.worksheets[0]  # тот же лист, что pandas read_excel (sheet_name=0), НЕ wb.active
+            header = [cell.value for cell in ws[1]]
+            try:
+                col = header.index(SECTION_NO_COLUMN) + 1
+            except ValueError:  # pandas уже бы упал; перестраховка
+                return {}, {}
+            outline_by_si: dict[int, int] = {}
+            code_by_si: dict[int, object] = {}
+            for er in range(2, ws.max_row + 1):
+                si = er - 2
+                outline_by_si[si] = ws.row_dimensions[er].outline_level
+                code_by_si[si] = ws.cell(row=er, column=col).value
+        finally:
+            wb.close()
         return outline_by_si, code_by_si
