@@ -420,6 +420,27 @@ def test_classify_invariant_kept_node_empty_crumb_raises(monkeypatch):
         svc._classify_nodes(est.id)
 
 
+def test_classify_collision_gives_different_breadcrumbs() -> None:
+    repo = FakeEstimateRepository()
+    articles = FakeRepository(candidates=[])
+    est = repo.create(
+        NewEstimate(user_id=1, filename="f.xlsx", original_object_key="k"),
+        [
+            EstimateNode("6", "Фасады", None, "СМР", "Фасады", 0, 1),
+            EstimateNode("6.1", "навесной типового", "6", None, "x", 1, 2),
+            EstimateNode("6.1.1", "подсистема", "6.1", None, "x", 2, 3),
+            EstimateNode("6.1", "навесной 1 этажа", "6", None, "x", 3, 2),   # дубль кода 6.1
+            EstimateNode("6.1.1", "подсистема", "6.1", None, "x", 4, 3),     # дубль кода 6.1.1
+        ],
+    )
+    svc = _classify_service(repo, articles)
+    svc._classify_nodes(est.id)  # noqa: SLF001
+    rows = sorted(repo.get(est.id, 1, is_admin=True).rows, key=lambda r: r.source_index)
+    # два «6.1.1» (si=2 и si=4) — РАЗНЫЕ крошки (сегодня были бы байт-в-байт одинаковы)
+    assert rows[2].embedding_input == "Фасады. навесной типового. подсистема"
+    assert rows[4].embedding_input == "Фасады. навесной 1 этажа. подсистема"
+
+
 def test_match_estimate_logs_summary(caplog) -> None:
     import logging
 
