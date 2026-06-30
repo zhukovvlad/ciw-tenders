@@ -175,3 +175,23 @@ def test_old_match_route_removed() -> None:
     # FastAPI совпадает с /{estimate_id} и отдаёт 405 (нет POST для этого паттерна) —
     # оба кода (404/405) подтверждают, что синхронный stateless-матч снят.
     assert resp.status_code in (404, 405, 422)
+
+
+def _xlsx_rows(rows: list[tuple[object, object, object]]) -> bytes:
+    """Вспомогательный xlsx с произвольным набором строк (для тестов аномалий)."""
+    df = pd.DataFrame(rows, columns=["№ раздела", "Наименование раздела / позиции", "Вид раздела"])
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False, engine="openpyxl")
+    return buf.getvalue()
+
+
+def test_upload_response_carries_anomalies_and_outline_overrides() -> None:
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    client = _client(repo, storage)
+    # Дублирующийся код 1.1 → парсер должен создать аномалию duplicate_code
+    content = _xlsx_rows([("1", "A", "СМР"), ("1.1", "B", None), ("1.1", "C", None)])
+    resp = client.post("/api/estimates", files={"file": ("e.xlsx", content, _XLSX)})
+    assert resp.status_code == 201
+    body = resp.json()
+    assert any(a["kind"] == "duplicate_code" for a in body["anomalies"])
+    assert "outline_overrides" in body

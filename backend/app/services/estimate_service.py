@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from app.domain.entities import Estimate, EstimateSummary, NewEstimate
+from app.domain.entities import Estimate, EstimateSummary, NewEstimate, StructuralAnomaly
 from app.domain.ports import EstimateRepository, ObjectStorage, TaskQueue
 from app.services.estimate_parser import EstimateParser
 
@@ -17,6 +17,8 @@ class IngestResult:
     estimate: Estimate
     positions_count: int
     warnings: list[str]
+    anomalies: list[StructuralAnomaly] = field(default_factory=list)
+    outline_overrides: int = 0
 
 
 class EstimateService:
@@ -48,6 +50,8 @@ class EstimateService:
             estimate=estimate,
             positions_count=len(parsed.positions),
             warnings=parsed.warnings,
+            anomalies=parsed.anomalies,
+            outline_overrides=parsed.outline_overrides,
         )
 
     def list(self, owner_id: int, *, is_admin: bool) -> list[EstimateSummary]:
