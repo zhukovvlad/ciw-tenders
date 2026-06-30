@@ -25,7 +25,7 @@
 ## Пять мест, где не наступить (из брифа ревью)
 
 1. **Узлы = только coded-строки.** `depths`/`resolve`/`leaf_flags` — только по coded-узлам; позиции (№=NaN) НЕ входят. В сервисе это само собой (`fetch_all_nodes` отдаёт только строки-узлы); в парсере — позиции в отдельный список.
-2. **🔴 Рассинхрон pandas↔openpyxl.** На каждый coded-узел: код openpyxl по `source_index+2` обязан совпасть с кодом pandas по `source_index` (нормализованно, с коэрсингом int-float). Не совпало → `ValueError` ДО записи. Обязательный «грязный» тест.
+2. **Рассинхрон pandas↔openpyxl — warning, НЕ raise (v2).** outline detection-only → рассинхрон уносит лишь косметический `outline_overrides`; крошка из кодов и построчные аномалии не затронуты. На каждый coded-узел сверяем код openpyxl по `source_index+2` с кодом pandas по `source_index` (нормализованно, коэрсинг int-float). Не совпало → **warning + отключить `outline_overrides`** (не считать/обнулить), ingest НЕ падает. «Грязный» тест проверяет warning-путь.
 3. **`depth` не перегружать** — отдельной семантики `structural_depth` не вводим (резолв на глубине-кода, считается из `code`).
 4. **`outline_code_mismatch` — агрегат** (`outline_overrides: int`), не построчно (на многоэтапке ~14%).
 5. **Глубина = число сегментов кода.** Стек только вверх; `is_fallback`-флага нет.
@@ -229,26 +229,15 @@ def test_outline_overrides_zero_on_flat_file() -> None:
     assert parsed.outline_overrides == 0
 
 
-def test_alignment_assert_catches_desync() -> None:
-    # «Грязный» файл: openpyxl видит лишнюю строку, которой нет во фрейме pandas в той же позиции
-    # → код по source_index+2 разойдётся с pandas → ValueError. Строим .xlsx вручную (openpyxl),
-    # вставляя пустую строку-разделитель так, чтобы сместить физические строки.
-    import io as _io
-
-    import openpyxl
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append([_NO, _NAME, _TYPE])
-    ws.append(["1", "Раздел", "СМР"])
-    ws.append([None, None, None])          # полностью пустая физ.строка
-    ws.append(["1.1", "Подраздел", None])
-    buf = _io.BytesIO(); wb.save(buf)
-    # pandas роняет полностью пустую строку из data? Нет — read_excel сохраняет её как NaN-строку,
-    # поэтому здесь выравнивание ДЕРЖИТСЯ. Для срыва нужен иной механизм: см. ниже.
+def test_desync_warns_and_disables_outline_not_raises() -> None:
+    # При рассинхроне pandas↔openpyxl: warning + outline_overrides отключён (==0/None),
+    # но ingest НЕ падает, а крошка из кодов строится корректно. Сценарий рассинхрона
+    # подобрать эмпирически (см. замечание); если недостижим — тест фиксирует отсутствие
+    # ложного срабатывания на чистом файле.
+    ...  # реализатор: «грязный» вход → assert parsed.outline_overrides in (0, None) и есть warning
 ```
 
-> **Замечание реализатору:** подобрать сценарий рассинхрона эмпирически. pandas `read_excel` по умолчанию сохраняет пустые строки как NaN (RangeIndex не сдвигается), поэтому простая пустая строка НЕ рвёт выравнивание. Рабочий «грязный» кейс: лист, где физическая строка существует в openpyxl, но pandas её отбрасывает (напр. строка целиком из формульных/пустых ячеек выше первой данных, или `header`-смещение). Реализатор ОБЯЗАН довести тест до состояния, в котором БЕЗ ассерта крошка строилась бы по сдвинутому outline, а ассерт ловит это `ValueError`. Если эмпирически сорвать выравнивание тем же `read_excel`-контрактом не удаётся (pandas и openpyxl видят строки одинаково), это само по себе вывод: одиночный риск-класс закрыт контрактом — тогда тест фиксирует, что ассерт стоит и НЕ ложно-срабатывает на чистом файле, а «грязный» сценарий документируется как недостижимый при текущем чтении. Не выдумывать срыв, которого нет.
+> **Замечание реализатору:** pandas `read_excel` по умолчанию сохраняет пустые строки как NaN (RangeIndex не сдвигается), поэтому простая пустая строка НЕ рвёт выравнивание. Рабочий «грязный» кейс: лист, где физическая строка существует в openpyxl, но pandas её отбрасывает. Довести тест до состояния, где сверка ловит рассинхрон → **warning-путь** (`outline_overrides` отключён, ingest успешен, крошка из кодов верна). Если эмпирически сорвать выравнивание тем же `read_excel`-контрактом не удаётся (pandas и openpyxl видят строки одинаково) — задокументировать недостижимость; тогда тест фиксирует, что сверка стоит и НЕ ложно-срабатывает на чистом файле. **НЕ raise** — рассинхрон уносит лишь косметический `outline_overrides`, крошка/аномалии код-based. Не выдумывать срыв, которого нет.
 
 - [ ] **Step 2: Прогон — RED**
 
@@ -281,11 +270,11 @@ class EstimateParser:
             raise ValueError(f"В файле отсутствуют обязательные колонки: {sorted(missing)}")
 
         outline_by_si, code_by_si = self._read_outline(content)
-        file_has_outline = max(outline_by_si.values(), default=0) >= 1  # резолв НЕ использует
 
         warnings: list[str] = []
         positions: list[EstimatePosition] = []
         last_node_code: str | None = None
+        outline_desync = False  # рассинхрон pandas↔openpyxl → outline-детекция недоступна
         # coded-узлы (только они идут в стек глубины) — собираем в порядке документа
         coded: list[dict] = []   # {source_index, code, name, segments, section_type, outline}
         top_type_by_segment: dict[str, str | None] = {}
@@ -308,12 +297,9 @@ class EstimateParser:
                 warnings.append(f"строка {si}: нечисловой код '{no}' → позиция")
                 positions.append(EstimatePosition(name, last_node_code, si))
                 continue
-            # 🔴 АССЕРТ ВЫРАВНИВАНИЯ pandas↔openpyxl на каждый coded-узел
+            # Сверка выравнивания pandas↔openpyxl (v2: warning, НЕ raise — outline только детекция)
             if _norm_code(code_by_si.get(si)) != code:
-                raise ValueError(
-                    f"рассинхрон pandas↔openpyxl на строке {si}: "
-                    f"pandas='{code}' openpyxl='{_norm_code(code_by_si.get(si))}'"
-                )
+                outline_desync = True
             if len(segments) == 1:
                 vid = record[SECTION_TYPE_COLUMN] if SECTION_TYPE_COLUMN in df.columns else None
                 top_type_by_segment[code] = None if pd.isna(vid) else str(vid).strip()
@@ -341,6 +327,9 @@ class EstimateParser:
         anomalies, overrides = detect_structural_anomalies(
             [(c["source_index"], c["code"], c["name"], c["outline"]) for c in coded]
         )
+        if outline_desync:  # рассинхрон → outline-детекция недостоверна; крошка/аномалии код-based — ок
+            warnings.append("outline-детекция отключена: рассинхрон pandas↔openpyxl по строкам")
+            overrides = 0
         return ParsedEstimate(nodes=nodes, positions=positions, warnings=warnings,
                               anomalies=anomalies, outline_overrides=overrides)
 
@@ -594,7 +583,7 @@ class EstimateUploadResponse(BaseModel):
 
 - [ ] **Step 1: Полный бэк-сьют** — `cd backend && uv run pytest -q` → всё зелёное (проверить, что правка `_classify_nodes` не уронила др. тесты; `test_benchmark_reconstruct` зелёный — `depth` не мутировали).
 - [ ] **Step 2: ruff** — `cd backend && uv run ruff check .` → чисто. Фронт: `cd frontend && npm run lint`.
-- [ ] **Step 3: Пост-замер (разово, OpenRouter живой).** `just embed-worker --once` при необходимости; затем `just eval-matching benchmark=1` ДО — уже снят как baseline? Снять ПОСЛЕ. Зафиксировать дельту top-1/top-3, число узлов с изменённым предком (ожидаем ≈50, не 68 — резолв на глубине-кода), и **отдельно** счётчик `outline_overrides` парсингом золотого файла напрямую (ожидаем ≈115). Срез по `10.2.1.x` (родитель ниже) и газону `11.3.1.1.x` — флипнул ли top-1.
+- [ ] **Step 3: Пост-замер (разово, OpenRouter живой).** `just embed-worker --once` при необходимости; затем `just eval-matching benchmark=1` ДО — уже снят как baseline? Снять ПОСЛЕ. Зафиксировать дельту top-1/top-3, число узлов с изменённым предком (ожидаем ≈50, не 68 — резолв на глубине-кода), и **отдельно** счётчик `outline_overrides` парсингом золотого файла напрямую (ожидаем ≈115). **Именованный срез (3 кейса):** `10.2.1.x` (родитель ниже), газон `11.3.1.1.x` (родителя нет) — флипнул ли top-1; **+ фасадные коллизионные `6.x` (873/891/905/917…)** — подтвердить, что top-1 НЕ просел при включении лишнего промежуточного предка (исходный мотивирующий кейс).
 - [ ] **Step 4: Запись** — результат пост-замера в [docs/devlog/](../../devlog/) (новый файл) + перенести «Кейс D» в «Погашено» в [TECH_DEBT.md](../../TECH_DEBT.md) по факту (после мерджа). Зафиксировать: дерево подтверждено → предусловие §5 (экспорт-ремонт) выполнено.
 - [ ] **Step 5: Commit** — `git commit -am "docs(devlog): пост-замер позиционного резолва (top-1/top-3, срез 10.2.1/газон)"`.
 
