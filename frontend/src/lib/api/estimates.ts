@@ -3,6 +3,7 @@ import type {
   MatchRow,
   MatchStatus,
   ReviewStatus,
+  StructuralAnomaly,
 } from "@/lib/types"
 import { apiGet, apiGetBlob, apiSend, apiUpload } from "./client"
 
@@ -32,6 +33,20 @@ interface DetailDto {
 interface CreateDto {
   id: number
   status: string
+  anomalies: {
+    kind: string
+    source_index: number
+    code: string
+    name: string
+    detail: string
+  }[]
+  outline_overrides: number
+}
+
+export interface UploadResult {
+  id: number
+  anomalies: StructuralAnomaly[]
+  outlineOverrides: number
 }
 
 export function rowFromDto(r: RowDto): MatchRow {
@@ -66,9 +81,21 @@ export async function getEstimate(
   return { fileName: dto.filename, rows: dto.rows.map(rowFromDto) }
 }
 
-export async function uploadEstimate(file: File): Promise<number> {
+export async function uploadEstimate(
+  file: File
+): Promise<UploadResult> {
   const dto = await apiUpload<CreateDto>("/estimates", file)
-  return dto.id
+  return {
+    id: dto.id,
+    anomalies: (dto.anomalies ?? []).map((a) => ({
+      kind: a.kind,
+      sourceIndex: a.source_index,
+      code: a.code,
+      name: a.name,
+      detail: a.detail,
+    })),
+    outlineOverrides: dto.outline_overrides ?? 0,
+  }
 }
 
 // Терминальные статусы сметы (см. бэк EstimateStatus): ready/partial_error —
