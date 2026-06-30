@@ -16,9 +16,7 @@ const ONE_ANOMALY: StructuralAnomaly[] = [
 
 describe("StructureNotice", () => {
   it("рендерит заголовок «1 замечание» и detail аномалии", async () => {
-    render(
-      <StructureNotice anomalies={ONE_ANOMALY} outlineOverrides={115} />
-    )
+    render(<StructureNotice anomalies={ONE_ANOMALY} outlineOverrides={115} />)
     // Заголовок содержит «1 замечание»
     expect(
       screen.getByText(/структура сметы.*1 замечание/i)

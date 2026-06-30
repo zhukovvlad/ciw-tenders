@@ -59,8 +59,7 @@ export function StructureNotice({
       <CollapsibleTrigger asChild>
         <button
           type="button"
-          className="flex w-full items-center gap-2 rounded-md border bg-muted/50
-            px-3 py-2 text-sm font-medium hover:bg-muted"
+          className="flex w-full items-center gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm font-medium hover:bg-muted"
         >
           {open ? (
             <ChevronDown className="size-4 shrink-0" />
@@ -85,7 +84,7 @@ export function StructureNotice({
             <TableBody>
               {anomalies.map((a) => (
                 <TableRow key={`${a.sourceIndex}-${a.kind}`}>
-                  <TableCell className="whitespace-nowrap text-xs">
+                  <TableCell className="text-xs whitespace-nowrap">
                     {kindLabel(a.kind)}
                   </TableCell>
                   <TableCell className="font-mono text-xs">{a.code}</TableCell>

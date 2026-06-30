@@ -55,8 +55,10 @@ export function EstimateFlow() {
   const estimateIdRef = useRef<number | null>(loadEstimateId())
   // Транзиентная справка по аномалиям структуры: заполняется при загрузке,
   // сбрасывается при «новой смете». Не персистируется (при перезагрузке теряется).
-  const [structureNotice, setStructureNotice] =
-    useState<StructureNoticeState>({ anomalies: [], outlineOverrides: 0 })
+  const [structureNotice, setStructureNotice] = useState<StructureNoticeState>({
+    anomalies: [],
+    outlineOverrides: 0,
+  })
 
   // персист ревью на каждое изменение
   useEffect(() => {
