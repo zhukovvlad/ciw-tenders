@@ -32,7 +32,7 @@ class MatchingService:
         embedder: Embedder | None = None,  # больше не используется ядром (сметы хранят вектор)
         llm_matcher: LLMMatcher | None = None,
         confidence_threshold: float = 0.90,
-        top_k: int = 3,
+        top_k: int = 5,  # см. Settings.match_top_k / TECH_DEBT «Качество матчинга», Кейс C
     ) -> None:
         self._repository = repository
         self._llm_matcher = llm_matcher

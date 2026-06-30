@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -23,6 +24,7 @@ from app.api.schemas import (
     EstimateSummaryOut,
     EstimateUploadResponse,
     ReviewDecisionIn,
+    StructuralAnomalyOut,
 )
 from app.core.config import Settings
 from app.domain.entities import Role, User
@@ -101,6 +103,8 @@ async def upload_estimate(
         nodes_count=len(result.estimate.rows),
         positions_count=result.positions_count,
         warnings=result.warnings,
+        anomalies=[StructuralAnomalyOut(**asdict(a)) for a in result.anomalies],
+        outline_overrides=result.outline_overrides,
     )
 
 

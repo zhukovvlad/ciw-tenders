@@ -34,7 +34,7 @@ const pollEstimate = vi.fn(
 // Mock the real estimates API so tests don't hit the network. Функции
 // вызываются лениво (через arrow) — иначе хойст vi.mock поймает TDZ const-ов.
 vi.mock("@/lib/api/estimates", () => ({
-  uploadEstimate: async () => 1,
+  uploadEstimate: async () => ({ id: 1, anomalies: [], outlineOverrides: 0 }),
   pollEstimate: (
     id: number,
     onProgress?: (status: string, done: number, total: number) => void

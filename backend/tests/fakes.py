@@ -573,9 +573,11 @@ class FakeEstimateRepository(EstimateRepository):
 
     def fetch_all_nodes(self, estimate_id: int) -> list[ClassifiableNode]:
         base = {r.id: r for e in self.estimates.values() for r in e.rows}
+        # Порядок по source_index — как реальный репозиторий (ORDER BY source_index);
+        # позиционный резолв предков порядко-зависим, фейк обязан это воспроизводить.
         rows = sorted(
             (n for n in self.nodes.values() if n["estimate_id"] == estimate_id),
-            key=lambda n: n["id"],
+            key=lambda n: base[n["id"]].source_index,
         )
         return [
             ClassifiableNode(id=n["id"], code=base[n["id"]].code, name=base[n["id"]].name)

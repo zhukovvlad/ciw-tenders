@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
 
     confidence_threshold: float = 0.90
+    # Сколько кандидатов pgvector отдаёт арбитру. 5 (не 3): в тесных кластерах сестёр-статей
+    # правильная статья выпадает из топ-3 на доли score (TECH_DEBT «Качество матчинга», Кейс C).
+    match_top_k: int = 5
     embedding_base_url: str = "https://openrouter.ai/api/v1"
     embedding_model: str = "google/gemini-embedding-2"
     # LLM-арбитр матчинга — переключаемый провайдер.
@@ -101,6 +104,8 @@ class Settings(BaseSettings):
             raise ValueError("Классификатор требует непустой CLASSIFIER_MODEL")
         if self.classifier_batch_size <= 0:
             raise ValueError("CLASSIFIER_BATCH_SIZE должен быть > 0")
+        if self.match_top_k <= 0:
+            raise ValueError("MATCH_TOP_K должен быть > 0 (иначе арбитр не получит кандидатов)")
         return self
 
 

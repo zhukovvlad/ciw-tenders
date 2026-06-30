@@ -10,6 +10,8 @@ import {
   uploadEstimate,
 } from "@/lib/api/estimates"
 import type { EstimateListItem } from "@/lib/api/estimates"
+import type { StructuralAnomaly } from "@/lib/types"
+import { StructureNotice } from "@/components/estimate/StructureNotice"
 import { initReview, progress, reviewReducer } from "@/lib/reviewState"
 import type { ReviewActionKind } from "@/pages/estimate/ReviewScreen"
 import {
@@ -25,6 +27,11 @@ import { ReviewScreen } from "@/pages/estimate/ReviewScreen"
 import { DoneScreen } from "@/pages/estimate/DoneScreen"
 
 type Phase = "start" | "processing" | "review" | "done"
+
+interface StructureNoticeState {
+  anomalies: StructuralAnomaly[]
+  outlineOverrides: number
+}
 
 export function EstimateFlow() {
   const [phase, setPhase] = useState<Phase>(() =>
@@ -46,6 +53,12 @@ export function EstimateFlow() {
   )
   // id сметы для коммита решений (PATCH) и экспорта; регидратируется из сессии
   const estimateIdRef = useRef<number | null>(loadEstimateId())
+  // Транзиентная справка по аномалиям структуры: заполняется при загрузке,
+  // сбрасывается при «новой смете». Не персистируется (при перезагрузке теряется).
+  const [structureNotice, setStructureNotice] = useState<StructureNoticeState>({
+    anomalies: [],
+    outlineOverrides: 0,
+  })
 
   // персист ревью на каждое изменение
   useEffect(() => {
@@ -67,11 +80,13 @@ export function EstimateFlow() {
   async function handleFile(file: File) {
     setFileName(file.name)
     setPhase("processing")
+    setStructureNotice({ anomalies: [], outlineOverrides: 0 })
     try {
       // SP1: upload → get id, then poll until ready
-      const id = await uploadEstimate(file)
+      const { id, anomalies, outlineOverrides } = await uploadEstimate(file)
       estimateIdRef.current = id
       saveEstimateId(id)
+      setStructureNotice({ anomalies, outlineOverrides })
       setProg({ phase: "parsing", done: 0, total: 0, etaSeconds: null })
 
       const { fileName: serverFileName, rows } = await pollEstimate(
@@ -103,6 +118,10 @@ export function EstimateFlow() {
     estimateIdRef.current = item.id
     saveEstimateId(item.id)
     setFileName(item.filename)
+    // Аномалии — транзиентная справка по конкретной загрузке; GET /estimates/{id}
+    // их не возвращает. При открытии из истории чистим справку, иначе блок от
+    // предыдущей загрузки протёк бы над только что открытой сметой (обе ветки ниже).
+    setStructureNotice({ anomalies: [], outlineOverrides: 0 })
 
     if (item.status === "pending" || item.status === "running") {
       setPhase("processing")
@@ -149,6 +168,7 @@ export function EstimateFlow() {
     estimateIdRef.current = null
     clearReview()
     setFileName("")
+    setStructureNotice({ anomalies: [], outlineOverrides: 0 })
     setPhase("start")
   }
 
@@ -215,12 +235,18 @@ export function EstimateFlow() {
       />
     )
   return (
-    <ReviewScreen
-      state={state}
-      dispatch={dispatch}
-      onExport={handleExport}
-      onNewEstimate={handleNew}
-      onReview={handleReview}
-    />
+    <>
+      <StructureNotice
+        anomalies={structureNotice.anomalies}
+        outlineOverrides={structureNotice.outlineOverrides}
+      />
+      <ReviewScreen
+        state={state}
+        dispatch={dispatch}
+        onExport={handleExport}
+        onNewEstimate={handleNew}
+        onReview={handleReview}
+      />
+    </>
   )
 }

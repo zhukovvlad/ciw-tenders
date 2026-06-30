@@ -11,9 +11,14 @@ import logging
 import time
 from collections import Counter
 
-from app.domain.classification import build_embedding_input, classify_lexical, is_excluded
+from app.domain.classification import (
+    build_embedding_input,
+    classify_lexical,
+    is_excluded,
+    leaf_flags,
+    resolve_ancestor_indices,
+)
 from app.domain.entities import (
-    ClassifiableNode,
     EstimateRowStatus,
     EstimateStatus,
     NodeClassification,
@@ -120,49 +125,37 @@ class EstimateMatchingService:
         )
 
     def _classify_nodes(self, estimate_id: int) -> int:
-        nodes = self._estimates.fetch_all_nodes(estimate_id)
+        nodes = self._estimates.fetch_all_nodes(estimate_id)  # порядок по source_index
         if not nodes:
             return 0
-        # Представители по коду (первое вхождение) — только для крошки предков.
-        name_by_code: dict[str, str] = {}
-        repr_id_by_code: dict[str, int] = {}
-        for n in nodes:
-            name_by_code.setdefault(n.code, n.name)
-            repr_id_by_code.setdefault(n.code, n.id)
-        # Проход 1: лексика. Собственный класс — по id. UNSURE копим для LLM.
+        depths = [len(n.code.split(".")) for n in nodes]
+        chains = resolve_ancestor_indices(depths)
+        leafs = leaf_flags(depths)
+        # Проход 1: лексика.
         cls_by_id: dict[int, WorkClass] = {}
-        unsure: list[ClassifiableNode] = []
-        for n in nodes:
+        unsure_idx: list[int] = []
+        for i, n in enumerate(nodes):
             cls = classify_lexical(n.name)
             cls_by_id[n.id] = cls
             if cls is WorkClass.UNSURE:
-                unsure.append(n)
-        # Проход 1b: LLM по неоднозначным (UNSURE-вердикт остаётся = keep).
-        if unsure:
+                unsure_idx.append(i)
+        # Проход 1b: LLM по UNSURE — контекст предков из позиционной цепочки.
+        if unsure_idx:
             items = [
-                NodeToClassify(n.name, self._ancestor_names(n.code, name_by_code))
-                for n in unsure
+                NodeToClassify(nodes[i].name, tuple(nodes[j].name for j in chains[i]))
+                for i in unsure_idx
             ]
-            for n, verdict in zip(unsure, self._classifier.classify(items), strict=True):
-                cls_by_id[n.id] = verdict
-        # Проход 2: override (код-based лист + non-org предок) + крошка с выбросом своего org → bulk
-        parent_codes = {p for n in nodes if (p := self._parent_of(n.code))}
+            verdicts = self._classifier.classify(items)
+            for i, verdict in zip(unsure_idx, verdicts, strict=True):
+                cls_by_id[nodes[i].id] = verdict
+        # Проход 2: override + крошка → bulk.
         results: list[NodeClassification] = []
-        for n in nodes:
-            # ancestors — ПОЛНЫЙ (name, cls) по всем предкам, БЕЗ предварительной фильтрации ORG:
-            # has_non_org_anc и build_embedding_input фильтруют ORG изнутри (эквивалентность инв.2).
-            ancestors = [
-                (name_by_code[a], cls_by_id[repr_id_by_code[a]])
-                for a in self._ancestor_codes(n.code)
-                if a in name_by_code
-            ]
+        for i, n in enumerate(nodes):
+            ancestors = [(nodes[j].name, cls_by_id[nodes[j].id]) for j in chains[i]]
             own = cls_by_id[n.id]
-            is_leaf = n.code not in parent_codes
             has_non_org_anc = any(cls is not WorkClass.ORG for _, cls in ancestors)
-            excluded = is_excluded(own, is_leaf=is_leaf, has_non_org_ancestor=has_non_org_anc)
+            excluded = is_excluded(own, is_leaf=leafs[i], has_non_org_ancestor=has_non_org_anc)
             crumb = build_embedding_input(n.name, ancestors, self_class=own)
-            # Инвариант 2: kept-узел ОБЯЗАН иметь непустую крошку. Не ловит логику _classify_nodes
-            # (она такого не породит), а ловит будущий рассинхрон is_excluded↔build_embedding_input.
             if not excluded and not crumb:
                 logger.error(
                     "kept-узел с пустой крошкой: id=%s code=%s class=%s", n.id, n.code, own
@@ -171,21 +164,8 @@ class EstimateMatchingService:
             results.append(
                 NodeClassification(node_id=n.id, excluded=excluded, embedding_input=crumb)
             )
-        self._estimates.save_node_classifications(results)  # один commit, охрана статуса
+        self._estimates.save_node_classifications(results)
         return sum(1 for r in results if r.excluded)
-
-    @staticmethod
-    def _parent_of(code: str) -> str | None:
-        segs = code.split(".")
-        return ".".join(segs[:-1]) or None
-
-    @staticmethod
-    def _ancestor_codes(code: str) -> list[str]:
-        segs = code.split(".")
-        return [".".join(segs[:i]) for i in range(1, len(segs))]  # root..parent, без узла
-
-    def _ancestor_names(self, code: str, name_by_code: dict[str, str]) -> tuple[str, ...]:
-        return tuple(name_by_code[a] for a in self._ancestor_codes(code) if a in name_by_code)
 
     def _embed_nodes(self, estimate_id: int) -> None:
         last_id = 0

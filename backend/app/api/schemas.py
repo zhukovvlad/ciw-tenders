@@ -110,12 +110,24 @@ class ImportReportOut(BaseModel):
         )
 
 
+class StructuralAnomalyOut(BaseModel):
+    """DTO построчной аномалии структуры (проброс из парсера в ответ загрузки)."""
+
+    kind: str
+    source_index: int
+    code: str
+    name: str
+    detail: str
+
+
 class EstimateUploadResponse(BaseModel):
     id: int
     status: str
     nodes_count: int
     positions_count: int
     warnings: list[str]
+    anomalies: list[StructuralAnomalyOut] = []
+    outline_overrides: int = 0
 
 
 class EstimateSummaryOut(BaseModel):

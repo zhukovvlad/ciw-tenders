@@ -64,3 +64,11 @@ export interface ImportReport {
   dry_run: boolean
   force_required: boolean
 }
+
+export interface StructuralAnomaly {
+  kind: string
+  sourceIndex: number
+  code: string
+  name: string
+  detail: string
+}

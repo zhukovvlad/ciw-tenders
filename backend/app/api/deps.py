@@ -186,6 +186,7 @@ def build_estimate_matching_service(session: Session) -> EstimateMatchingService
         embedder=None,
         llm_matcher=get_llm_matcher(),
         confidence_threshold=settings.confidence_threshold,
+        top_k=settings.match_top_k,
     )
     return EstimateMatchingService(
         matcher=matcher,

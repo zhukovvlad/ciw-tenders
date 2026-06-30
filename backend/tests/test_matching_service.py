@@ -63,3 +63,26 @@ def test_llm_hallucinated_article_treated_as_decline() -> None:
 
     nm = _svc(cands, llm=_Halluc()).match_one([0.1], "запрос")
     assert nm.status is EstimateRowStatus.NO_MATCH  # не из кандидатов → как отказ
+
+
+def test_default_top_k_surfaces_rank4_candidate_to_arbiter() -> None:
+    """Регрессия Кейса C (см. TECH_DEBT «Качество матчинга», рычаг №5): правильная статья,
+    стоящая на #4 в тесном кластере сестёр, ДОЛЖНА дойти до арбитра. До фикса дефолт top_k=3
+    срезал её → арбитру нечего выбрать → no_match («без пары»). Дефолт top_k≥4 её спасает."""
+    cands = [ArticleCandidate(_article(i, f"c{i}"), 0.88 - i * 0.001) for i in range(5)]
+    gold_code = "c3"  # ранг 4 — вне топ-3
+
+    class _PickByCode(FakeLLMMatcher):
+        def choose_best(self, query, candidates):
+            # как реальный арбитр: берёт правильную, ЕСЛИ она в списке; иначе честный отказ
+            for c in candidates:
+                if c.article.article_code == gold_code:
+                    return c.article
+            return None
+
+    repo = FakeRepository(candidates=cands)
+    nm = MatchingService(  # top_k — по умолчанию (источник правды дефолта)
+        repo, embedder=None, llm_matcher=_PickByCode(), confidence_threshold=0.90
+    ).match_one([0.1], "запрос")
+    assert nm.status is EstimateRowStatus.NEEDS_REVIEW
+    assert nm.matched_code == gold_code
