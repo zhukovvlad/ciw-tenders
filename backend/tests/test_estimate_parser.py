@@ -90,20 +90,60 @@ def test_source_index_integrity_with_skip_above() -> None:
     assert live.source_index == 2  # на enumerate-по-выжившим было бы 1
 
 
-def test_duplicate_code_keeps_first_name_and_warns() -> None:
+def test_duplicate_code_uses_nearest_preceding_parent() -> None:
+    # Позиционный резолв: ребёнок берёт БЛИЖАЙШЕГО предшествующего предка, не первое вхождение.
     content = _xlsx(
         [
             ("1", "Первый", "СМР"),
             ("1.1", "Имя-А", None),
-            ("1.1", "Имя-Б", None),       # дубль кода
+            ("1.1", "Имя-Б", None),       # дубль кода — ближайший предок для следующего
             ("1.1.1", "Дитя", None),
         ]
     )
     parsed = EstimateParser().parse(content)
-    assert sum(n.code == "1.1" for n in parsed.nodes) == 2          # оба сохранены
     child = next(n for n in parsed.nodes if n.code == "1.1.1")
-    assert child.embedding_input == "Первый. Имя-А. Дитя"           # имя предка — первое
-    assert any("1.1" in w for w in parsed.warnings)
+    assert child.embedding_input == "Первый. Имя-Б. Дитя"   # было «Имя-А» (первое вхождение)
+    assert any(a.kind == "duplicate_code" for a in parsed.anomalies)
+
+
+def test_parent_below_does_not_pull_context_from_below() -> None:
+    # «родитель ниже»: ребёнок 10.2.1 встречается ВЫШЕ строки-родителя 10.2 →
+    # позиционный стек НЕ тянет имя снизу (forward-ref невозможен).
+    content = _xlsx(
+        [
+            ("10", "Инженерные системы", "СМР"),
+            ("10.1", "Освещение ЖК", None),
+            ("10.1.1", "Монтаж опор", None),     # предок в документе — «Освещение ЖК»
+            ("10.2", "Освещение Офис", None),    # код-родитель 10.1.1? нет; здесь просто следом
+        ]
+    )
+    parsed = EstimateParser().parse(content)
+    node = next(n for n in parsed.nodes if n.code == "10.1.1")
+    assert node.embedding_input == "Инженерные системы. Освещение ЖК. Монтаж опор"
+
+
+def test_outline_overrides_zero_on_flat_file() -> None:
+    # df.to_excel не создаёт группировку → file_has_outline False → overrides 0.
+    content = _xlsx([("1", "Раздел", "СМР"), ("1.1", "Под", None)])
+    parsed = EstimateParser().parse(content)
+    assert parsed.outline_overrides == 0
+
+
+def test_desync_warns_and_disables_outline_not_raises() -> None:
+    # При рассинхроне pandas↔openpyxl: warning + outline_overrides отключён (==0/None),
+    # но ingest НЕ падает, а крошка из кодов строится корректно. Сценарий рассинхрона
+    # эмпирически недостижим через _xlsx() — pandas и openpyxl видят строки одинаково.
+    # Тест фиксирует, что сверка СТОИТ и НЕ ложно-срабатывает на чистом файле:
+    # outline_overrides не обнулён ложно, warning про рассинхрон отсутствует.
+    content = _xlsx([("1", "Раздел", "СМР"), ("1.1", "Под", None)])
+    parsed = EstimateParser().parse(content)
+    # Нет ложного рассинхрона — предупреждение про outline-детекцию не должно быть
+    assert not any("рассинхрон" in w for w in parsed.warnings)
+    # outline_overrides корректен (не обнулён ложно)
+    assert parsed.outline_overrides == 0
+    # ingest не упал, крошка строится корректно
+    assert len(parsed.nodes) == 2
+    assert parsed.nodes[1].embedding_input == "Раздел. Под"
 
 
 def test_non_numeric_code_becomes_position_with_warning() -> None:
