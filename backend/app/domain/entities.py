@@ -177,10 +177,27 @@ class EstimatePosition:
 
 
 @dataclass(frozen=True, slots=True)
+class StructuralAnomaly:
+    """Построчная аномалия структуры «№ раздела» (для отчёта оператору при загрузке).
+
+    kind ∈ {duplicate_code, parent_below, parent_missing, depth_jump}. outline_code_mismatch
+    сюда НЕ попадает — он агрегатный (ParsedEstimate.outline_overrides), т.к. на многоэтапной
+    смете срабатывает на ~14% строк (базовое состояние, не ошибка)."""
+
+    kind: str
+    source_index: int
+    code: str
+    name: str
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
 class ParsedEstimate:
     nodes: list[EstimateNode]
     positions: list[EstimatePosition]
     warnings: list[str] = field(default_factory=list)
+    anomalies: list[StructuralAnomaly] = field(default_factory=list)
+    outline_overrides: int = 0
 
 
 @dataclass(frozen=True, slots=True)

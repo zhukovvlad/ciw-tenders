@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
+from collections.abc import Sequence
 
-from app.domain.entities import WorkClass
+from app.domain.entities import StructuralAnomaly, WorkClass
 
 # Оргтокены — маленькое закрытое множество. Стемы заякорены на начало слова и
 # матчат русские окончания (этап→этапы/этапов); «этап» НЕ ловит «этаж».
@@ -102,6 +104,97 @@ def _collapse_consecutive(parts: list[str]) -> list[str]:
         if not out or out[-1] != part:
             out.append(part)
     return out
+
+
+# --- Позиционный резолв иерархии (стек по глубине-кода) ----------------------
+# Резолв строится по ГЛУБИНЕ (число сегментов кода), а не усечением кода: стек смотрит
+# только вверх → forward-ref (контекст снизу) невозможен, коллизии дублей разводятся,
+# пропущенный уровень даёт ближайшего открытого предка. См. дизайн (ревью v2).
+
+
+def resolve_ancestor_indices(depths: Sequence[int]) -> list[list[int]]:
+    """depths — глубина каждого узла В ПОРЯДКЕ документа (1-based, ≥1).
+
+    Для позиции i возвращает индексы предков root→parent: ближайший открытый узел на
+    каждом уровне d < depths[i] (последний с глубиной d, не закрытый более мелким между ним
+    и i). Пропущенный уровень выпадает из цепочки. Индексы строго возрастают и все < i.
+    """
+    stack: list[tuple[int, int]] = []  # (depth, index) открытых предков
+    result: list[list[int]] = []
+    for i, d in enumerate(depths):
+        while stack and stack[-1][0] >= d:  # закрыть сёстер и более глубокие ветки
+            stack.pop()
+        result.append([idx for _, idx in stack])
+        stack.append((d, i))
+    return result
+
+
+def leaf_flags(depths: Sequence[int]) -> list[bool]:
+    """Лист ⟺ следующий узел НЕ глубже текущего (никто не открывается под ним).
+
+    Узлы — только coded-строки (позиции в depths не входят), поэтому узел, под которым
+    лишь позиции, остаётся листом."""
+    n = len(depths)
+    return [i == n - 1 or depths[i + 1] <= depths[i] for i in range(n)]
+
+
+def canonical_codes(depths: Sequence[int]) -> list[str]:
+    """Канонические коды (1, 1.1, 1.1.1 …) из ВОССТАНОВЛЕННОГО позиционного дерева.
+
+    Глубина кода = длина реальной цепочки предков + 1 (пропущенные уровни схлопываются),
+    поэтому устойчиво к битым исходным кодам. Потребитель — экспорт-ремонт (отдельный патч)."""
+    chains = resolve_ancestor_indices(depths)
+    child_count: dict[int | None, int] = {}
+    codes: list[str] = []
+    for chain in chains:
+        parent = chain[-1] if chain else None
+        child_count[parent] = child_count.get(parent, 0) + 1
+        prefix = codes[parent] + "." if parent is not None else ""
+        codes.append(prefix + str(child_count[parent]))
+    return codes
+
+
+def _parent_code(code: str) -> str | None:
+    head, _, _ = code.rpartition(".")
+    return head or None
+
+
+def detect_structural_anomalies(
+    rows: Sequence[tuple[int, str, str, int]],
+) -> tuple[list[StructuralAnomaly], int]:
+    """rows — (source_index, code, name, outline_level) coded-узлов В ПОРЯДКЕ документа.
+
+    Возвращает построчные аномалии (duplicate_code / parent_below / parent_missing /
+    depth_jump) и АГРЕГАТНЫЙ счётчик outline_overrides (outline_level+1 ≠ число сегментов).
+    """
+    counts = Counter(code for _, code, _, _ in rows)
+    first_si_by_code: dict[str, int] = {}
+    for si, code, _, _ in rows:
+        first_si_by_code.setdefault(code, si)
+
+    anomalies: list[StructuralAnomaly] = []
+    overrides = 0
+    prev_depth: int | None = None
+    for si, code, name, outline in rows:
+        depth = len(code.split("."))
+        if outline + 1 != depth:
+            overrides += 1
+        if counts[code] >= 2:
+            detail = f"код встречается {counts[code]} раз"
+            anomalies.append(StructuralAnomaly("duplicate_code", si, code, name, detail))
+        parent = _parent_code(code)
+        if parent is not None:
+            if parent not in counts:
+                detail = f"родитель '{parent}' отсутствует в смете"
+                anomalies.append(StructuralAnomaly("parent_missing", si, code, name, detail))
+            elif first_si_by_code[parent] > si:
+                detail = f"родитель '{parent}' встречается НИЖЕ (si={first_si_by_code[parent]})"
+                anomalies.append(StructuralAnomaly("parent_below", si, code, name, detail))
+        if prev_depth is not None and depth > prev_depth + 1:
+            detail = f"скачок глубины {prev_depth}→{depth}"
+            anomalies.append(StructuralAnomaly("depth_jump", si, code, name, detail))
+        prev_depth = depth
+    return anomalies, overrides
 
 
 def build_embedding_input(
