@@ -336,7 +336,7 @@ class EstimateParser:
     @staticmethod
     def _read_outline(content: bytes) -> tuple[dict[int, int], dict[int, object]]:
         wb = load_workbook(io.BytesIO(content))  # НЕ read_only: нужен row_dimensions.outline_level
-        ws = wb.active
+        ws = wb.worksheets[0]  # тот же лист, что pandas read_excel (sheet_name=0), НЕ wb.active
         header = [cell.value for cell in ws[1]]
         try:
             col = header.index(SECTION_NO_COLUMN) + 1
