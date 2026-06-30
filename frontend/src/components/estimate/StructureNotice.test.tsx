@@ -10,7 +10,7 @@ const ONE_ANOMALY: StructuralAnomaly[] = [
     sourceIndex: 2,
     code: "1.1",
     name: "B",
-    detail: "код встречается 2 раз",
+    detail: "код встречается 2 раза",
   },
 ]
 
@@ -61,6 +61,13 @@ describe("StructureNotice", () => {
     expect(
       screen.queryByText(/вложенность взята из группировки/i)
     ).not.toBeInTheDocument()
+  })
+
+  it("заголовок без «0 замечаний», если есть только outline-агрегат", () => {
+    render(<StructureNotice anomalies={[]} outlineOverrides={115} />)
+    // Блок рендерится (агрегат есть), но заголовок — без вводящего в заблуждение счётчика.
+    expect(screen.getByText(/^Структура сметы$/i)).toBeInTheDocument()
+    expect(screen.queryByText(/замечани/i)).not.toBeInTheDocument()
   })
 
   it("не рендерит ничего, если anomalies пуст и outlineOverrides === 0", () => {

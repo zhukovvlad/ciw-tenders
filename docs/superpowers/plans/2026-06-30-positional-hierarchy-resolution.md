@@ -549,7 +549,7 @@ class EstimateUploadResponse(BaseModel):
         nodes_count=len(result.estimate.rows),
         positions_count=result.positions_count,
         warnings=result.warnings,
-        anomalies=[StructuralAnomalyOut(**vars(a)) for a in result.anomalies],
+        anomalies=[StructuralAnomalyOut(**asdict(a)) for a in result.anomalies],  # asdict: StructuralAnomaly — slots-dataclass, vars() бросит TypeError
         outline_overrides=result.outline_overrides,
     )
 ```

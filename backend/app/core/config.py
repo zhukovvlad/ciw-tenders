@@ -104,6 +104,8 @@ class Settings(BaseSettings):
             raise ValueError("Классификатор требует непустой CLASSIFIER_MODEL")
         if self.classifier_batch_size <= 0:
             raise ValueError("CLASSIFIER_BATCH_SIZE должен быть > 0")
+        if self.match_top_k <= 0:
+            raise ValueError("MATCH_TOP_K должен быть > 0 (иначе арбитр не получит кандидатов)")
         return self
 
 

@@ -112,6 +112,7 @@ def test_detect_duplicate_code() -> None:
     anoms, _ = detect_structural_anomalies(rows)
     dups = [a for a in anoms if a.kind == "duplicate_code"]
     assert {a.source_index for a in dups} == {1, 2}  # оба вхождения
+    assert all(a.detail == "код встречается 2 раза" for a in dups)  # склонение «раза», не «раз»
 
 
 def test_detect_parent_below() -> None:

@@ -33,14 +33,16 @@ interface DetailDto {
 interface CreateDto {
   id: number
   status: string
-  anomalies: {
+  // Опциональны: старый бэк (до фичи структурных аномалий) их не присылает —
+  // ниже читаются защитно (`?? []` / `?? 0`).
+  anomalies?: {
     kind: string
     source_index: number
     code: string
     name: string
     detail: string
   }[]
-  outline_overrides: number
+  outline_overrides?: number
 }
 
 export interface UploadResult {
@@ -81,9 +83,7 @@ export async function getEstimate(
   return { fileName: dto.filename, rows: dto.rows.map(rowFromDto) }
 }
 
-export async function uploadEstimate(
-  file: File
-): Promise<UploadResult> {
+export async function uploadEstimate(file: File): Promise<UploadResult> {
   const dto = await apiUpload<CreateDto>("/estimates", file)
   return {
     id: dto.id,

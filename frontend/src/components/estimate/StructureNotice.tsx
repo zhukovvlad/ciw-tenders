@@ -52,7 +52,11 @@ export function StructureNotice({
 
   if (anomalies.length === 0 && outlineOverrides === 0) return null
 
-  const title = `Структура сметы: ${pluralizeZamechanie(anomalies.length)}`
+  // Когда построчных аномалий нет (только агрегат outline) — не показываем «0 замечаний».
+  const title =
+    anomalies.length > 0
+      ? `Структура сметы: ${pluralizeZamechanie(anomalies.length)}`
+      : "Структура сметы"
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="mb-4">

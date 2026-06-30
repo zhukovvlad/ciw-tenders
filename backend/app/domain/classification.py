@@ -159,6 +159,16 @@ def _parent_code(code: str) -> str | None:
     return head or None
 
 
+def _plural_raz(n: int) -> str:
+    """Склонение «раз» после числа: 1 раз / 2-4 раза / 5+ раз (видно в UI как detail)."""
+    m10, m100 = n % 10, n % 100
+    if m10 == 1 and m100 != 11:
+        return "раз"
+    if 2 <= m10 <= 4 and not (12 <= m100 <= 14):
+        return "раза"
+    return "раз"
+
+
 def detect_structural_anomalies(
     rows: Sequence[tuple[int, str, str, int]],
 ) -> tuple[list[StructuralAnomaly], int]:
@@ -180,7 +190,7 @@ def detect_structural_anomalies(
         if outline + 1 != depth:
             overrides += 1
         if counts[code] >= 2:
-            detail = f"код встречается {counts[code]} раз"
+            detail = f"код встречается {counts[code]} {_plural_raz(counts[code])}"
             anomalies.append(StructuralAnomaly("duplicate_code", si, code, name, detail))
         parent = _parent_code(code)
         if parent is not None:
