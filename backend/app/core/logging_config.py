@@ -23,7 +23,7 @@ _LOG_FORMAT = (
     "req=%(request_id)s task=%(task_id)s | %(message)s"
 )
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-_NOISY = ("httpx", "httpcore", "urllib3", "botocore", "s3transfer")
+_NOISY = ("httpx", "httpcore", "urllib3", "botocore", "s3transfer", "watchfiles")
 
 _configured = False
 
@@ -107,6 +107,11 @@ def setup_logging() -> None:
 
     for name in _NOISY:
         logging.getLogger(name).setLevel(logging.WARNING)
+
+    # celery.worker на DEBUG спамит "Timer wake-up! Next ETA ..." каждую секунду
+    # (celery/worker/components.py). INFO (не WARNING) глушит только таймер, сохраняя
+    # полезный жизненный цикл задач (Task received/succeeded — он на INFO).
+    logging.getLogger("celery.worker").setLevel(logging.INFO)
 
     # Хендофф uvicorn: его записи идут через наш root, без своих хендлеров (без дублей).
     for name in ("uvicorn", "uvicorn.access", "uvicorn.error"):

@@ -33,7 +33,7 @@ makemigration name:
 
 # Запуск FastAPI (hot-reload) в виртуальном окружении.
 dev-back:
-    cd {{backend}}; uv run uvicorn app.main:app --reload --port 8260
+    cd {{backend}}; uv run uvicorn app.main:app --reload --reload-exclude "*.log" --port 8260
 
 # Запуск Vite dev-сервера.
 dev-front:
@@ -83,7 +83,7 @@ eval-matching benchmark="":
 # НО remote-control останется off (управляется конфигом, не флагами): для `celery inspect`
 # верни worker_enable_remote_control=True в celery_app.py + выдай права на каналы.
 celery-worker *args="--pool=solo --loglevel=info --without-mingle --without-gossip":
-    cd {{backend}}; uv run celery -A app.infrastructure.tasks.celery_app worker {{args}}
+    cd {{backend}}; $env:LOG_DIR="logs/celery"; uv run celery -A app.infrastructure.tasks.celery_app worker {{args}}
 
 # MinIO (S3-хранилище оригиналов смет): API на :9000, консоль на :9001, данные в ./minio-data (gitignored).
 # Учётки по умолчанию minioadmin/minioadmin — держать в согласии с S3_ACCESS_KEY/S3_SECRET_KEY в backend/.env.
