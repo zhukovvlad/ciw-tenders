@@ -26,6 +26,8 @@ from app.domain.entities import (
     NodeMatch,
     NodeToClassify,
     PendingEmbedding,
+    PendingNode,
+    PromotableRow,
     TemplateArticle,
     TokenPayload,
     User,
@@ -281,6 +283,33 @@ class EstimateRepository(ABC):
     def save_node_classifications(self, results: list[NodeClassification]) -> None:
         """Bulk, один commit. Охрана: пишет только строки в status IN ('pending','excluded');
         excluded=True→'excluded', False→'pending'. Терминальные матч-статусы/ревью не трогает."""
+        ...
+
+    @abstractmethod
+    def set_reference(self, estimate_id: int, value: bool) -> None:
+        """Помечает/снимает смету как эталонную (источник промоушена в золотой фонд)."""
+        ...
+
+    @abstractmethod
+    def fetch_reference_estimate_ids(self) -> list[int]:
+        """Все id смет с is_reference=True."""
+        ...
+
+    @abstractmethod
+    def fetch_promotable_rows(self, estimate_id: int) -> list[PromotableRow]:
+        """Все строки сметы с полями, нужными для отбора кандидатов на промоушен в фонд."""
+        ...
+
+    @abstractmethod
+    def fetch_pending_nodes(self, estimate_id: int) -> list[PendingNode]:
+        """Узлы status='pending' И review_status='unreviewed' (кандидаты на fund-look-up)."""
+        ...
+
+    @abstractmethod
+    def save_fund_hit(self, node_id: int, article_id: int, code: str, name: str) -> None:
+        """Пишет снимок «решено фондом» (matched_fund) в обход арбитра. CAS по
+        review_status='unreviewed' — как save_node_match. candidates/score обнуляются
+        (снимок без кандидатов)."""
         ...
 
 

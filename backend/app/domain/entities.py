@@ -317,6 +317,25 @@ class NodeToClassify:
 
 
 @dataclass(frozen=True, slots=True)
+class PromotableRow:
+    """Строка сметы-эталона — кандидат на промоушен в золотой фонд."""
+
+    row_id: int
+    embedding_input: str
+    status: str
+    review_status: str
+    final_article_id: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class PendingNode:
+    """Узел сметы, ожидающий матчинга (status='pending', review_status='unreviewed')."""
+
+    row_id: int
+    embedding_input: str
+
+
+@dataclass(frozen=True, slots=True)
 class BenchmarkNodeSeed:
     """Узел бенчмарка: разметка специалиста относительно версии справочника."""
 

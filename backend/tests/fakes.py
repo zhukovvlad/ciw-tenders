@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from app.domain.decision_fund import FundHit
+from app.domain.decision_fund import FundEntry, FundHit
 from app.domain.entities import (
     ArticleCandidate,
     ClassifiableNode,
@@ -22,6 +23,8 @@ from app.domain.entities import (
     NodeMatch,
     NodeToClassify,
     PendingEmbedding,
+    PendingNode,
+    PromotableRow,
     StoredEstimateRow,
     TemplateArticle,
     TokenPayload,
@@ -351,6 +354,7 @@ class FakeEstimateRepository(EstimateRepository):
         self._locks: set[int] = set()
         self.stale_running: set[int] = set()
         self._node_seq = 0
+        self.reference_ids: set[int] = set()  # золотой фонд: сметы-эталоны
 
     def create(self, new: NewEstimate, nodes: list[EstimateNode]) -> Estimate:
         self.create_calls += 1
@@ -597,6 +601,123 @@ class FakeEstimateRepository(EstimateRepository):
             n["status"] = "excluded" if r.excluded else "pending"
             n["embedding_input"] = r.embedding_input
 
+    # --- золотой фонд (Task 4) ---
+    def set_reference(self, estimate_id: int, value: bool) -> None:
+        if value:
+            self.reference_ids.add(estimate_id)
+        else:
+            self.reference_ids.discard(estimate_id)
+
+    def fetch_reference_estimate_ids(self) -> list[int]:
+        return list(self.reference_ids)
+
+    def is_reference(self, estimate_id: int) -> bool:  # тест-читатель (не часть порта)
+        return estimate_id in self.reference_ids
+
+    def fetch_promotable_rows(self, estimate_id: int) -> list[PromotableRow]:
+        return [
+            PromotableRow(
+                row_id=n["id"],
+                embedding_input=n["embedding_input"],
+                status=n["status"],
+                review_status=n["review_status"],
+                final_article_id=n["final_article_id"],
+            )
+            for n in sorted(self.nodes.values(), key=lambda n: n["id"])
+            if n["estimate_id"] == estimate_id
+        ]
+
+    def fetch_pending_nodes(self, estimate_id: int) -> list[PendingNode]:
+        return [
+            PendingNode(row_id=n["id"], embedding_input=n["embedding_input"])
+            for n in sorted(self.nodes.values(), key=lambda n: n["id"])
+            if n["estimate_id"] == estimate_id
+            and n["status"] == "pending"
+            and n["review_status"] == "unreviewed"
+        ]
+
+    def save_fund_hit(self, node_id: int, article_id: int, code: str, name: str) -> None:
+        n = self.nodes[node_id]
+        if n["review_status"] != "unreviewed":
+            return  # CAS: зеркало save_node_match — человек тронул строку, не затираем
+        n["status"] = "matched_fund"
+        n["matched_article_id"] = article_id
+        n["matched_code"] = code
+        n["matched_name"] = name
+        n["candidates"] = []
+        n["score"] = None
+        n["match_error"] = None
+
+
+@dataclass
+class Row:
+    """Тест-сид одной строки сметы (порядок полей фиксирован для позиционных вызовов)."""
+
+    embedding_input: str
+    status: str
+    review_status: str
+    final_article_id: int | None = None
+
+
+def seed_estimate_with_rows(repo: FakeEstimateRepository, rows: list[Row]) -> int:
+    """Создаёт смету с заданными строками напрямую в фейк-хранилище, возвращает estimate_id.
+
+    Обходит create()/EstimateNode (не все поля Row нужны для EstimateNode), пишет прямо
+    в repo.nodes/repo.estimates — единый сид-хелпер для тестов Task 4 и Task 5.
+    """
+    eid = repo._next
+    repo._next += 1
+    stored_rows: list[StoredEstimateRow] = []
+    for row in rows:
+        repo._node_seq += 1
+        nid = repo._node_seq
+        repo.nodes[nid] = {
+            "id": nid,
+            "estimate_id": eid,
+            "embedding_input": row.embedding_input,
+            "embedding": None,
+            "status": row.status,
+            "match_error": None,
+            "matched_article_id": None,
+            "matched_code": None,
+            "matched_name": None,
+            "score": None,
+            "candidates": [],
+            "review_status": row.review_status,
+            "final_article_id": row.final_article_id,
+            "final_code": None,
+            "final_name": None,
+            "reviewed_at": None,
+        }
+        stored_rows.append(
+            StoredEstimateRow(
+                id=nid,
+                code=str(nid),
+                name=row.embedding_input,
+                parent_code=None,
+                section_type=None,
+                depth=0,
+                embedding_input=row.embedding_input,
+                source_index=len(stored_rows),
+                status=row.status,
+                has_embedding=False,
+            )
+        )
+    est = Estimate(
+        id=eid,
+        user_id=1,
+        filename="seed.xlsx",
+        status="pending",
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),  # noqa: UP017
+        rows=stored_rows,
+    )
+    repo.estimates[eid] = est
+    repo.statuses[eid] = "pending"
+    repo.details[eid] = None
+    repo.touch_count[eid] = 0
+    repo._keys[eid] = "seed-key"
+    return eid
+
 
 class FakeWorkTypeClassifier(WorkTypeClassifier):
     def __init__(
@@ -641,7 +762,7 @@ class FakeDecisionFundRepository(DecisionFundRepository):
                 out[h] = hits
         return out
 
-    def upsert(self, entries: Sequence) -> None:
+    def upsert(self, entries: Sequence[FundEntry]) -> None:
         for e in entries:
             bucket = self.entries.setdefault((e.cache_key_hash, e.crumb_version), {})
             # фейк хранит FundHit напрямую (тест задаёт code/name через seed_hit-хелпер)

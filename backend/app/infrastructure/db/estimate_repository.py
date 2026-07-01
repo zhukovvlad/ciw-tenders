@@ -18,6 +18,8 @@ from app.domain.entities import (
     NodeClassification,
     NodeMatch,
     PendingEmbedding,
+    PendingNode,
+    PromotableRow,
     StoredEstimateRow,
 )
 from app.domain.ports import EstimateRepository
@@ -361,3 +363,46 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 )
             )
         self._session.commit()  # один commit на весь проход (атомарность + латентность)
+
+    def set_reference(self, estimate_id: int, value: bool) -> None:
+        self._session.execute(
+            update(EstimateModel).where(EstimateModel.id == estimate_id).values(is_reference=value)
+        )
+        self._session.commit()
+
+    def fetch_reference_estimate_ids(self) -> list[int]:
+        return list(
+            self._session.scalars(
+                select(EstimateModel.id).where(EstimateModel.is_reference.is_(True))
+            )
+        )
+
+    def fetch_promotable_rows(self, estimate_id: int) -> list[PromotableRow]:
+        stmt = select(
+            EstimateRowModel.id, EstimateRowModel.embedding_input,
+            EstimateRowModel.status, EstimateRowModel.review_status,
+            EstimateRowModel.final_article_id,
+        ).where(EstimateRowModel.estimate_id == estimate_id)
+        return [
+            PromotableRow(r.id, r.embedding_input, r.status, r.review_status, r.final_article_id)
+            for r in self._session.execute(stmt)
+        ]
+
+    def fetch_pending_nodes(self, estimate_id: int) -> list[PendingNode]:
+        stmt = select(EstimateRowModel.id, EstimateRowModel.embedding_input).where(
+            EstimateRowModel.estimate_id == estimate_id,
+            EstimateRowModel.status == "pending",
+            EstimateRowModel.review_status == "unreviewed",  # защитный: pending ⟹ unreviewed
+        )
+        return [PendingNode(r.id, r.embedding_input) for r in self._session.execute(stmt)]
+
+    def save_fund_hit(self, node_id: int, article_id: int, code: str, name: str) -> None:
+        # CAS по unreviewed — как save_node_match; candidates/score обнуляем (снимок без кандидатов)
+        self._session.execute(
+            update(EstimateRowModel)
+            .where(EstimateRowModel.id == node_id, EstimateRowModel.review_status == "unreviewed")
+            .values(status="matched_fund", matched_article_id=article_id,
+                    matched_code=code, matched_name=name, candidates=None, score=None,
+                    match_error=None)
+        )
+        self._session.commit()
