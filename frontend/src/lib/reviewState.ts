@@ -1,14 +1,16 @@
 import type { Candidate, Decision, MatchRow, ReviewState } from "@/lib/types"
 
 export function requiresDecision(row: MatchRow): boolean {
-  return row.status !== "confident"
+  return row.status !== "confident" && row.status !== "matched_fund"
 }
 
 export function initReview(fileName: string, rows: MatchRow[]): ReviewState {
   const decisions: Record<number, Decision> = {}
   for (const r of rows) {
     decisions[r.row_number] =
-      r.status === "confident" && r.matched_code && r.matched_name
+      (r.status === "confident" || r.status === "matched_fund") &&
+      r.matched_code &&
+      r.matched_name
         ? {
             kind: "confirmed",
             code: r.matched_code,

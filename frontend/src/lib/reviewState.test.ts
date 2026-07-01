@@ -6,9 +6,19 @@ import {
   decisionFromRow,
   progress,
   filteredRows,
+  requiresDecision,
   statusLabel,
 } from "@/lib/reviewState"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
+import type { MatchRow } from "@/lib/types"
+
+const fundRow = (): MatchRow => ({
+  ...MOCK_ROWS.find((r) => r.status === "confident")!,
+  row_number: 9001,
+  status: "matched_fund",
+  matched_code: "СМР-01-001",
+  matched_name: "Подготовительные работы и содержание площадки",
+})
 
 const base = () => initReview("смета.xlsx", MOCK_ROWS)
 const rowNum = (status: string) =>
@@ -94,6 +104,21 @@ describe("reviewState", () => {
     expect(statusLabel(MOCK_ROWS[0], { kind: "no_match" })).toBe(
       "Нет совпадения"
     )
+  })
+
+  it("requiresDecision: matched_fund не требует ревью (как confident)", () => {
+    expect(requiresDecision(fundRow())).toBe(false)
+  })
+
+  it("initReview авто-подтверждает matched_fund строку (не остаётся pending)", () => {
+    const row = fundRow()
+    const s = initReview("смета.xlsx", [row])
+    expect(decisionFor(s, row)).toEqual({
+      kind: "confirmed",
+      code: "СМР-01-001",
+      name: "Подготовительные работы и содержание площадки",
+      manual: false,
+    })
   })
 
   it("decisionFromRow выводит решение из review_status бэка", () => {
