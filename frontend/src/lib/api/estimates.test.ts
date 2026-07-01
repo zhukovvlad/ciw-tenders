@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as client from "@/lib/api/client"
-import { deleteEstimate, listEstimates, rowFromDto } from "@/lib/api/estimates"
+import {
+  deleteEstimate,
+  listEstimates,
+  rebuildFund,
+  rowFromDto,
+  setReference,
+} from "@/lib/api/estimates"
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -62,5 +68,27 @@ describe("estimates api list/delete", () => {
     const spy = vi.spyOn(client, "apiSend").mockResolvedValue(undefined)
     await deleteEstimate(7)
     expect(spy).toHaveBeenCalledWith("DELETE", "/estimates/7")
+  })
+
+  it("setReference шлёт PATCH /estimates/{id}/reference с is_reference", async () => {
+    const spy = vi.spyOn(client, "apiSend").mockResolvedValue(undefined)
+    await setReference(7, true)
+    expect(spy).toHaveBeenCalledWith("PATCH", "/estimates/7/reference", {
+      is_reference: true,
+    })
+  })
+
+  it("setReference(id, false) снимает смету из фонда", async () => {
+    const spy = vi.spyOn(client, "apiSend").mockResolvedValue(undefined)
+    await setReference(7, false)
+    expect(spy).toHaveBeenCalledWith("PATCH", "/estimates/7/reference", {
+      is_reference: false,
+    })
+  })
+
+  it("rebuildFund шлёт POST /estimates/fund/rebuild без тела", async () => {
+    const spy = vi.spyOn(client, "apiSend").mockResolvedValue(undefined)
+    await rebuildFund()
+    expect(spy).toHaveBeenCalledWith("POST", "/estimates/fund/rebuild")
   })
 })

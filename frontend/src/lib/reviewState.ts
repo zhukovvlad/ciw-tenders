@@ -152,7 +152,8 @@ export function filteredRows(state: ReviewState): MatchRow[] {
   }
 }
 
-export function statusLabel(_row: MatchRow, d: Decision): string {
+export function statusLabel(row: MatchRow, d: Decision): string {
+  if (row.status === "matched_fund") return "Из фонда"
   if (d.kind === "no_match") return "Нет совпадения"
   if (d.kind === "pending") return "Требует проверки"
   return d.manual ? "Ручной выбор" : "Подтверждено оператором"

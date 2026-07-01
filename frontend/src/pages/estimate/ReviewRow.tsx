@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronDown, Search } from "lucide-react"
+import { ChevronDown, Database, Search } from "lucide-react"
 import type { Candidate, Decision, MatchRow } from "@/lib/types"
 import { statusLabel } from "@/lib/reviewState"
 import { searchArticles } from "@/lib/api/articles"
@@ -20,6 +20,7 @@ const statusTone: Record<string, string> = {
   confident: "text-[var(--success)]",
   needs_review: "text-[var(--warning)]",
   no_match: "text-destructive",
+  matched_fund: "text-[var(--ds-accent-hover)]",
 }
 
 export function ReviewRow({
@@ -33,7 +34,7 @@ export function ReviewRow({
 }: ReviewRowProps) {
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<Candidate[]>([])
-  const flagged = row.status !== "confident"
+  const flagged = row.status !== "confident" && row.status !== "matched_fund"
   const chosenCode =
     decision.kind === "confirmed" ? decision.code : row.matched_code
 
@@ -90,6 +91,9 @@ export function ReviewRow({
           {row.status !== "no_match" ? row.score.toFixed(2) : ""}
         </td>
         <td className={"px-4 py-2 text-sm " + (statusTone[row.status] ?? "")}>
+          {row.status === "matched_fund" && (
+            <Database className="mr-1 inline size-3" />
+          )}
           {statusLabel(row, decision)}
         </td>
       </tr>

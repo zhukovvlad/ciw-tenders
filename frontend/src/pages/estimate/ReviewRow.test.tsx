@@ -27,8 +27,31 @@ function tableWrap(ui: React.ReactNode) {
   )
 }
 const reviewRow = MOCK_ROWS.find((r) => r.status === "needs_review")!
+const confidentRow = MOCK_ROWS.find((r) => r.status === "confident")!
+const fundRow = { ...confidentRow, status: "matched_fund" as const }
 
 describe("ReviewRow", () => {
+  it("строка со статусом matched_fund показывает бейдж «из фонда»", () => {
+    render(
+      tableWrap(
+        <ReviewRow
+          row={fundRow}
+          decision={{ kind: "pending" }}
+          expanded={false}
+          onToggle={vi.fn()}
+          onPickCandidate={vi.fn()}
+          onManualPick={vi.fn()}
+          onConfirmNoMatch={vi.fn()}
+        />
+      )
+    )
+    expect(screen.getByText(/из фонда/i)).toBeInTheDocument()
+    expect(screen.queryByText(/требует проверки/i)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/подтверждено оператором/i)
+    ).not.toBeInTheDocument()
+  })
+
   it("раскрытая спорная строка показывает 3 кандидата", () => {
     render(
       tableWrap(
