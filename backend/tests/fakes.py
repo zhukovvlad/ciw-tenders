@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 
+from app.domain.decision_fund import FundHit
 from app.domain.entities import (
     ArticleCandidate,
     ClassifiableNode,
@@ -30,6 +32,7 @@ from app.domain.errors import StorageError, TokenError
 from app.domain.ports import (
     ArticleImportRepository,
     ArticleRepository,
+    DecisionFundRepository,
     Embedder,
     EstimateRepository,
     LLMMatcher,
@@ -608,3 +611,44 @@ class FakeWorkTypeClassifier(WorkTypeClassifier):
     def classify(self, items: list[NodeToClassify]) -> list[WorkClass]:
         self.calls.append(items)
         return [self._verdicts.get(i.name, self._default) for i in items]
+
+
+class FakeDecisionFundRepository(DecisionFundRepository):
+    """In-memory зеркало SqlAlchemyDecisionFundRepository.
+
+    ЧЕСТЕН ПО ЖИВОСТИ: реальный репозиторий фильтрует lookup JOIN-ом к каталогу
+    (мёртвые article_id — удалённые статьи — отпадают). Фейк воспроизводит это
+    через denylist `dead_ids` (по умолчанию пуст → всё живо, сервис-тесты Task 5/6
+    не ломаются на честности фейка).
+    """
+
+    def __init__(self) -> None:
+        # (hash, version) -> {article_id -> FundHit}
+        self.entries: dict[tuple[str, int], dict[int, FundHit]] = {}
+        self.dead_ids: set[int] = set()
+
+    def lookup(
+        self, key_hashes: Sequence[str], crumb_version: int
+    ) -> dict[str, list[FundHit]]:
+        out: dict[str, list[FundHit]] = {}
+        for h in key_hashes:
+            hits = [
+                hit
+                for hit in self.entries.get((h, crumb_version), {}).values()
+                if hit.article_id not in self.dead_ids
+            ]
+            if hits:
+                out[h] = hits
+        return out
+
+    def upsert(self, entries: Sequence) -> None:
+        for e in entries:
+            bucket = self.entries.setdefault((e.cache_key_hash, e.crumb_version), {})
+            # фейк хранит FundHit напрямую (тест задаёт code/name через seed_hit-хелпер)
+            bucket.setdefault(e.article_id, FundHit(e.article_id, "", ""))
+
+    def clear(self) -> None:
+        self.entries.clear()
+
+    def seed_hit(self, key_hash: str, version: int, hit: FundHit) -> None:  # тест-хелпер
+        self.entries.setdefault((key_hash, version), {})[hit.article_id] = hit

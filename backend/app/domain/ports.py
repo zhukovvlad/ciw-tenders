@@ -7,7 +7,9 @@ Inversion Principle. Конкретные реализации живут в inf
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 
+from app.domain.decision_fund import FundEntry, FundHit
 from app.domain.entities import (
     ArticleCandidate,
     BenchmarkNodeSeed,
@@ -304,6 +306,23 @@ class WorkTypeClassifier(ABC):
     def classify(self, items: list[NodeToClassify]) -> list[WorkClass]:
         """Возврат выровнен по items. При сбое/неоднозначности → WorkClass.UNSURE."""
         ...
+
+
+class DecisionFundRepository(ABC):
+    """Золотой фонд решений: exact-match кэш подтверждённых человеком сопоставлений."""
+
+    @abstractmethod
+    def lookup(
+        self, key_hashes: Sequence[str], crumb_version: int
+    ) -> dict[str, list[FundHit]]:
+        """Живые попадания (article_id жив в каталоге) по хешам ключей строго для версии."""
+        ...
+
+    @abstractmethod
+    def upsert(self, entries: Sequence[FundEntry]) -> None: ...
+
+    @abstractmethod
+    def clear(self) -> None: ...
 
 
 class BenchmarkRepository(ABC):
