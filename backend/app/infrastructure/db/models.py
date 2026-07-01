@@ -12,6 +12,7 @@ from sqlalchemy import (
     Double,
     ForeignKey,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -84,6 +85,9 @@ class EstimateModel(Base):
     original_object_key: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="pending")
     status_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_reference: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -158,3 +162,30 @@ class BenchmarkNodeModel(Base):
     expected_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     expected_article_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     expected_article_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DecisionFundModel(Base):
+    __tablename__ = "decision_fund"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cache_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    cache_key: Mapped[str] = mapped_column(Text, nullable=False)  # дебаг, не уникальный
+    crumb_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    article_id: Mapped[int] = mapped_column(Integer, nullable=False)  # БЕЗ FK (см. спеку §4.1)
+    votes: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    origin: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'human_review'")
+    )
+    source_estimate_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_row_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("cache_key_hash", "crumb_version", "article_id",
+                         name="uq_decision_fund_key_version_article"),
+    )
