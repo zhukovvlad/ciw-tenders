@@ -275,7 +275,7 @@ def test_rebuild_as_admin_rebuilds_fund() -> None:
     repo.set_reference(eid, True)
     client = _client(repo, storage, fund, user=_user(role=Role.ADMIN))
     resp = client.post("/api/estimates/fund/rebuild")
-    assert resp.status_code == 202
+    assert resp.status_code == 200
     assert resp.json() == {"status": "rebuilt"}
     assert fund.entries  # rebuild пере-запромоутил reference-сметы
 

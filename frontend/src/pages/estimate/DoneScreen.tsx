@@ -34,13 +34,17 @@ export function DoneScreen({
       return
     }
     setInFund(next)
-    setReference(estimateId, next).catch((err: unknown) => {
-      console.error(err)
-      setInFund(!next)
-      toast.error(
-        err instanceof Error ? err.message : "Не удалось обновить фонд решений"
-      )
-    })
+    setReference(estimateId, next)
+      .then((r) => setInFund(r.is_reference))
+      .catch((err: unknown) => {
+        console.error(err)
+        setInFund(!next)
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Не удалось обновить фонд решений"
+        )
+      })
   }
 
   return (
@@ -77,6 +81,7 @@ export function DoneScreen({
           checked={inFund}
           disabled={estimateId === null}
           onCheckedChange={handleToggleFund}
+          aria-label="Эталонная смета — добавить в фонд решений"
         />
       </div>
       <div className="mt-4">

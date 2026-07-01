@@ -70,12 +70,15 @@ describe("estimates api list/delete", () => {
     expect(spy).toHaveBeenCalledWith("DELETE", "/estimates/7")
   })
 
-  it("setReference шлёт PATCH /estimates/{id}/reference с is_reference", async () => {
-    const spy = vi.spyOn(client, "apiSend").mockResolvedValue(undefined)
-    await setReference(7, true)
+  it("setReference шлёт PATCH /estimates/{id}/reference с is_reference и возвращает распарсенный DTO", async () => {
+    const spy = vi
+      .spyOn(client, "apiSend")
+      .mockResolvedValue({ is_reference: true, promoted: 3 })
+    const result = await setReference(7, true)
     expect(spy).toHaveBeenCalledWith("PATCH", "/estimates/7/reference", {
       is_reference: true,
     })
+    expect(result).toEqual({ is_reference: true, promoted: 3 })
   })
 
   it("setReference(id, false) снимает смету из фонда", async () => {

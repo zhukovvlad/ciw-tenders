@@ -184,7 +184,7 @@ def toggle_reference(
     return {"is_reference": False, "promoted": 0}
 
 
-@router.post("/fund/rebuild", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/fund/rebuild", status_code=status.HTTP_200_OK)
 def rebuild_fund(
     user: User = Depends(require_admin),
     fund_service: DecisionFundService = Depends(get_decision_fund_service),

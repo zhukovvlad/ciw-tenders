@@ -42,25 +42,29 @@ class SqlAlchemyDecisionFundRepository:
         return out
 
     def upsert(self, entries: Sequence[FundEntry]) -> None:
-        for e in entries:
-            stmt = (
-                pg_insert(DecisionFundModel)
-                .values(
-                    cache_key_hash=e.cache_key_hash, cache_key=e.cache_key,
-                    crumb_version=e.crumb_version, article_id=e.article_id,
-                    source_estimate_id=e.source_estimate_id, source_row_id=e.source_row_id,
-                )
-                .on_conflict_do_update(
-                    constraint="uq_decision_fund_key_version_article",
-                    set_={
-                        "votes": DecisionFundModel.votes + 1,
-                        "source_estimate_id": e.source_estimate_id,
-                        "source_row_id": e.source_row_id,
-                        "updated_at": text("now()"),
-                    },
-                )
+        if not entries:
+            return
+        stmt = (
+            pg_insert(DecisionFundModel)
+            .values([
+                {
+                    "cache_key_hash": e.cache_key_hash, "cache_key": e.cache_key,
+                    "crumb_version": e.crumb_version, "article_id": e.article_id,
+                    "source_estimate_id": e.source_estimate_id, "source_row_id": e.source_row_id,
+                }
+                for e in entries
+            ])
+            .on_conflict_do_update(
+                constraint="uq_decision_fund_key_version_article",
+                set_={
+                    "votes": DecisionFundModel.votes + 1,
+                    "source_estimate_id": pg_insert(DecisionFundModel).excluded.source_estimate_id,
+                    "source_row_id": pg_insert(DecisionFundModel).excluded.source_row_id,
+                    "updated_at": text("now()"),
+                },
             )
-            self._session.execute(stmt)
+        )
+        self._session.execute(stmt)
         self._session.commit()  # один commit на весь промоушен (атомарность + латентность)
 
     def clear(self) -> None:

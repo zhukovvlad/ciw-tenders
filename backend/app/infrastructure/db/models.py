@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Double,
     ForeignKey,
+    Index,
     Integer,
     SmallInteger,
     String,
@@ -188,4 +189,5 @@ class DecisionFundModel(Base):
     __table_args__ = (
         UniqueConstraint("cache_key_hash", "crumb_version", "article_id",
                          name="uq_decision_fund_key_version_article"),
+        Index("ix_decision_fund_lookup", "cache_key_hash", "crumb_version"),
     )
