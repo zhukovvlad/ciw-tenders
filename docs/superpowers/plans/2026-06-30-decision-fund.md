@@ -842,7 +842,7 @@ def test_crumb_version_bump_misses_old_keys() -> None:
         return hits
 ```
 
-(Импорты домена; флаг сохранить как `self._apply_fund_enabled = apply_fund`.) Счётчик добавить в сигнатуру/тело `_log_summary` (новый аргумент `fund_hits`, лог `extra={... "matched_fund": fund_hits}`).
+(Импорты домена; флаг сохранить как `self._apply_fund_enabled = apply_fund`. `_log_summary` — по шагам (3)-(4) выше.)
 
 В `deps.py` `build_estimate_matching_service(session, *, apply_fund: bool = True)`: создать `SqlAlchemyDecisionFundRepository(session)`, передать `fund=...` и `apply_fund=apply_fund` в конструктор. (FastAPI DI-путь — тоже прокинуть фонд; web по умолчанию `apply_fund=True`.)
 
