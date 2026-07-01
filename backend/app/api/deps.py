@@ -35,6 +35,7 @@ from app.infrastructure.ai.openrouter_matcher import OpenRouterLLMMatcher
 from app.infrastructure.auth.jwt_token_service import JwtTokenService
 from app.infrastructure.auth.password_hasher import Argon2PasswordHasher
 from app.infrastructure.db.article_repository import SqlAlchemyArticleRepository
+from app.infrastructure.db.decision_fund_repository import SqlAlchemyDecisionFundRepository
 from app.infrastructure.db.estimate_repository import SqlAlchemyEstimateRepository
 from app.infrastructure.db.import_repository import SqlAlchemyArticleImportRepository
 from app.infrastructure.db.session import get_session
@@ -172,15 +173,22 @@ def get_work_classifier() -> WorkTypeClassifier:
     )
 
 
-def build_estimate_matching_service(session: Session) -> EstimateMatchingService:
+def build_estimate_matching_service(
+    session: Session, *, apply_fund: bool = True
+) -> EstimateMatchingService:
     """Фабрика для Celery-задачи (вне FastAPI DI): репозитории — на ПЕРЕДАННОЙ сессии
     (пиннутый коннект задачи), а embedder/LLM-матчер берём из кэшированных синглтонов
     `get_embedder()`/`get_llm_matcher()`. Они stateless (конфиг + HTTP-клиент), поэтому
     переиспользуются процессом воркера — без создания нового httpx-клиента на каждую
-    задачу и каждый gate-retry (иначе течёт пул сокетов на долгоживущем воркере)."""
+    задачу и каждый gate-retry (иначе течёт пул сокетов на долгоживущем воркере).
+
+    `apply_fund` — выключатель стадии золотого фонда (по умолчанию включена; веб/Celery
+    используют дефолт True, офлайн-харнес метрики (`eval_matching.py`) передаёт False —
+    держит фонд held-out от собственной оценки)."""
     settings = get_settings()
     articles = SqlAlchemyArticleRepository(session)
     estimates = SqlAlchemyEstimateRepository(session)
+    fund = SqlAlchemyDecisionFundRepository(session)
     matcher = MatchingService(
         articles,
         embedder=None,
@@ -194,6 +202,8 @@ def build_estimate_matching_service(session: Session) -> EstimateMatchingService
         estimates=estimates,
         articles=articles,
         classifier=get_work_classifier(),
+        fund=fund,
+        apply_fund=apply_fund,
     )
 
 
