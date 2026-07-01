@@ -242,8 +242,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0007"
-down_revision = "0006"
+revision: str = "0007"
+down_revision: str = "0006"
 branch_labels = None
 depends_on = None
 
@@ -686,7 +686,10 @@ class DecisionFundService:
                 source_estimate_id=estimate_id, source_row_id=r.row_id,
             ))
         self._fund.upsert(entries)
-        self._estimates.set_reference(estimate_id, True)
+        # флаг ставим только если реально что-то запромоутили — иначе «пустая» эталонная смета
+        # (0 confirmed-строк), которую rebuild гоняет вхолостую. Эндпоинт вернёт count → UI подскажет.
+        if entries:
+            self._estimates.set_reference(estimate_id, True)
         return len(entries)
 
     def unreference(self, estimate_id: int) -> None:
@@ -778,20 +781,43 @@ def test_crumb_version_bump_misses_old_keys() -> None:
 
 - [ ] **Step 3: Реализация**
 
-В `__init__` `EstimateMatchingService` добавить параметры `fund: DecisionFundRepository`, `apply_fund: bool = True` и сохранить. В `match_estimate` вставить стадию ПОСЛЕ `_embed_nodes` и ПЕРЕД `_match_nodes`, и сделать гейт каталога условным:
+В `__init__` `EstimateMatchingService` добавить параметры `fund: DecisionFundRepository`, `apply_fund: bool = True` и сохранить (`self._fund`, `self._apply_fund_enabled`).
+
+**КРИТИЧНО — пред-инициализация и ОБА call-site.** `_log_summary` зовётся в ДВУХ местах `match_estimate`:
+успех (строка 84) и `except Exception` (строка 91). Поэтому `excluded`/`counts` предынициализированы ДО `try`
+(строки 59-60) — чтобы except-путь мог их передать, даже если исключение прилетело раньше присвоения. Новый
+`fund_hits` **обязан** следовать тому же паттерну, иначе except-путь бросит `UnboundLocalError` и замаскирует
+исходное исключение (а happy-path тесты этого не поймают).
+
+(1) Рядом с `excluded = 0` (строка 59) добавить:
+
+```python
+        fund_hits = 0
+```
+
+(2) В `try`, заменить существующий безусловный блок гейта (строки 67-72) на: стадия фонда → условный гейт:
 
 ```python
             self._embed_nodes(estimate_id)
-            fund_hits = self._apply_fund(estimate_id)        # NEW: до арбитра
-            remaining = self._estimates.count_unfinished_nodes(estimate_id)  # pending после фонда
-            if remaining:                                    # гейт только если есть не-фондовое
+            logger.debug("Матчинг %s: эмбеддинг завершён", estimate_id)
+            fund_hits = self._apply_fund(estimate_id)  # NEW: до арбитра
+            # гейт каталога — только если после фонда остались не-фондовые matchable (pending).
+            # На полностью-фондовой смете (0 pending) спурьозный DictionaryNotReadyError не летит.
+            if self._estimates.count_unfinished_nodes(estimate_id):
                 total, pending = self._articles.matching_readiness()
                 if total == 0 or pending > 0:
                     raise DictionaryNotReadyError(total=total, pending=pending)
             counts = self._match_nodes(estimate_id)
 ```
 
-(Существующий безусловный блок `matching_readiness` заменяется этим условным. `fund_hits` прокинуть в `_log_summary`.)
+(3) **Оба** вызова `_log_summary` (строки 84 и 91) → добавить `fund_hits`:
+
+```python
+            self._log_summary(estimate_id, counts, excluded, fund_hits, start)
+```
+
+(4) Сигнатуру `_log_summary` расширить `fund_hits: int` (после `excluded`), добавить в формат-строку
+(`… matched_fund=%d …`, аргумент `fund_hits`) и в `extra={... "matched_fund": fund_hits}`.
 
 Метод:
 
@@ -823,6 +849,14 @@ def test_crumb_version_bump_misses_old_keys() -> None:
 В `eval_matching.py` (Task §7 спеки): `build_estimate_matching_service(session, apply_fund=False).match_estimate(estimate.id)`.
 
 - [ ] **Step 4: Прогон файла** — `PYTHONIOENCODING=utf-8 uv run pytest tests/test_estimate_matching_service.py -q` → PASS (новые + существующие). `uv run ruff check .` → чисто.
+
+> **Осознать при прогоне (не баги):** (1) условие гейта — `count_unfinished_nodes` (= `status=='pending'`),
+> чуть шире спецовского «matchable» (pending+вектор): транзиентно-безвекторный pending тоже даёт `remaining>0`
+> → гейт проверится. Безопасно (спурьозных срабатываний строго ≤ сегодняшних), отдельный `count_matchable` не
+> заводим. (2) Побочка: смета со ВСЕМИ excluded (0 pending) теперь пропускает гейт → READY (раньше безусловный
+> гейт мог кинуть `DictionaryNotReadyError` на пустом каталоге). Это починка (все-ORG смете каталог не нужен),
+> но если существующий тест лочил старое поведение на 0-pending смете — он споткнётся здесь; поправь тест под
+> новое (корректное) поведение.
 
 > **Заметка реализатору (в тест ре-прогона):** спасённый фонд-хит без вектора на ре-триггере один раз
 > переэмбедится (`fetch_unembedded_nodes` исключает только `excluded`, не `matched_fund`) — безвредно
@@ -888,10 +922,10 @@ def toggle_reference(
     if est is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
     if body.is_reference:
-        fund_service.promote(estimate_id)
-    else:
-        fund_service.unreference(estimate_id)
-    return {"is_reference": body.is_reference}
+        promoted = fund_service.promote(estimate_id)  # 0 → is_reference не выставлен (см. Task 5)
+        return {"is_reference": promoted > 0, "promoted": promoted}
+    fund_service.unreference(estimate_id)
+    return {"is_reference": False, "promoted": 0}
 
 
 @router.post("/fund/rebuild", status_code=status.HTTP_202_ACCEPTED)
