@@ -126,6 +126,7 @@ class EstimateRowStatus(StrEnum):
     NEEDS_REVIEW = "needs_review"
     NO_MATCH = "no_match"
     ERROR = "error"
+    MATCHED_FUND = "matched_fund"  # решено золотым фондом мимо арбитра (виден, переопределяем)
 
 
 class ReviewStatus(StrEnum):
