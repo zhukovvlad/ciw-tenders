@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Download } from "lucide-react"
 import { toast } from "sonner"
 import type { ReviewState } from "@/lib/types"
@@ -21,6 +21,7 @@ export function DoneScreen({
   estimateId,
 }: DoneScreenProps) {
   const [inFund, setInFund] = useState(false)
+  const toggleSeq = useRef(0)
   const matched = state.rows.filter(
     (r) => decisionFor(state, r).kind === "confirmed"
   ).length
@@ -33,12 +34,15 @@ export function DoneScreen({
       toast.error("Не удалось определить смету для добавления в фонд")
       return
     }
+    const seq = ++toggleSeq.current
     setInFund(next)
     setReference(estimateId, next)
-      .then((r) => setInFund(r.is_reference))
+      .then((r) => {
+        if (seq === toggleSeq.current) setInFund(r.is_reference)
+      })
       .catch((err: unknown) => {
+        if (seq === toggleSeq.current) setInFund(!next)
         console.error(err)
-        setInFund(!next)
         toast.error(
           err instanceof Error
             ? err.message

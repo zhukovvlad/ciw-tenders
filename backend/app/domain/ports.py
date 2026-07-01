@@ -291,6 +291,11 @@ class EstimateRepository(ABC):
         ...
 
     @abstractmethod
+    def is_reference(self, estimate_id: int) -> bool:
+        """Факт из БД: состоит ли смета в золотом фонде (is_reference)."""
+        ...
+
+    @abstractmethod
     def fetch_reference_estimate_ids(self) -> list[int]:
         """Все id смет с is_reference=True."""
         ...

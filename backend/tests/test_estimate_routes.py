@@ -240,6 +240,21 @@ def test_toggle_reference_promotes_and_sets_flag() -> None:
     assert repo.is_reference(eid) is True and fund.entries  # запромоутилось
 
 
+def test_toggle_reference_on_already_reference_empty_repromote_reports_db_fact() -> None:
+    # смета уже в фонде (is_reference=True); повторный ON с 0 промоутабельных строк —
+    # ответ обязан отражать ФАКТ БД (True), а не promoted>0 (иначе расхождение с реальным флагом)
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    fund = FakeDecisionFundRepository()
+    client = _client(repo, storage, fund)
+    eid = seed_estimate_with_rows(repo, [Row("образец работы", "no_match", "unreviewed")])
+    repo.estimates[eid] = replace(repo.estimates[eid], user_id=2)
+    repo.set_reference(eid, True)
+    resp = client.patch(f"/api/estimates/{eid}/reference", json={"is_reference": True})
+    assert resp.status_code == 200
+    assert resp.json() == {"is_reference": True, "promoted": 0}
+    assert repo.is_reference(eid) is True
+
+
 def test_toggle_reference_off_unreferences() -> None:
     repo, storage = FakeEstimateRepository(), FakeObjectStorage()
     fund = FakeDecisionFundRepository()

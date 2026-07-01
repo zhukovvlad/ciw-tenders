@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { DoneScreen } from "@/pages/estimate/DoneScreen"
 import { initReview } from "@/lib/reviewState"
@@ -78,5 +78,40 @@ describe("DoneScreen", () => {
     await vi.waitFor(() => {
       expect(toggle).toHaveAttribute("aria-checked", "false")
     })
+  })
+
+  it("гонка двойного клика: побеждает ответ на последний запрос (latest-wins)", async () => {
+    let resolveFirst: (v: { is_reference: boolean; promoted: number }) => void
+    const first = new Promise<{ is_reference: boolean; promoted: number }>(
+      (resolve) => {
+        resolveFirst = resolve
+      }
+    )
+    vi.mocked(setReference)
+      .mockReturnValueOnce(first)
+      .mockResolvedValueOnce({ is_reference: false, promoted: 0 })
+    render(
+      <DoneScreen
+        state={initReview("смета.xlsx", MOCK_ROWS)}
+        onExport={vi.fn()}
+        onNewEstimate={vi.fn()}
+        estimateId={1}
+      />
+    )
+    const toggle = screen.getByRole("switch")
+    // первый клик (ON) — ответ придёт позже
+    await userEvent.click(toggle)
+    // второй клик (OFF) — ответ приходит раньше и должен победить
+    await userEvent.click(toggle)
+    await vi.waitFor(() => {
+      expect(toggle).toHaveAttribute("aria-checked", "false")
+    })
+    // устаревший ответ первого (ON) запроса приходит последним, с ДРУГИМ is_reference —
+    // не должен перезаписать актуальное состояние (OFF)
+    await act(async () => {
+      resolveFirst!({ is_reference: true, promoted: 1 })
+      await first
+    })
+    expect(toggle).toHaveAttribute("aria-checked", "false")
   })
 })

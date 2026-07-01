@@ -611,7 +611,7 @@ class FakeEstimateRepository(EstimateRepository):
     def fetch_reference_estimate_ids(self) -> list[int]:
         return list(self.reference_ids)
 
-    def is_reference(self, estimate_id: int) -> bool:  # тест-читатель (не часть порта)
+    def is_reference(self, estimate_id: int) -> bool:
         return estimate_id in self.reference_ids
 
     def fetch_promotable_rows(self, estimate_id: int) -> list[PromotableRow]:

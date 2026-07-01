@@ -370,6 +370,13 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
         )
         self._session.commit()
 
+    def is_reference(self, estimate_id: int) -> bool:
+        return bool(
+            self._session.scalar(
+                select(EstimateModel.is_reference).where(EstimateModel.id == estimate_id)
+            )
+        )
+
     def fetch_reference_estimate_ids(self) -> list[int]:
         return list(
             self._session.scalars(

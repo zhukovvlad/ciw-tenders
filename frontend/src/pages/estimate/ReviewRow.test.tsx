@@ -50,6 +50,8 @@ describe("ReviewRow", () => {
     expect(
       screen.queryByText(/подтверждено оператором/i)
     ).not.toBeInTheDocument()
+    // score у фонд-хита нет by design (спека §4.3) — ячейка должна быть пустой, не «0.00»
+    expect(screen.queryByText("0.00")).not.toBeInTheDocument()
   })
 
   it("раскрытая спорная строка показывает 3 кандидата", () => {

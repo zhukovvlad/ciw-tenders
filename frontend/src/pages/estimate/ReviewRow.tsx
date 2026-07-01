@@ -88,7 +88,9 @@ export function ReviewRow({
           )}
         </td>
         <td className="px-4 py-2 text-right font-mono text-xs text-muted-foreground">
-          {row.status !== "no_match" ? row.score.toFixed(2) : ""}
+          {row.status !== "no_match" && row.status !== "matched_fund"
+            ? row.score.toFixed(2)
+            : ""}
         </td>
         <td className={"px-4 py-2 text-sm " + (statusTone[row.status] ?? "")}>
           {row.status === "matched_fund" && (

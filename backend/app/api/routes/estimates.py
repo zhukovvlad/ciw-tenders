@@ -179,7 +179,7 @@ def toggle_reference(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
     if body.is_reference:
         promoted = fund_service.promote(estimate_id)  # 0 → is_reference не выставлен (см. Task 5)
-        return {"is_reference": promoted > 0, "promoted": promoted}
+        return {"is_reference": repository.is_reference(estimate_id), "promoted": promoted}
     fund_service.unreference(estimate_id)
     return {"is_reference": False, "promoted": 0}
 
