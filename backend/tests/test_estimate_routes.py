@@ -2,18 +2,33 @@ from __future__ import annotations
 
 import io
 from collections.abc import Callable
+from dataclasses import replace
 
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_current_user, get_estimate_service, get_settings
+from app.api.deps import (
+    get_current_user,
+    get_decision_fund_service,
+    get_estimate_repository,
+    get_estimate_service,
+    get_settings,
+)
 from app.core.config import Settings
 from app.domain.entities import Role, User
 from app.main import app
+from app.services.decision_fund_service import DecisionFundService
 from app.services.estimate_parser import EstimateParser
 from app.services.estimate_service import EstimateService
-from tests.fakes import FakeEstimateRepository, FakeObjectStorage, FakeTaskQueue
+from tests.fakes import (
+    FakeDecisionFundRepository,
+    FakeEstimateRepository,
+    FakeObjectStorage,
+    FakeTaskQueue,
+    Row,
+    seed_estimate_with_rows,
+)
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -50,10 +65,25 @@ def _svc_factory(repo: FakeEstimateRepository, storage: FakeObjectStorage):
 _DEFAULT_USER = _user()
 
 
-def _client(repo, storage, user=_DEFAULT_USER) -> TestClient:
+def _client(repo, storage, fund=None, user=_DEFAULT_USER) -> TestClient:
     app.dependency_overrides[get_current_user] = user
     app.dependency_overrides[get_estimate_service] = _svc_factory(repo, storage)
+    app.dependency_overrides[get_estimate_repository] = lambda: repo
+    if fund is not None:
+        app.dependency_overrides[get_decision_fund_service] = lambda: DecisionFundService(
+            repo, fund
+        )
     return TestClient(app)
+
+
+def _seed_reviewed(repo: FakeEstimateRepository) -> int:
+    """Смета с одной confirmed-строкой владельца id=2 — готова к промоушену в фонд."""
+    eid = seed_estimate_with_rows(
+        repo, [Row("образец работы", "needs_review", "confirmed", final_article_id=5)]
+    )
+    est = repo.estimates[eid]
+    repo.estimates[eid] = replace(est, user_id=2)
+    return eid
 
 
 def test_upload_creates_estimate() -> None:
@@ -195,3 +225,68 @@ def test_upload_response_carries_anomalies_and_outline_overrides() -> None:
     body = resp.json()
     assert any(a["kind"] == "duplicate_code" for a in body["anomalies"])
     assert "outline_overrides" in body
+
+
+def test_toggle_reference_promotes_and_sets_flag() -> None:
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    fund = FakeDecisionFundRepository()
+    # смета с confirmed-строкой; тумблер ON → is_reference + промоушен
+    client = _client(repo, storage, fund)
+    eid = _seed_reviewed(repo)  # хелпер: смета с confirmed-строкой
+    resp = client.patch(f"/api/estimates/{eid}/reference", json={"is_reference": True})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"is_reference": True, "promoted": 1}
+    assert repo.is_reference(eid) is True and fund.entries  # запромоутилось
+
+
+def test_toggle_reference_off_unreferences() -> None:
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    fund = FakeDecisionFundRepository()
+    client = _client(repo, storage, fund)
+    eid = _seed_reviewed(repo)
+    repo.set_reference(eid, True)
+    resp = client.patch(f"/api/estimates/{eid}/reference", json={"is_reference": False})
+    assert resp.status_code == 200
+    assert resp.json() == {"is_reference": False, "promoted": 0}
+    assert repo.is_reference(eid) is False
+
+
+def test_toggle_reference_foreign_estimate_404() -> None:
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    fund = FakeDecisionFundRepository()
+    eid = _seed_reviewed(repo)  # владелец id=2
+    client = _client(repo, storage, fund, user=_user(uid=9))  # чужой, не админ
+    resp = client.patch(f"/api/estimates/{eid}/reference", json={"is_reference": True})
+    assert resp.status_code == 404
+
+
+def test_rebuild_requires_admin() -> None:
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    fund = FakeDecisionFundRepository()
+    client = _client(repo, storage, fund, user=_user(role=Role.USER))
+    assert client.post("/api/estimates/fund/rebuild").status_code == 403
+
+
+def test_rebuild_as_admin_rebuilds_fund() -> None:
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    fund = FakeDecisionFundRepository()
+    eid = _seed_reviewed(repo)
+    repo.set_reference(eid, True)
+    client = _client(repo, storage, fund, user=_user(role=Role.ADMIN))
+    resp = client.post("/api/estimates/fund/rebuild")
+    assert resp.status_code == 202
+    assert resp.json() == {"status": "rebuilt"}
+    assert fund.entries  # rebuild пере-запромоутил reference-сметы
+
+
+def test_row_status_matched_fund_serializes() -> None:
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    eid = seed_estimate_with_rows(
+        repo, [Row("образец работы", "matched_fund", "unreviewed")]
+    )
+    repo.estimates[eid] = replace(repo.estimates[eid], user_id=2)
+    client = _client(repo, storage)
+    resp = client.get(f"/api/estimates/{eid}")
+    assert resp.status_code == 200
+    assert resp.json()["rows"][0]["status"] == "matched_fund"

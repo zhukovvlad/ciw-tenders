@@ -18,6 +18,7 @@ from app.domain.errors import TokenError
 from app.domain.ports import (
     ArticleImportRepository,
     ArticleRepository,
+    DecisionFundRepository,
     Embedder,
     EstimateRepository,
     LLMMatcher,
@@ -43,6 +44,7 @@ from app.infrastructure.db.user_repository import SqlAlchemyUserRepository
 from app.infrastructure.storage.s3_object_storage import S3ObjectStorage
 from app.services.article_service import ArticleService
 from app.services.auth_service import AuthService
+from app.services.decision_fund_service import DecisionFundService
 from app.services.estimate_export_service import EstimateExportService
 from app.services.estimate_matching_service import EstimateMatchingService
 from app.services.estimate_parser import EstimateParser
@@ -242,6 +244,19 @@ def get_object_storage() -> ObjectStorage:
 
 def get_estimate_repository(session: Session = Depends(get_session)) -> EstimateRepository:
     return SqlAlchemyEstimateRepository(session)
+
+
+def get_decision_fund_repository(
+    session: Session = Depends(get_session),
+) -> DecisionFundRepository:
+    return SqlAlchemyDecisionFundRepository(session)
+
+
+def get_decision_fund_service(
+    estimates: EstimateRepository = Depends(get_estimate_repository),
+    fund: DecisionFundRepository = Depends(get_decision_fund_repository),
+) -> DecisionFundService:
+    return DecisionFundService(estimates, fund)
 
 
 def get_estimate_review_service(

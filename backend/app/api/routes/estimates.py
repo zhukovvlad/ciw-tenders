@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.deps import (
     get_current_user,
+    get_decision_fund_service,
     get_estimate_export_service,
     get_estimate_repository,
     get_estimate_review_service,
@@ -17,12 +18,14 @@ from app.api.deps import (
     get_settings,
     get_stale_sweeper,
     get_task_queue,
+    require_admin,
 )
 from app.api.schemas import (
     EstimateDetailOut,
     EstimateRowOut,
     EstimateSummaryOut,
     EstimateUploadResponse,
+    ReferenceToggleIn,
     ReviewDecisionIn,
     StructuralAnomalyOut,
 )
@@ -30,6 +33,7 @@ from app.core.config import Settings
 from app.domain.entities import Role, User
 from app.domain.errors import InvalidReviewActionError, RowNotMatchedError, StorageError
 from app.domain.ports import EstimateRepository, TaskQueue
+from app.services.decision_fund_service import DecisionFundService
 from app.services.estimate_export_service import EstimateExportService
 from app.services.estimate_review_service import EstimateReviewService
 from app.services.estimate_service import EstimateService
@@ -160,6 +164,33 @@ def review_row(
     except InvalidReviewActionError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     return EstimateRowOut.from_entity(row)
+
+
+@router.patch("/{estimate_id}/reference", status_code=status.HTTP_200_OK)
+def toggle_reference(
+    estimate_id: int,
+    body: ReferenceToggleIn,
+    user: User = Depends(get_current_user),
+    fund_service: DecisionFundService = Depends(get_decision_fund_service),
+    repository: EstimateRepository = Depends(get_estimate_repository),
+) -> dict:
+    est = repository.get(estimate_id, user.id or 0, is_admin=user.role == Role.ADMIN)
+    if est is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
+    if body.is_reference:
+        promoted = fund_service.promote(estimate_id)  # 0 → is_reference не выставлен (см. Task 5)
+        return {"is_reference": promoted > 0, "promoted": promoted}
+    fund_service.unreference(estimate_id)
+    return {"is_reference": False, "promoted": 0}
+
+
+@router.post("/fund/rebuild", status_code=status.HTTP_202_ACCEPTED)
+def rebuild_fund(
+    user: User = Depends(require_admin),
+    fund_service: DecisionFundService = Depends(get_decision_fund_service),
+) -> dict:
+    fund_service.rebuild()
+    return {"status": "rebuilt"}
 
 
 @router.get("/{estimate_id}/export")

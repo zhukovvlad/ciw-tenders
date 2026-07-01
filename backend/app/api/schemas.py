@@ -192,6 +192,10 @@ class ReviewDecisionIn(BaseModel):
     article_id: int | None = None
 
 
+class ReferenceToggleIn(BaseModel):
+    is_reference: bool
+
+
 class EstimateDetailOut(BaseModel):
     id: int
     filename: str
