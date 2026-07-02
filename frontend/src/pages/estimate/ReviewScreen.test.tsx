@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useReducer } from "react"
+import { MemoryRouter } from "react-router-dom"
 import { ReviewScreen } from "@/pages/estimate/ReviewScreen"
 import { initReview, reviewReducer } from "@/lib/reviewState"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
@@ -12,12 +13,14 @@ function Wrap({ onExport = vi.fn() }: { onExport?: () => void }) {
     initReview("смета.xlsx", MOCK_ROWS)
   )
   return (
-    <ReviewScreen
-      state={state}
-      dispatch={dispatch}
-      onExport={onExport}
-      onNewEstimate={vi.fn()}
-    />
+    <MemoryRouter>
+      <ReviewScreen
+        state={state}
+        dispatch={dispatch}
+        onExport={onExport}
+        onComplete={vi.fn()}
+      />
+    </MemoryRouter>
   )
 }
 

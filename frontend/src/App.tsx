@@ -3,6 +3,7 @@ import { AuthGate } from "@/components/auth/AuthGate"
 import { AppShell } from "@/components/AppShell"
 import { AuthProvider } from "@/lib/auth/AuthContext"
 import { EstimatesPage } from "@/pages/estimate/EstimatesPage"
+import { EstimatePage } from "@/pages/estimate/EstimatePage"
 import { ArticlesPage } from "@/pages/ArticlesPage"
 import { Toaster } from "@/components/ui/sonner"
 
@@ -15,6 +16,7 @@ export function App() {
             <Routes>
               <Route path="/" element={<Navigate to="/estimates" replace />} />
               <Route path="/estimates" element={<EstimatesPage />} />
+              <Route path="/estimates/:id" element={<EstimatePage />} />
               <Route path="/articles" element={<ArticlesPage />} />
               <Route path="*" element={<Navigate to="/estimates" replace />} />
             </Routes>
