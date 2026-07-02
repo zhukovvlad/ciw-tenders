@@ -39,9 +39,11 @@ UI-откат (Task 2) опирается на инвариант «`pick`/`reje
 
 ```python
 def test_pick_and_reject_keep_ai_snapshot(client, auth_headers, estimate_repo, seed_estimate):
-    """UI-инвариант (спека editable-confident-rows, §2): ревью пишет только ось
-    review_status/final_*, AI-снимок matched_* иммутабелен — на этом держится
-    откат «вернуть рекомендацию» на фронте."""
+    """Два инварианта из спеки editable-confident-rows §2:
+    1) ревью пишет только ось review_status/final_* — AI-снимок matched_*/candidates
+       иммутабелен (на этом держится откат «вернуть рекомендацию» на фронте);
+    2) pick исходной рекомендации нормализуется в confirmed, не overridden
+       (откат confident-строки через клик по топ-3 не застревает в «Ручной выбор»)."""
     eid, nid = seed_estimate
     _match(estimate_repo, nid, EstimateRowStatus.NEEDS_REVIEW, mid=7, code="2.1",
            name="Статья", score=0.7,
@@ -402,7 +404,7 @@ onConfirmRecommendation={() => {
 - [ ] **Step 5: Прогнать тесты компонента**
 
 Run: `cd frontend && npx vitest run src/pages/estimate/ReviewRow.test.tsx`
-Expected: PASS все, включая 6 новых.
+Expected: PASS все 13 — 6 старых + 7 новых (5 `it` + 2 кейса `it.each`).
 
 - [ ] **Step 6: Смежные сьюты и typecheck**
 
