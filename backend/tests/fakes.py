@@ -436,6 +436,7 @@ class FakeEstimateRepository(EstimateRepository):
             status=self.statuses.get(est.id, est.status),
             created_at=est.created_at, rows=rows,
             status_detail=self.details.get(est.id),
+            is_reference=estimate_id in self.reference_ids,
         )
 
     @staticmethod

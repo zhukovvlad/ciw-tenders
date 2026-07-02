@@ -202,13 +202,15 @@ class EstimateDetailOut(BaseModel):
     status: str
     status_detail: str | None = None
     created_at: datetime
+    is_reference: bool = False
     rows: list[EstimateRowOut]
 
     @classmethod
     def from_entity(cls, e: Estimate) -> EstimateDetailOut:
         return cls(
             id=e.id, filename=e.filename, status=e.status, status_detail=e.status_detail,
-            created_at=e.created_at, rows=[EstimateRowOut.from_entity(r) for r in e.rows],
+            created_at=e.created_at, is_reference=e.is_reference,
+            rows=[EstimateRowOut.from_entity(r) for r in e.rows],
         )
 
 

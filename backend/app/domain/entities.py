@@ -247,6 +247,7 @@ class Estimate:
     created_at: datetime
     rows: list[StoredEstimateRow] = field(default_factory=list)
     status_detail: str | None = None
+    is_reference: bool = False  # эталонная (источник фонда) — UI гидратирует тумблер
 
 
 @dataclass(frozen=True, slots=True)

@@ -7,6 +7,12 @@ export function requiresDecision(row: MatchRow): boolean {
 export function initReview(fileName: string, rows: MatchRow[]): ReviewState {
   const decisions: Record<number, Decision> = {}
   for (const r of rows) {
+    // решения оператора персистентны на бэке (PATCH .../review) — при повторном
+    // открытии сметы гидратируем их из review_status, а не начинаем ревью с нуля
+    if (r.review_status !== "unreviewed") {
+      decisions[r.row_number] = decisionFromRow(r)
+      continue
+    }
     decisions[r.row_number] =
       (r.status === "confident" || r.status === "matched_fund") &&
       r.matched_code &&
