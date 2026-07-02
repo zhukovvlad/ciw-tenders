@@ -183,3 +183,16 @@ export async function listEstimates(): Promise<EstimateListItem[]> {
 export async function deleteEstimate(id: number): Promise<void> {
   await apiSend("DELETE", `/estimates/${id}`)
 }
+
+export async function setReference(
+  id: number,
+  value: boolean
+): Promise<{ is_reference: boolean; promoted: number }> {
+  return apiSend("PATCH", `/estimates/${id}/reference`, {
+    is_reference: value,
+  })
+}
+
+export async function rebuildFund(): Promise<void> {
+  await apiSend("POST", "/estimates/fund/rebuild")
+}

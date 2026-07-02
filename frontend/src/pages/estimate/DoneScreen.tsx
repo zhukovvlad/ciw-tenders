@@ -1,25 +1,66 @@
+import { useRef, useState } from "react"
 import { Download } from "lucide-react"
+import { toast } from "sonner"
 import type { ReviewState } from "@/lib/types"
 import { decisionFor } from "@/lib/reviewState"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
+import { setReference } from "@/lib/api/estimates"
 
 interface DoneScreenProps {
   state: ReviewState
   onExport: () => void
   onNewEstimate: () => void
+  estimateId: number | null
 }
 
 export function DoneScreen({
   state,
   onExport,
   onNewEstimate,
+  estimateId,
 }: DoneScreenProps) {
+  const [inFund, setInFund] = useState(false)
+  const toggleSeq = useRef(0)
   const matched = state.rows.filter(
     (r) => decisionFor(state, r).kind === "confirmed"
   ).length
   const noPair = state.rows.filter(
     (r) => decisionFor(state, r).kind === "no_match"
   ).length
+
+  function handleToggleFund(next: boolean) {
+    if (estimateId === null) {
+      toast.error("Не удалось определить смету для добавления в фонд")
+      return
+    }
+    const seq = ++toggleSeq.current
+    setInFund(next)
+    setReference(estimateId, next)
+      .then((r) => {
+        if (seq !== toggleSeq.current) return
+        setInFund(r.is_reference)
+        if (next && !r.is_reference && r.promoted === 0) {
+          // бэк не ставит is_reference при 0 промоученных строк (toggle_reference) —
+          // объясняем отщёлкивание, иначе тумблер выглядит сломанным
+          toast.info(
+            "Смета не добавлена в фонд: нет подтверждённых решений. " +
+              "Подтвердите или выберите статьи на шаге проверки и включите " +
+              "тумблер снова."
+          )
+        }
+      })
+      .catch((err: unknown) => {
+        if (seq === toggleSeq.current) setInFund(!next)
+        console.error(err)
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Не удалось обновить фонд решений"
+        )
+      })
+  }
+
   return (
     <div className="mx-auto max-w-md p-10 text-center">
       <div className="mb-6 flex justify-center gap-10">
@@ -46,6 +87,17 @@ export function DoneScreen({
         <Download className="size-4" />
         Скачать обогащённый .xlsx
       </Button>
+      <div className="mt-6 flex items-center justify-center gap-3 text-left">
+        <span className="text-sm text-[var(--ds-text-2)]">
+          Эталонная смета — добавить в фонд решений
+        </span>
+        <Switch
+          checked={inFund}
+          disabled={estimateId === null}
+          onCheckedChange={handleToggleFund}
+          aria-label="Эталонная смета — добавить в фонд решений"
+        />
+      </div>
       <div className="mt-4">
         <button
           onClick={onNewEstimate}

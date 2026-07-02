@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronDown, Search } from "lucide-react"
+import { ChevronDown, Database, Search } from "lucide-react"
 import type { Candidate, Decision, MatchRow } from "@/lib/types"
-import { statusLabel } from "@/lib/reviewState"
+import { requiresDecision, statusLabel } from "@/lib/reviewState"
 import { searchArticles } from "@/lib/api/articles"
 
 const SEARCH_DEBOUNCE_MS = 250
@@ -20,6 +20,7 @@ const statusTone: Record<string, string> = {
   confident: "text-[var(--success)]",
   needs_review: "text-[var(--warning)]",
   no_match: "text-destructive",
+  matched_fund: "text-[var(--ds-accent-hover)]",
 }
 
 export function ReviewRow({
@@ -33,7 +34,11 @@ export function ReviewRow({
 }: ReviewRowProps) {
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<Candidate[]>([])
-  const flagged = row.status !== "confident"
+  const flagged = requiresDecision(row) // warning-рамка: только реально спорные
+  // фонд-хит не требует решения, но должен быть переопределяем (спека фонда §12.4):
+  // строка раскрывается, override — через ручной поиск (кандидатов у снимка нет)
+  const expandable = flagged || row.status === "matched_fund"
+  const label = statusLabel(row, decision)
   const chosenCode =
     decision.kind === "confirmed" ? decision.code : row.matched_code
 
@@ -62,9 +67,12 @@ export function ReviewRow({
     <>
       <tr
         className={
-          flagged ? "cursor-pointer border-l-2 border-l-[var(--warning)]" : ""
+          expandable
+            ? "cursor-pointer" +
+              (flagged ? " border-l-2 border-l-[var(--warning)]" : "")
+            : ""
         }
-        onClick={flagged ? onToggle : undefined}
+        onClick={expandable ? onToggle : undefined}
         data-state={expanded ? "open" : "closed"}
       >
         <td className="px-4 py-2 font-mono text-muted-foreground">
@@ -76,7 +84,7 @@ export function ReviewRow({
             <span className="text-muted-foreground">— без пары —</span>
           ) : (
             <span>
-              {flagged && (
+              {expandable && (
                 <ChevronDown className="mr-1 inline size-3 text-[var(--ds-accent-hover)]" />
               )}
               <span className="font-mono text-xs text-muted-foreground">
@@ -87,14 +95,17 @@ export function ReviewRow({
           )}
         </td>
         <td className="px-4 py-2 text-right font-mono text-xs text-muted-foreground">
-          {row.status !== "no_match" ? row.score.toFixed(2) : ""}
+          {row.status !== "no_match" && row.status !== "matched_fund"
+            ? row.score.toFixed(2)
+            : ""}
         </td>
         <td className={"px-4 py-2 text-sm " + (statusTone[row.status] ?? "")}>
-          {statusLabel(row, decision)}
+          {label === "Из фонда" && <Database className="mr-1 inline size-3" />}
+          {label}
         </td>
       </tr>
 
-      {expanded && flagged && (
+      {expanded && expandable && (
         <tr>
           <td
             colSpan={5}

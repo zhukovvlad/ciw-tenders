@@ -51,8 +51,12 @@ export function EstimateFlow() {
     undefined,
     () => loadReview() ?? initReview("", [])
   )
-  // id сметы для коммита решений (PATCH) и экспорта; регидратируется из сессии
+  // id сметы для коммита решений (PATCH) и экспорта; регидратируется из сессии.
+  // Ref — источник истины для async-колбэков (handleExport/handleReview), не
+  // требует ре-рендера. estimateId (state) — его зеркало для JSX (DoneScreen):
+  // react-hooks/refs запрещает читать .current в теле рендера.
   const estimateIdRef = useRef<number | null>(loadEstimateId())
+  const [estimateId, setEstimateId] = useState<number | null>(loadEstimateId())
   // Транзиентная справка по аномалиям структуры: заполняется при загрузке,
   // сбрасывается при «новой смете». Не персистируется (при перезагрузке теряется).
   const [structureNotice, setStructureNotice] = useState<StructureNoticeState>({
@@ -85,6 +89,7 @@ export function EstimateFlow() {
       // SP1: upload → get id, then poll until ready
       const { id, anomalies, outlineOverrides } = await uploadEstimate(file)
       estimateIdRef.current = id
+      setEstimateId(id)
       saveEstimateId(id)
       setStructureNotice({ anomalies, outlineOverrides })
       setProg({ phase: "parsing", done: 0, total: 0, etaSeconds: null })
@@ -116,6 +121,7 @@ export function EstimateFlow() {
   // возобновлением poll. blocked сюда не приходит (некликабелен в списке).
   async function handleOpen(item: EstimateListItem) {
     estimateIdRef.current = item.id
+    setEstimateId(item.id)
     saveEstimateId(item.id)
     setFileName(item.filename)
     // Аномалии — транзиентная справка по конкретной загрузке; GET /estimates/{id}
@@ -166,6 +172,7 @@ export function EstimateFlow() {
 
   function handleNew() {
     estimateIdRef.current = null
+    setEstimateId(null)
     clearReview()
     setFileName("")
     setStructureNotice({ anomalies: [], outlineOverrides: 0 })
@@ -232,6 +239,7 @@ export function EstimateFlow() {
         state={state}
         onExport={handleExport}
         onNewEstimate={handleNew}
+        estimateId={estimateId}
       />
     )
   return (

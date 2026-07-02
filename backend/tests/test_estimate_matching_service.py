@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domain.classification import CRUMB_DERIVATION_VERSION
+from app.domain.decision_fund import FundHit, cache_key_hash, normalize_cache_key
 from app.domain.entities import (
     ArticleCandidate,
     EstimateNode,
@@ -13,6 +15,7 @@ from app.domain.errors import DictionaryNotReadyError, TransientError
 from app.services.estimate_matching_service import EstimateMatchingService
 from app.services.matching_service import MatchingService
 from tests.fakes import (
+    FakeDecisionFundRepository,
     FakeEmbedder,
     FakeEstimateRepository,
     FakeLLMMatcher,
@@ -50,7 +53,16 @@ def _service(repo, articles, *, embedder=None, llm=None):
     matcher = MatchingService(articles, embedder=None, llm_matcher=llm or FakeLLMMatcher())
     return EstimateMatchingService(matcher=matcher, embedder=embedder or _Embedder(),
                                    estimates=repo, articles=articles,
-                                   classifier=FakeWorkTypeClassifier(default=WorkClass.WORK))
+                                   classifier=FakeWorkTypeClassifier(default=WorkClass.WORK),
+                                   fund=FakeDecisionFundRepository())
+
+
+def _matching_service(repo, articles, fund, apply_fund: bool = True, embedder=None):
+    matcher = MatchingService(articles, embedder=None, llm_matcher=FakeLLMMatcher())
+    return EstimateMatchingService(matcher=matcher, embedder=embedder or _Embedder(),
+                                   estimates=repo, articles=articles,
+                                   classifier=FakeWorkTypeClassifier(default=WorkClass.WORK),
+                                   fund=fund, apply_fund=apply_fund)
 
 
 def _ready_articles(candidates) -> FakeRepository:
@@ -226,6 +238,43 @@ def test_fake_repo_reclassify_clears_vector_when_breadcrumb_changes() -> None:
     assert pend and pend[0].embedding_input == "Новая крошка"
 
 
+def test_fake_repo_reclassify_resets_unreviewed_matched_fund() -> None:
+    # отравленный фонд лечится: ре-прогон возвращает нетронутый фонд-хит в pending (спека §12.3)
+    repo = FakeEstimateRepository()
+    nid = _seed_one(repo, "x")
+    repo.nodes[nid]["status"] = "matched_fund"
+    repo.save_node_classifications([NodeClassification(nid, excluded=False, embedding_input="x")])
+    assert repo.get(1, 1, is_admin=True).rows[0].status == "pending"
+
+
+def test_fake_repo_reclassify_keeps_reviewed_matched_fund() -> None:
+    # решение человека поверх фонд-хита неприкосновенно
+    repo = FakeEstimateRepository()
+    nid = _seed_one(repo, "x")
+    repo.nodes[nid]["status"] = "matched_fund"
+    repo.nodes[nid]["review_status"] = "confirmed"
+    repo.save_node_classifications([NodeClassification(nid, excluded=False, embedding_input="x")])
+    assert repo.get(1, 1, is_admin=True).rows[0].status == "matched_fund"
+
+
+def test_rematch_after_fund_cleanup_reresolves_row() -> None:
+    # строка проштампована фондом → запись фонда сняли → повторный полный прогон даёт RAG-результат
+    repo = FakeEstimateRepository()
+    fund = FakeDecisionFundRepository()
+    est = repo.create(NewEstimate(1, "f.xlsx", "k"),
+                      [EstimateNode("1.1.5", "МОКАП", "1.1", None, "МОКАП", 0, 3)])
+    key = cache_key_hash(normalize_cache_key("МОКАП"))
+    fund.seed_hit(key, CRUMB_DERIVATION_VERSION, FundHit(5, "1.4", "Мокап"))
+    art = _ready_articles([ArticleCandidate(_article(9, "1.99"), 0.97)])
+    svc = _matching_service(repo, art, fund, apply_fund=True)
+    svc.match_estimate(est.id)
+    assert repo.get(est.id, 1, is_admin=True).rows[0].status == "matched_fund"
+    fund.clear()  # плохую запись сняли (unreference + rebuild)
+    svc.match_estimate(est.id)
+    row = repo.get(est.id, 1, is_admin=True).rows[0]
+    assert row.status == "confident" and row.matched_article_id == 9  # переразрешено RAG-ом
+
+
 def test_fake_repo_reclassify_keeps_vector_when_breadcrumb_unchanged() -> None:
     # крошка не изменилась → вектор сохраняется, лишний пере-эмбед не провоцируется.
     repo = FakeEstimateRepository()
@@ -267,6 +316,7 @@ def _classify_service(
         estimates=repo,
         articles=articles,
         classifier=FakeWorkTypeClassifier(default=WorkClass.WORK),
+        fund=FakeDecisionFundRepository(),
     )
 
 
@@ -303,7 +353,7 @@ def test_llm_org_verdict_on_mixed_also_excludes() -> None:
     matcher = MatchingService(articles, embedder=None, llm_matcher=None, confidence_threshold=0.9)
     svc = EstimateMatchingService(
         matcher=matcher, embedder=FakeEmbedder(), estimates=repo,
-        articles=articles, classifier=clf,
+        articles=articles, classifier=clf, fund=FakeDecisionFundRepository(),
     )
     svc._classify_nodes(est.id)  # noqa: SLF001
     assert repo.get(est.id, 1, is_admin=True).rows[0].status == "excluded"
@@ -357,7 +407,8 @@ def _classify_svc(repo, *, classifier):
     art = _ready_articles([])
     matcher = MatchingService(art, embedder=None, llm_matcher=FakeLLMMatcher())
     return EstimateMatchingService(matcher=matcher, embedder=_Embedder(),
-                                   estimates=repo, articles=art, classifier=classifier)
+                                   estimates=repo, articles=art, classifier=classifier,
+                                   fund=FakeDecisionFundRepository())
 
 
 def test_classify_rescues_org_leaf_under_work():
@@ -457,3 +508,81 @@ def test_match_estimate_logs_summary(caplog) -> None:
     assert rec.confident == 1
     assert rec.needs_review == 0 and rec.no_match == 0 and rec.match_error == 0
     assert rec.latency_ms >= 0
+
+
+# ---------------------------------------------------------------------------
+# Task 6: _apply_fund — стадия перед арбитром
+# ---------------------------------------------------------------------------
+
+
+def test_apply_fund_hit_writes_matched_fund_and_skips_arbiter() -> None:
+    repo, articles = FakeEstimateRepository(), FakeRepository(candidates=[])
+    fund = FakeDecisionFundRepository()
+    est = repo.create(NewEstimate(1, "f.xlsx", "k"),
+                      [EstimateNode("1.1.5", "МОКАП", "1.1", None, "Подг. МОКАП", 0, 3)])
+    key = cache_key_hash(normalize_cache_key("Подг. МОКАП"))
+    fund.seed_hit(key, CRUMB_DERIVATION_VERSION, FundHit(5, "1.4", "Мокап"))
+    svc = _matching_service(repo, articles, fund, apply_fund=True)
+    svc._apply_fund(est.id)  # noqa: SLF001
+    row = repo.get(est.id, 1, is_admin=True).rows[0]
+    assert row.status == "matched_fund" and row.matched_article_id == 5
+
+
+def test_apply_fund_conflict_and_miss_stay_pending() -> None:
+    repo, articles = FakeEstimateRepository(), FakeRepository(candidates=[])
+    fund = FakeDecisionFundRepository()
+    est = repo.create(NewEstimate(1, "f.xlsx", "k"),
+                      [EstimateNode("1.1.5", "МОКАП", "1.1", None, "Подг. МОКАП", 0, 3)])
+    key = cache_key_hash(normalize_cache_key("Подг. МОКАП"))
+    fund.seed_hit(key, CRUMB_DERIVATION_VERSION, FundHit(5, "1.4", "Мокап"))
+    fund.seed_hit(key, CRUMB_DERIVATION_VERSION, FundHit(7, "1.5", "Иное"))  # 2-е живое → конфликт
+    svc = _matching_service(repo, articles, fund, apply_fund=True)
+    svc._apply_fund(est.id)  # noqa: SLF001
+    assert repo.get(est.id, 1, is_admin=True).rows[0].status == "pending"  # конфликт → RAG
+
+
+def test_apply_fund_disabled_is_noop() -> None:
+    repo, articles = FakeEstimateRepository(), FakeRepository(candidates=[])
+    fund = FakeDecisionFundRepository()
+    est = repo.create(NewEstimate(1, "f.xlsx", "k"),
+                      [EstimateNode("1.1.5", "МОКАП", "1.1", None, "Подг. МОКАП", 0, 3)])
+    fund.seed_hit(cache_key_hash(normalize_cache_key("Подг. МОКАП")),
+                  CRUMB_DERIVATION_VERSION, FundHit(5, "1.4", "Мокап"))
+    svc = _matching_service(repo, articles, fund, apply_fund=False)
+    svc._apply_fund(est.id)  # noqa: SLF001
+    assert repo.get(est.id, 1, is_admin=True).rows[0].status == "pending"  # выключен → не трогает
+
+
+def test_fund_hit_rows_are_not_embedded() -> None:
+    # экономия эмбеддинга — суть кэша (спека §12.2): хит закрывается ДО _embed_nodes
+    repo, fund = FakeEstimateRepository(), FakeDecisionFundRepository()
+    est = repo.create(NewEstimate(1, "f.xlsx", "k"), [
+        EstimateNode("1.1", "МОКАП", "1", None, "МОКАП", 0, 2),
+        EstimateNode("1.2", "Кровля", "1", None, "Кровля", 1, 2),
+    ])
+    fund.seed_hit(cache_key_hash(normalize_cache_key("МОКАП")),
+                  CRUMB_DERIVATION_VERSION, FundHit(5, "1.4", "Мокап"))
+    art = _ready_articles([ArticleCandidate(_article(9, "1.99"), 0.97)])
+    embedder = _Embedder()
+    svc = _matching_service(repo, art, fund, apply_fund=True, embedder=embedder)
+    svc.match_estimate(est.id)
+    embedded = [t for batch in embedder.batches for t in batch]
+    assert "МОКАП" not in embedded          # фонд-хит не оплачивал эмбеддинг
+    assert "Кровля" in embedded             # промах пошёл штатно
+    rows = {r.embedding_input: r for r in repo.get(est.id, 1, is_admin=True).rows}
+    assert rows["МОКАП"].status == "matched_fund"
+    assert rows["Кровля"].status == "confident"
+
+
+def test_crumb_version_bump_misses_old_keys() -> None:
+    repo, articles = FakeEstimateRepository(), FakeRepository(candidates=[])
+    fund = FakeDecisionFundRepository()
+    est = repo.create(NewEstimate(1, "f.xlsx", "k"),
+                      [EstimateNode("1.1.5", "МОКАП", "1.1", None, "Подг. МОКАП", 0, 3)])
+    # запись осела на СТАРОЙ версии (99); лукап идёт на CRUMB_DERIVATION_VERSION → промах
+    fund.seed_hit(
+        cache_key_hash(normalize_cache_key("Подг. МОКАП")), 99, FundHit(5, "1.4", "Мокап")
+    )
+    svc = _matching_service(repo, articles, fund, apply_fund=True)
+    svc._apply_fund(est.id)  # noqa: SLF001
+    assert repo.get(est.id, 1, is_admin=True).rows[0].status == "pending"  # версия не та → холодно

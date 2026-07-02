@@ -1,4 +1,9 @@
-export type MatchStatus = "confident" | "needs_review" | "no_match" | "error"
+export type MatchStatus =
+  | "confident"
+  | "needs_review"
+  | "no_match"
+  | "error"
+  | "matched_fund"
 export type ReviewStatus =
   | "unreviewed"
   | "confirmed"

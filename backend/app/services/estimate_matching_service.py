@@ -12,11 +12,18 @@ import time
 from collections import Counter
 
 from app.domain.classification import (
+    CRUMB_DERIVATION_VERSION,
     build_embedding_input,
     classify_lexical,
     is_excluded,
     leaf_flags,
     resolve_ancestor_indices,
+)
+from app.domain.decision_fund import (
+    AppliedFundHit,
+    cache_key_hash,
+    normalize_cache_key,
+    resolve_fund_decision,
 )
 from app.domain.entities import (
     EstimateRowStatus,
@@ -27,7 +34,13 @@ from app.domain.entities import (
     WorkClass,
 )
 from app.domain.errors import DictionaryNotReadyError, TransientError
-from app.domain.ports import ArticleRepository, Embedder, EstimateRepository, WorkTypeClassifier
+from app.domain.ports import (
+    ArticleRepository,
+    DecisionFundRepository,
+    Embedder,
+    EstimateRepository,
+    WorkTypeClassifier,
+)
 from app.services.matching_service import MatchingService
 
 _EMBED_CHUNK = 100
@@ -45,18 +58,23 @@ class EstimateMatchingService:
         estimates: EstimateRepository,
         articles: ArticleRepository,
         classifier: WorkTypeClassifier,
+        fund: DecisionFundRepository,
+        apply_fund: bool = True,
     ) -> None:
         self._matcher = matcher
         self._embedder = embedder
         self._estimates = estimates
         self._articles = articles
         self._classifier = classifier
+        self._fund = fund
+        self._apply_fund_enabled = apply_fund
 
     def match_estimate(self, estimate_id: int) -> None:
         if not self._estimates.try_matching_lock(estimate_id):
             return  # конкурент владеет → no-op
         start = time.monotonic()
         excluded = 0
+        fund_hits = 0
         counts: Counter[EstimateRowStatus] = Counter()
         try:
             self._estimates.set_status(estimate_id, EstimateStatus.RUNNING)  # COMMIT до embed
@@ -64,11 +82,15 @@ class EstimateMatchingService:
             logger.debug(
                 "Матчинг %s: классификация завершена (ORG-исключено: %d)", estimate_id, excluded
             )
-            self._embed_nodes(estimate_id)
+            fund_hits = self._apply_fund(estimate_id)  # ДО эмбеддинга: хиту вектор не нужен (§12.2)
+            self._embed_nodes(estimate_id)  # только промахи фонда (без matched_fund)
             logger.debug("Матчинг %s: эмбеддинг завершён", estimate_id)
-            total, pending = self._articles.matching_readiness()
-            if total == 0 or pending > 0:
-                raise DictionaryNotReadyError(total=total, pending=pending)
+            # гейт каталога — только если после фонда остались не-фондовые matchable (pending).
+            # На полностью-фондовой смете (0 pending) спурьозный DictionaryNotReadyError не летит.
+            if self._estimates.count_unfinished_nodes(estimate_id):
+                total, pending = self._articles.matching_readiness()
+                if total == 0 or pending > 0:
+                    raise DictionaryNotReadyError(total=total, pending=pending)
             counts = self._match_nodes(estimate_id)
             logger.debug("Матчинг %s: сопоставление завершено", estimate_id)
             errors = self._estimates.count_node_errors(estimate_id)
@@ -81,14 +103,14 @@ class EstimateMatchingService:
                 )
             else:
                 self._estimates.set_status(estimate_id, EstimateStatus.READY)
-            self._log_summary(estimate_id, counts, excluded, start)
+            self._log_summary(estimate_id, counts, excluded, fund_hits, start)
         except DictionaryNotReadyError:
             raise  # gate: обёртка ретраит/блокирует — summary НЕ пишем (не терминал)
         except Exception as exc:  # noqa: BLE001 — непредвиденный сбой не оставляем в running
             self._estimates.set_status(
                 estimate_id, EstimateStatus.PARTIAL_ERROR, detail=f"unexpected: {exc}"
             )
-            self._log_summary(estimate_id, counts, excluded, start)
+            self._log_summary(estimate_id, counts, excluded, fund_hits, start)
             raise
         finally:
             self._estimates.release_matching_lock(estimate_id)
@@ -98,13 +120,14 @@ class EstimateMatchingService:
         estimate_id: int,
         counts: Counter[EstimateRowStatus],
         excluded: int,
+        fund_hits: int,
         start: float,
     ) -> None:
         duration_ms = round((time.monotonic() - start) * 1000)
         status = self._estimates.get_status(estimate_id)
         logger.info(
             "Матчинг сметы %s завершён: статус=%s confident=%d needs_review=%d "
-            "no_match=%d match_error=%d excluded=%d за %d мс",
+            "no_match=%d match_error=%d excluded=%d matched_fund=%d за %d мс",
             estimate_id,
             getattr(status, "value", status),
             counts[EstimateRowStatus.CONFIDENT],
@@ -112,6 +135,7 @@ class EstimateMatchingService:
             counts[EstimateRowStatus.NO_MATCH],
             counts[EstimateRowStatus.ERROR],
             excluded,
+            fund_hits,
             duration_ms,
             extra={
                 "estimate_id": estimate_id,
@@ -120,6 +144,7 @@ class EstimateMatchingService:
                 "no_match": counts[EstimateRowStatus.NO_MATCH],
                 "match_error": counts[EstimateRowStatus.ERROR],
                 "excluded": excluded,
+                "matched_fund": fund_hits,
                 "latency_ms": duration_ms,
             },
         )
@@ -180,6 +205,26 @@ class EstimateMatchingService:
                 pass  # узлы остаются pending → unfinished → partial_error (ре-триггер доберёт)
             self._estimates.touch(estimate_id)  # heartbeat
             last_id = chunk[-1].id
+
+    def _apply_fund(self, estimate_id: int) -> int:
+        if not self._apply_fund_enabled:
+            return 0
+        nodes = self._estimates.fetch_pending_nodes(estimate_id)  # все pending, вектор не нужен
+        if not nodes:
+            return 0
+        by_hash = {n.row_id: cache_key_hash(normalize_cache_key(n.embedding_input)) for n in nodes}
+        found = self._fund.lookup(list(set(by_hash.values())), CRUMB_DERIVATION_VERSION)
+        applied: list[AppliedFundHit] = []
+        for n in nodes:
+            candidates = found.get(by_hash[n.row_id], [])
+            decision = resolve_fund_decision([h.article_id for h in candidates])
+            if decision is None:
+                continue  # промах/конфликт → остаётся pending → RAG
+            hit = next(h for h in candidates if h.article_id == decision)
+            applied.append(AppliedFundHit(n.row_id, hit.article_id, hit.code, hit.name))
+        if applied:
+            self._estimates.save_fund_hits(applied)  # bulk: один commit на фонд-пасс
+        return len(applied)
 
     def _match_nodes(self, estimate_id: int) -> Counter[EstimateRowStatus]:
         counts: Counter[EstimateRowStatus] = Counter()

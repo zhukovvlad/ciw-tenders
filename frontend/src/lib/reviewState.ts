@@ -1,14 +1,16 @@
 import type { Candidate, Decision, MatchRow, ReviewState } from "@/lib/types"
 
 export function requiresDecision(row: MatchRow): boolean {
-  return row.status !== "confident"
+  return row.status !== "confident" && row.status !== "matched_fund"
 }
 
 export function initReview(fileName: string, rows: MatchRow[]): ReviewState {
   const decisions: Record<number, Decision> = {}
   for (const r of rows) {
     decisions[r.row_number] =
-      r.status === "confident" && r.matched_code && r.matched_name
+      (r.status === "confident" || r.status === "matched_fund") &&
+      r.matched_code &&
+      r.matched_name
         ? {
             kind: "confirmed",
             code: r.matched_code,
@@ -152,8 +154,12 @@ export function filteredRows(state: ReviewState): MatchRow[] {
   }
 }
 
-export function statusLabel(_row: MatchRow, d: Decision): string {
+export function statusLabel(row: MatchRow, d: Decision): string {
+  // решение оператора важнее происхождения снимка: override/reject поверх
+  // фонд-хита не должны маскироваться меткой «Из фонда» (спека фонда §12.4)
   if (d.kind === "no_match") return "Нет совпадения"
   if (d.kind === "pending") return "Требует проверки"
-  return d.manual ? "Ручной выбор" : "Подтверждено оператором"
+  if (d.manual) return "Ручной выбор"
+  if (row.status === "matched_fund") return "Из фонда"
+  return "Подтверждено оператором"
 }

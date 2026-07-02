@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from sqlalchemy import case, delete, func, select, text, update
+from collections.abc import Sequence
+
+from sqlalchemy import and_, bindparam, case, delete, func, or_, select, text, update
 from sqlalchemy.orm import Session
 
+from app.domain.decision_fund import AppliedFundHit
 from app.domain.entities import (
     ClassifiableNode,
     Estimate,
@@ -18,6 +21,8 @@ from app.domain.entities import (
     NodeClassification,
     NodeMatch,
     PendingEmbedding,
+    PendingNode,
+    PromotableRow,
     StoredEstimateRow,
 )
 from app.domain.ports import EstimateRepository
@@ -208,7 +213,8 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 EstimateRowModel.estimate_id == estimate_id,
                 EstimateRowModel.embedding.is_(None),
                 EstimateRowModel.id > after_id,
-                EstimateRowModel.status != "excluded",
+                # matched_fund закрыт фонд-пассом ДО эмбеддинга — вектор ему не нужен (§12.2)
+                EstimateRowModel.status.notin_(("excluded", "matched_fund")),
             )
             .order_by(EstimateRowModel.id)
             .limit(limit)
@@ -339,8 +345,13 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
 
     def save_node_classifications(self, results: list[NodeClassification]) -> None:
         # Охрана: pending/excluded + retryable error/no_match (они матчабельны → орг среди них
-        # должен переехать в excluded). Терминальные/ревью-статусы (confident/needs_review/
-        # confirmed/overridden) неприкосновенны.
+        # должен переехать в excluded). Плюс нетронутый matched_fund (review_status='unreviewed'):
+        # ре-прогон переразрешает его текущим фондом — лечение отравленного фонда (спека фонда
+        # §12.3). Терминальные/ревью-статусы (confident/needs_review/confirmed/overridden)
+        # неприкосновенны.
+        # Сброс НЕ чистит matched_* — снимок перезапишется дальше по пайплайну
+        # (_apply_fund/_match_values); при краше между classify-commit и фонд-пассом pending
+        # временно несёт stale-снимок до следующего ре-прогона.
         # Вектор сбрасываем ТОЛЬКО при смене крошки: иначе уже сэмбедженный узел остался бы со
         # старым вектором при новом embedding_input (дрейф на ре-прогоне после флипа вердикта).
         for r in results:
@@ -349,7 +360,13 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 update(EstimateRowModel)
                 .where(
                     EstimateRowModel.id == r.node_id,
-                    EstimateRowModel.status.in_(("pending", "excluded", "error", "no_match")),
+                    or_(
+                        EstimateRowModel.status.in_(("pending", "excluded", "error", "no_match")),
+                        and_(
+                            EstimateRowModel.status == "matched_fund",
+                            EstimateRowModel.review_status == "unreviewed",
+                        ),
+                    ),
                 )
                 .values(
                     status=str(target),
@@ -361,3 +378,73 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 )
             )
         self._session.commit()  # один commit на весь проход (атомарность + латентность)
+
+    def set_reference(self, estimate_id: int, value: bool) -> None:
+        self._session.execute(
+            update(EstimateModel).where(EstimateModel.id == estimate_id).values(is_reference=value)
+        )
+        self._session.commit()
+
+    def is_reference(self, estimate_id: int) -> bool:
+        return bool(
+            self._session.scalar(
+                select(EstimateModel.is_reference).where(EstimateModel.id == estimate_id)
+            )
+        )
+
+    def fetch_reference_estimate_ids(self) -> list[int]:
+        return list(
+            self._session.scalars(
+                select(EstimateModel.id).where(EstimateModel.is_reference.is_(True))
+            )
+        )
+
+    def fetch_promotable_rows(self, estimate_id: int) -> list[PromotableRow]:
+        stmt = select(
+            EstimateRowModel.id, EstimateRowModel.embedding_input,
+            EstimateRowModel.status, EstimateRowModel.review_status,
+            EstimateRowModel.final_article_id,
+        ).where(EstimateRowModel.estimate_id == estimate_id)
+        return [
+            PromotableRow(r.id, r.embedding_input, r.status, r.review_status, r.final_article_id)
+            for r in self._session.execute(stmt)
+        ]
+
+    def exists(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> bool:
+        # лёгкая проверка владения (зеркало delete/get_object_key) — get() тянул бы
+        # все строки с векторами ради одного bool
+        est = self._session.get(EstimateModel, estimate_id)
+        return est is not None and (is_admin or est.user_id == requester_id)
+
+    def fetch_pending_nodes(self, estimate_id: int) -> list[PendingNode]:
+        stmt = select(EstimateRowModel.id, EstimateRowModel.embedding_input).where(
+            EstimateRowModel.estimate_id == estimate_id,
+            EstimateRowModel.status == "pending",
+            EstimateRowModel.review_status == "unreviewed",  # защитный: pending ⟹ unreviewed
+        )
+        return [PendingNode(r.id, r.embedding_input) for r in self._session.execute(stmt)]
+
+    def save_fund_hits(self, hits: Sequence[AppliedFundHit]) -> None:
+        # CAS по unreviewed — как save_node_match; candidates/score обнуляем (снимок без
+        # кандидатов). Один executemany-UPDATE (psycopg3 батчит в pipeline) + один commit
+        # на весь фонд-пасс: горячий путь фонда не платит round-trip за строку.
+        # Core-UPDATE по __table__, НЕ update(EstimateRowModel): ORM-путь bulk-UPDATE требует
+        # PK в параметрах и синк identity map, что с кастомным WHERE-CAS не работает.
+        if hits:
+            tbl = EstimateRowModel.__table__
+            self._session.execute(
+                tbl.update()
+                .where(
+                    tbl.c.id == bindparam("_row_id"),
+                    tbl.c.review_status == "unreviewed",
+                )
+                .values(status="matched_fund", matched_article_id=bindparam("_article_id"),
+                        matched_code=bindparam("_code"), matched_name=bindparam("_name"),
+                        candidates=None, score=None, match_error=None),
+                [
+                    {"_row_id": h.row_id, "_article_id": h.article_id,
+                     "_code": h.code, "_name": h.name}
+                    for h in hits
+                ],
+            )
+        self._session.commit()

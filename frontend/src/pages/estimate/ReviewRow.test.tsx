@@ -27,8 +27,79 @@ function tableWrap(ui: React.ReactNode) {
   )
 }
 const reviewRow = MOCK_ROWS.find((r) => r.status === "needs_review")!
+const confidentRow = MOCK_ROWS.find((r) => r.status === "confident")!
+const fundRow = { ...confidentRow, status: "matched_fund" as const }
+// реалистичное решение фонд-строки: initReview авто-подтверждает её (manual:false)
+const fundDecision = {
+  kind: "confirmed" as const,
+  code: fundRow.matched_code!,
+  name: fundRow.matched_name!,
+  manual: false,
+}
 
 describe("ReviewRow", () => {
+  it("строка со статусом matched_fund показывает бейдж «из фонда»", () => {
+    render(
+      tableWrap(
+        <ReviewRow
+          row={fundRow}
+          decision={fundDecision}
+          expanded={false}
+          onToggle={vi.fn()}
+          onPickCandidate={vi.fn()}
+          onManualPick={vi.fn()}
+          onConfirmNoMatch={vi.fn()}
+        />
+      )
+    )
+    expect(screen.getByText(/из фонда/i)).toBeInTheDocument()
+    expect(screen.queryByText(/требует проверки/i)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/подтверждено оператором/i)
+    ).not.toBeInTheDocument()
+    // score у фонд-хита нет by design (спека §4.3) — ячейка пустая; проверяем отсутствие
+    // РЕАЛЬНОГО значения фикстуры (0.96), иначе ассерция не упадёт при сломанном гарде
+    expect(screen.queryByText(fundRow.score.toFixed(2))).not.toBeInTheDocument()
+  })
+
+  it("фонд-строка кликабельна: клик зовёт onToggle (переопределение доступно)", async () => {
+    const onToggle = vi.fn()
+    render(
+      tableWrap(
+        <ReviewRow
+          row={fundRow}
+          decision={fundDecision}
+          expanded={false}
+          onToggle={onToggle}
+          onPickCandidate={vi.fn()}
+          onManualPick={vi.fn()}
+          onConfirmNoMatch={vi.fn()}
+        />
+      )
+    )
+    await userEvent.click(screen.getByText(/из фонда/i))
+    expect(onToggle).toHaveBeenCalled()
+  })
+
+  it("раскрытая фонд-строка даёт ручной поиск по справочнику (override)", () => {
+    render(
+      tableWrap(
+        <ReviewRow
+          row={fundRow}
+          decision={fundDecision}
+          expanded
+          onToggle={vi.fn()}
+          onPickCandidate={vi.fn()}
+          onManualPick={vi.fn()}
+          onConfirmNoMatch={vi.fn()}
+        />
+      )
+    )
+    expect(
+      screen.getByPlaceholderText(/искать в справочнике/i)
+    ).toBeInTheDocument()
+  })
+
   it("раскрытая спорная строка показывает 3 кандидата", () => {
     render(
       tableWrap(

@@ -79,7 +79,7 @@ def main() -> None:
             # Харнес использует обычный SessionLocal() без пула — advisory-lock-leak
             # из estimate_repository здесь не применим: процесс однократный, при выходе
             # соединение закрывается и pg_advisory_lock освобождается автоматически.
-            build_estimate_matching_service(session).match_estimate(estimate.id)
+            build_estimate_matching_service(session, apply_fund=False).match_estimate(estimate.id)
             stored = estimates.get(estimate.id, user_id, is_admin=True)
             _report(seeds, stored, articles, args.report)
         finally:

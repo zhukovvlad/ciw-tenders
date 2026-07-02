@@ -7,7 +7,9 @@ Inversion Principle. Конкретные реализации живут в inf
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 
+from app.domain.decision_fund import AppliedFundHit, FundEntry, FundHit
 from app.domain.entities import (
     ArticleCandidate,
     BenchmarkNodeSeed,
@@ -24,6 +26,8 @@ from app.domain.entities import (
     NodeMatch,
     NodeToClassify,
     PendingEmbedding,
+    PendingNode,
+    PromotableRow,
     TemplateArticle,
     TokenPayload,
     User,
@@ -281,6 +285,44 @@ class EstimateRepository(ABC):
         excluded=True→'excluded', False→'pending'. Терминальные матч-статусы/ревью не трогает."""
         ...
 
+    @abstractmethod
+    def set_reference(self, estimate_id: int, value: bool) -> None:
+        """Помечает/снимает смету как эталонную (источник промоушена в золотой фонд)."""
+        ...
+
+    @abstractmethod
+    def is_reference(self, estimate_id: int) -> bool:
+        """Факт из БД: состоит ли смета в золотом фонде (is_reference)."""
+        ...
+
+    @abstractmethod
+    def fetch_reference_estimate_ids(self) -> list[int]:
+        """Все id смет с is_reference=True."""
+        ...
+
+    @abstractmethod
+    def fetch_promotable_rows(self, estimate_id: int) -> list[PromotableRow]:
+        """Все строки сметы с полями, нужными для отбора кандидатов на промоушен в фонд."""
+        ...
+
+    @abstractmethod
+    def exists(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> bool:
+        """Смета существует и доступна запрашивающему (без загрузки строк/векторов)."""
+        ...
+
+    @abstractmethod
+    def fetch_pending_nodes(self, estimate_id: int) -> list[PendingNode]:
+        """Узлы status='pending' И review_status='unreviewed' (кандидаты на fund-look-up)."""
+        ...
+
+    @abstractmethod
+    def save_fund_hits(self, hits: Sequence[AppliedFundHit]) -> None:
+        """Пишет снимки «решено фондом» (matched_fund) в обход арбитра. CAS по
+        review_status='unreviewed' на каждую строку — как save_node_match;
+        candidates/score обнуляются (снимок без кандидатов). Один commit на батч
+        (зеркало save_node_classifications)."""
+        ...
+
 
 class ObjectStorage(ABC):
     """Объектное хранилище (MinIO/S3) для исходных файлов."""
@@ -304,6 +346,23 @@ class WorkTypeClassifier(ABC):
     def classify(self, items: list[NodeToClassify]) -> list[WorkClass]:
         """Возврат выровнен по items. При сбое/неоднозначности → WorkClass.UNSURE."""
         ...
+
+
+class DecisionFundRepository(ABC):
+    """Золотой фонд решений: exact-match кэш подтверждённых человеком сопоставлений."""
+
+    @abstractmethod
+    def lookup(
+        self, key_hashes: Sequence[str], crumb_version: int
+    ) -> dict[str, list[FundHit]]:
+        """Живые попадания (article_id жив в каталоге) по хешам ключей строго для версии."""
+        ...
+
+    @abstractmethod
+    def upsert(self, entries: Sequence[FundEntry]) -> None: ...
+
+    @abstractmethod
+    def clear(self) -> None: ...
 
 
 class BenchmarkRepository(ABC):

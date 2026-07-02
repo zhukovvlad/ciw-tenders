@@ -224,3 +224,11 @@ def build_embedding_input(
     if collapse_repeats:
         parts = _collapse_consecutive(parts)
     return separator.join(parts)
+
+
+# Версия крошко-деривации для золотого фонда: единый источник правды. И промоушен (пишет
+# crumb_version), и lookup (ищет по версии) читают ЭТУ константу. Меняем логику крошки
+# (build_embedding_input / org-стрип / резолв предков) → бампаем версию (старый фонд мажет мимо).
+# ТАКЖЕ бампаем при изменении normalize_cache_key (domain/decision_fund.py) — ключи фонда
+# хэшируются поверх неё, иначе весь фонд молча остынет.
+CRUMB_DERIVATION_VERSION = 1
