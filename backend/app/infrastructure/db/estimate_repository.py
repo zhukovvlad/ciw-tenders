@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import case, delete, func, select, text, update
+from sqlalchemy import and_, case, delete, func, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from app.domain.entities import (
@@ -341,8 +341,13 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
 
     def save_node_classifications(self, results: list[NodeClassification]) -> None:
         # Охрана: pending/excluded + retryable error/no_match (они матчабельны → орг среди них
-        # должен переехать в excluded). Терминальные/ревью-статусы (confident/needs_review/
-        # confirmed/overridden) неприкосновенны.
+        # должен переехать в excluded). Плюс нетронутый matched_fund (review_status='unreviewed'):
+        # ре-прогон переразрешает его текущим фондом — лечение отравленного фонда (спека фонда
+        # §12.3). Терминальные/ревью-статусы (confident/needs_review/confirmed/overridden)
+        # неприкосновенны.
+        # Сброс НЕ чистит matched_* — снимок перезапишется дальше по пайплайну
+        # (_apply_fund/_match_values); при краше между classify-commit и фонд-пассом pending
+        # временно несёт stale-снимок до следующего ре-прогона.
         # Вектор сбрасываем ТОЛЬКО при смене крошки: иначе уже сэмбедженный узел остался бы со
         # старым вектором при новом embedding_input (дрейф на ре-прогоне после флипа вердикта).
         for r in results:
@@ -351,7 +356,13 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 update(EstimateRowModel)
                 .where(
                     EstimateRowModel.id == r.node_id,
-                    EstimateRowModel.status.in_(("pending", "excluded", "error", "no_match")),
+                    or_(
+                        EstimateRowModel.status.in_(("pending", "excluded", "error", "no_match")),
+                        and_(
+                            EstimateRowModel.status == "matched_fund",
+                            EstimateRowModel.review_status == "unreviewed",
+                        ),
+                    ),
                 )
                 .values(
                     status=str(target),

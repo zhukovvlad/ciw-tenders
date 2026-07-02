@@ -238,6 +238,43 @@ def test_fake_repo_reclassify_clears_vector_when_breadcrumb_changes() -> None:
     assert pend and pend[0].embedding_input == "Новая крошка"
 
 
+def test_fake_repo_reclassify_resets_unreviewed_matched_fund() -> None:
+    # отравленный фонд лечится: ре-прогон возвращает нетронутый фонд-хит в pending (спека §12.3)
+    repo = FakeEstimateRepository()
+    nid = _seed_one(repo, "x")
+    repo.nodes[nid]["status"] = "matched_fund"
+    repo.save_node_classifications([NodeClassification(nid, excluded=False, embedding_input="x")])
+    assert repo.get(1, 1, is_admin=True).rows[0].status == "pending"
+
+
+def test_fake_repo_reclassify_keeps_reviewed_matched_fund() -> None:
+    # решение человека поверх фонд-хита неприкосновенно
+    repo = FakeEstimateRepository()
+    nid = _seed_one(repo, "x")
+    repo.nodes[nid]["status"] = "matched_fund"
+    repo.nodes[nid]["review_status"] = "confirmed"
+    repo.save_node_classifications([NodeClassification(nid, excluded=False, embedding_input="x")])
+    assert repo.get(1, 1, is_admin=True).rows[0].status == "matched_fund"
+
+
+def test_rematch_after_fund_cleanup_reresolves_row() -> None:
+    # строка проштампована фондом → запись фонда сняли → повторный полный прогон даёт RAG-результат
+    repo = FakeEstimateRepository()
+    fund = FakeDecisionFundRepository()
+    est = repo.create(NewEstimate(1, "f.xlsx", "k"),
+                      [EstimateNode("1.1.5", "МОКАП", "1.1", None, "МОКАП", 0, 3)])
+    key = cache_key_hash(normalize_cache_key("МОКАП"))
+    fund.seed_hit(key, CRUMB_DERIVATION_VERSION, FundHit(5, "1.4", "Мокап"))
+    art = _ready_articles([ArticleCandidate(_article(9, "1.99"), 0.97)])
+    svc = _matching_service(repo, art, fund, apply_fund=True)
+    svc.match_estimate(est.id)
+    assert repo.get(est.id, 1, is_admin=True).rows[0].status == "matched_fund"
+    fund.clear()  # плохую запись сняли (unreference + rebuild)
+    svc.match_estimate(est.id)
+    row = repo.get(est.id, 1, is_admin=True).rows[0]
+    assert row.status == "confident" and row.matched_article_id == 9  # переразрешено RAG-ом
+
+
 def test_fake_repo_reclassify_keeps_vector_when_breadcrumb_unchanged() -> None:
     # крошка не изменилась → вектор сохраняется, лишний пере-эмбед не провоцируется.
     repo = FakeEstimateRepository()

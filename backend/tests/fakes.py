@@ -594,8 +594,14 @@ class FakeEstimateRepository(EstimateRepository):
     def save_node_classifications(self, results: list[NodeClassification]) -> None:
         for r in results:
             n = self.nodes[r.node_id]
-            if n["status"] not in ("pending", "excluded", "error", "no_match"):
-                continue  # охрана: терминальные матч/ревью-статусы неприкосновенны
+            # охрана-зеркало SQL: retryable-статусы + нетронутый matched_fund (спека фонда §12.3 —
+            # ре-прогон переразрешает хит текущим фондом); ревью-статусы неприкосновенны.
+            # Сброс не чистит matched_* — снимок перезапишется дальше по пайплайну.
+            resettable = n["status"] in ("pending", "excluded", "error", "no_match") or (
+                n["status"] == "matched_fund" and n["review_status"] == "unreviewed"
+            )
+            if not resettable:
+                continue
             if n["embedding_input"] != r.embedding_input:
                 n["embedding"] = None  # крошка изменилась → пере-эмбед на чистой (нет дрейфа)
             n["status"] = "excluded" if r.excluded else "pending"
