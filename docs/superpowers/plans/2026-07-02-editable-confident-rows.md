@@ -56,6 +56,9 @@ def test_pick_and_reject_keep_ai_snapshot(client, auth_headers, estimate_repo, s
     assert picked.json()["matched_article_id"] == 7  # снимок не мутировал
     assert picked.json()["matched_code"] == "2.1"
 
+    # снимок иммутабелен целиком: candidates тоже не тронуты
+    assert [c["id"] for c in picked.json()["candidates"]] == [7, 9]
+
     rejected = client.patch(
         f"/api/estimates/{eid}/rows/{nid}/review",
         headers=auth_headers, json={"action": "reject"},
@@ -63,6 +66,17 @@ def test_pick_and_reject_keep_ai_snapshot(client, auth_headers, estimate_repo, s
     assert rejected.status_code == 200
     assert rejected.json()["matched_article_id"] == 7
     assert rejected.json()["matched_code"] == "2.1"
+
+    # нормализация (_pick): выбор исходной рекомендации = confirmed, не overridden —
+    # поэтому «откат» у confident-строки (клик по исходному кандидату в топ-3)
+    # не застревает в «Ручной выбор» (спека §2)
+    restored = client.patch(
+        f"/api/estimates/{eid}/rows/{nid}/review",
+        headers=auth_headers, json={"action": "pick", "article_id": 7},
+    )
+    assert restored.status_code == 200
+    assert restored.json()["review_status"] == "confirmed"
+    assert restored.json()["final_code"] == "2.1"
 ```
 
 Примечание: спека предлагала доассертить в `test_pick_candidate_overridden`,
@@ -108,7 +122,8 @@ typecheck красный между коммитами).
 
 1. Во **все шесть** существующих `render(...)` добавить проп
    `onConfirmRecommendation={vi.fn()}` (рядом с `onConfirmNoMatch`).
-2. После существующих кейсов добавить:
+2. Расширить импорт RTL: `import { render, screen, within } from "@testing-library/react"`.
+3. После существующих кейсов добавить:
 
 ```tsx
 const fundRowNoCands = { ...fundRow, candidates: [] }
@@ -150,6 +165,10 @@ describe("ReviewRow: правка уверенных позиций", () => {
       )
     )
     // у confident matched-кандидат уже в candidates → синтетической карточки НЕТ
+    // (прямой ассерт по подписи, не по количеству кнопок — устойчив к фикстуре)
+    expect(
+      screen.queryByText(/рекомендация ai|из фонда/i)
+    ).not.toBeInTheDocument()
     expect(screen.getAllByRole("button", { name: /СМР-/ })).toHaveLength(1)
     expect(
       screen.getByPlaceholderText(/искать в справочнике/i)
@@ -180,6 +199,9 @@ describe("ReviewRow: правка уверенных позиций", () => {
     const card = screen.getByRole("button", {
       name: new RegExp(fundRowNoCands.matched_code!),
     })
+    // спека §Тесты кейс 4: метка происхождения «Из фонда» ВНУТРИ карточки
+    // (в статус-ячейке строки она тоже есть — поэтому within, не screen)
+    expect(within(card).getByText(/из фонда/i)).toBeInTheDocument()
     await userEvent.click(card)
     expect(onConfirmRec).toHaveBeenCalled()
     expect(onPick).not.toHaveBeenCalled()
@@ -264,10 +286,10 @@ describe("ReviewRow: правка уверенных позиций", () => {
 })
 ```
 
-- [ ] **Step 2: Прогнать — новые тесты падают, старые падают на типах**
+- [ ] **Step 2: Прогнать — новые тесты падают, старые проходят**
 
 Run: `cd frontend && npx vitest run src/pages/estimate/ReviewRow.test.tsx`
-Expected: FAIL — «уверенная строка кликабельна» (onToggle не зовётся: строка нераскрываема), карточка рекомендации не найдена, «Оставить без пары» отсутствует.
+Expected: старые 6 тестов PASS (лишний проп в рантайме безвреден, vitest типы не проверяет), все новые FAIL — «уверенная строка кликабельна» (onToggle не зовётся: строка нераскрываема), панель у confident не рендерится, карточка рекомендации не найдена, «Оставить без пары» отсутствует.
 
 - [ ] **Step 3: Реализовать `ReviewRow.tsx`**
 
@@ -372,7 +394,10 @@ onConfirmRecommendation={() => {
 
 (`confirmArbiter` берёт `matched_code`/`matched_name` из строки-снимка — ровно
 исходная рекомендация; `onReview "confirm"` на бэке использует
-`matched_article_id`, `article_id` не нужен.)
+`matched_article_id`, `article_id` не нужен. `gotoNext()` — симметрично трём
+существующим обработчикам, которые зовут его безусловно, в т.ч. на фонд-хитах
+вне клавиатурной очереди: для строки вне очереди `findIndex` даёт `-1` →
+фокус уходит на первую нерешённую спорную строку — существующее поведение.)
 
 - [ ] **Step 5: Прогнать тесты компонента**
 
