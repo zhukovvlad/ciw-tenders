@@ -82,9 +82,9 @@ class EstimateMatchingService:
             logger.debug(
                 "Матчинг %s: классификация завершена (ORG-исключено: %d)", estimate_id, excluded
             )
-            self._embed_nodes(estimate_id)
+            fund_hits = self._apply_fund(estimate_id)  # ДО эмбеддинга: хиту вектор не нужен (§12.2)
+            self._embed_nodes(estimate_id)  # только промахи фонда (fetch_unembedded без matched_fund)
             logger.debug("Матчинг %s: эмбеддинг завершён", estimate_id)
-            fund_hits = self._apply_fund(estimate_id)  # NEW: до арбитра
             # гейт каталога — только если после фонда остались не-фондовые matchable (pending).
             # На полностью-фондовой смете (0 pending) спурьозный DictionaryNotReadyError не летит.
             if self._estimates.count_unfinished_nodes(estimate_id):

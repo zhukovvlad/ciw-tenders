@@ -502,7 +502,8 @@ class FakeEstimateRepository(EstimateRepository):
                 if n["estimate_id"] == estimate_id
                 and n["embedding"] is None
                 and n["id"] > after_id
-                and n["status"] != "excluded"
+                # зеркало SQL: matched_fund закрыт фонд-пассом до эмбеддинга (§12.2)
+                and n["status"] not in ("excluded", "matched_fund")
             ),
             key=lambda n: n["id"],
         )

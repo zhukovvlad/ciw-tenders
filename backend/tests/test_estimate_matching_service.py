@@ -57,9 +57,9 @@ def _service(repo, articles, *, embedder=None, llm=None):
                                    fund=FakeDecisionFundRepository())
 
 
-def _matching_service(repo, articles, fund, apply_fund: bool = True):
+def _matching_service(repo, articles, fund, apply_fund: bool = True, embedder=None):
     matcher = MatchingService(articles, embedder=None, llm_matcher=FakeLLMMatcher())
-    return EstimateMatchingService(matcher=matcher, embedder=_Embedder(),
+    return EstimateMatchingService(matcher=matcher, embedder=embedder or _Embedder(),
                                    estimates=repo, articles=articles,
                                    classifier=FakeWorkTypeClassifier(default=WorkClass.WORK),
                                    fund=fund, apply_fund=apply_fund)
@@ -551,6 +551,27 @@ def test_apply_fund_disabled_is_noop() -> None:
     svc = _matching_service(repo, articles, fund, apply_fund=False)
     svc._apply_fund(est.id)  # noqa: SLF001
     assert repo.get(est.id, 1, is_admin=True).rows[0].status == "pending"  # выключен → не трогает
+
+
+def test_fund_hit_rows_are_not_embedded() -> None:
+    # экономия эмбеддинга — суть кэша (спека §12.2): хит закрывается ДО _embed_nodes
+    repo, fund = FakeEstimateRepository(), FakeDecisionFundRepository()
+    est = repo.create(NewEstimate(1, "f.xlsx", "k"), [
+        EstimateNode("1.1", "МОКАП", "1", None, "МОКАП", 0, 2),
+        EstimateNode("1.2", "Кровля", "1", None, "Кровля", 1, 2),
+    ])
+    fund.seed_hit(cache_key_hash(normalize_cache_key("МОКАП")),
+                  CRUMB_DERIVATION_VERSION, FundHit(5, "1.4", "Мокап"))
+    art = _ready_articles([ArticleCandidate(_article(9, "1.99"), 0.97)])
+    embedder = _Embedder()
+    svc = _matching_service(repo, art, fund, apply_fund=True, embedder=embedder)
+    svc.match_estimate(est.id)
+    embedded = [t for batch in embedder.batches for t in batch]
+    assert "МОКАП" not in embedded          # фонд-хит не оплачивал эмбеддинг
+    assert "Кровля" in embedded             # промах пошёл штатно
+    rows = {r.embedding_input: r for r in repo.get(est.id, 1, is_admin=True).rows}
+    assert rows["МОКАП"].status == "matched_fund"
+    assert rows["Кровля"].status == "confident"
 
 
 def test_crumb_version_bump_misses_old_keys() -> None:

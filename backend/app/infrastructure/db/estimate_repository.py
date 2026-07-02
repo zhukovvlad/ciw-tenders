@@ -213,7 +213,8 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 EstimateRowModel.estimate_id == estimate_id,
                 EstimateRowModel.embedding.is_(None),
                 EstimateRowModel.id > after_id,
-                EstimateRowModel.status != "excluded",
+                # matched_fund закрыт фонд-пассом ДО эмбеддинга — вектор ему не нужен (§12.2)
+                EstimateRowModel.status.notin_(("excluded", "matched_fund")),
             )
             .order_by(EstimateRowModel.id)
             .limit(limit)
