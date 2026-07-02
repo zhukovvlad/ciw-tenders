@@ -14,6 +14,8 @@ interface ReviewRowProps {
   onPickCandidate: (code: string) => void
   onManualPick: (c: Candidate) => void
   onConfirmNoMatch: () => void
+  /** вернуть/подтвердить исходную рекомендацию AI-снимка (действие confirm) */
+  onConfirmRecommendation: () => void
 }
 
 const statusTone: Record<string, string> = {
@@ -31,13 +33,14 @@ export function ReviewRow({
   onPickCandidate,
   onManualPick,
   onConfirmNoMatch,
+  onConfirmRecommendation,
 }: ReviewRowProps) {
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<Candidate[]>([])
   const flagged = requiresDecision(row) // warning-рамка: только реально спорные
-  // фонд-хит не требует решения, но должен быть переопределяем (спека фонда §12.4):
-  // строка раскрывается, override — через ручной поиск (кандидатов у снимка нет)
-  const expandable = flagged || row.status === "matched_fund"
+  // любая строка раскрываема и правима (спека editable-confident-rows §1);
+  // warning-рамка при этом остаётся только у требующих решения
+  const expandable = true
   const label = statusLabel(row, decision)
   const chosenCode =
     decision.kind === "confirmed" ? decision.code : row.matched_code
@@ -111,6 +114,40 @@ export function ReviewRow({
             colSpan={5}
             className="bg-[color-mix(in_srgb,var(--primary)_5%,transparent)] px-12 py-3"
           >
+            {row.matched_code &&
+              row.matched_name &&
+              !row.candidates.some(
+                (c) => c.article_code === row.matched_code
+              ) && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onConfirmRecommendation()
+                  }}
+                  className={
+                    "mb-1.5 flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left text-sm " +
+                    (chosenCode === row.matched_code
+                      ? "border-primary shadow-[var(--ds-glow-violet)]"
+                      : "border-border")
+                  }
+                >
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {row.matched_code}
+                  </span>
+                  <span className="flex-1">{row.matched_name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {row.status === "matched_fund" ? (
+                      <>
+                        <Database className="mr-1 inline size-3" />
+                        Из фонда
+                      </>
+                    ) : (
+                      "Рекомендация AI"
+                    )}
+                  </span>
+                </button>
+              )}
+
             {row.candidates.map((c, i) => {
               const sel = c.article_code === chosenCode
               return (
@@ -168,17 +205,15 @@ export function ReviewRow({
               </button>
             ))}
 
-            {row.status === "no_match" && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onConfirmNoMatch()
-                }}
-                className="mt-2 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
-              >
-                Оставить без пары
-              </button>
-            )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onConfirmNoMatch()
+              }}
+              className="mt-2 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+            >
+              Оставить без пары
+            </button>
           </td>
         </tr>
       )}
