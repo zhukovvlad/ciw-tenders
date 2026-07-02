@@ -38,7 +38,17 @@ export function DoneScreen({
     setInFund(next)
     setReference(estimateId, next)
       .then((r) => {
-        if (seq === toggleSeq.current) setInFund(r.is_reference)
+        if (seq !== toggleSeq.current) return
+        setInFund(r.is_reference)
+        if (next && !r.is_reference && r.promoted === 0) {
+          // бэк не ставит is_reference при 0 промоученных строк (toggle_reference) —
+          // объясняем отщёлкивание, иначе тумблер выглядит сломанным
+          toast.info(
+            "Смета не добавлена в фонд: нет подтверждённых решений. " +
+              "Подтвердите или выберите статьи на шаге проверки и включите " +
+              "тумблер снова."
+          )
+        }
       })
       .catch((err: unknown) => {
         if (seq === toggleSeq.current) setInFund(!next)

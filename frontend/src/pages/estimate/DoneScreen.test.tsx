@@ -9,6 +9,8 @@ import { setReference } from "@/lib/api/estimates"
 vi.mock("@/lib/api/estimates", () => ({
   setReference: vi.fn().mockResolvedValue({ is_reference: true, promoted: 1 }),
 }))
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), info: vi.fn() } }))
+import { toast } from "sonner"
 
 describe("DoneScreen", () => {
   it("кнопки выгрузки и новой сметы работают", async () => {
@@ -77,6 +79,25 @@ describe("DoneScreen", () => {
     expect(setReference).toHaveBeenCalledWith(1, true)
     await vi.waitFor(() => {
       expect(toggle).toHaveAttribute("aria-checked", "false")
+    })
+  })
+
+  it("promoted=0 при включении → подсказка, почему тумблер отщёлкнулся", async () => {
+    vi.mocked(setReference).mockResolvedValueOnce({
+      is_reference: false,
+      promoted: 0,
+    })
+    render(
+      <DoneScreen
+        state={initReview("смета.xlsx", MOCK_ROWS)}
+        onExport={vi.fn()}
+        onNewEstimate={vi.fn()}
+        estimateId={1}
+      />
+    )
+    await userEvent.click(screen.getByRole("switch"))
+    await vi.waitFor(() => {
+      expect(toast.info).toHaveBeenCalled()
     })
   })
 
