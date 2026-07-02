@@ -226,4 +226,25 @@ describe("reviewState", () => {
     })
     expect(progress(s).reviewed).toBe(1)
   })
+
+  it("pick/reject на confident-строке не двигает progress() (спека editable-confident-rows §4)", () => {
+    const r = rowNum("confident")
+    const total0 = progress(base()).total
+    const picked = reviewReducer(base(), {
+      type: "manualPick",
+      row: r,
+      candidate: {
+        id: null,
+        article_code: "СМР-99-999",
+        name: "Ручная",
+        score: 0,
+      },
+    })
+    expect(progress(picked)).toEqual({ reviewed: 0, total: total0 })
+    const rejected = reviewReducer(base(), {
+      type: "confirmNoMatch",
+      row: r,
+    })
+    expect(progress(rejected)).toEqual({ reviewed: 0, total: total0 })
+  })
 })
