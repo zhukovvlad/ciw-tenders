@@ -137,6 +137,8 @@ class EstimateSummaryOut(BaseModel):
     nodes_count: int
     created_at: datetime
     completed_at: datetime | None = None
+    reviewed_count: int = 0
+    total_reviewable: int = 0
 
     @classmethod
     def from_entity(cls, s: EstimateSummary) -> EstimateSummaryOut:
@@ -144,7 +146,13 @@ class EstimateSummaryOut(BaseModel):
             id=s.id, filename=s.filename, status=s.status,
             nodes_count=s.nodes_count, created_at=s.created_at,
             completed_at=s.completed_at,
+            reviewed_count=s.reviewed_count, total_reviewable=s.total_reviewable,
         )
+
+
+class EstimateListOut(BaseModel):
+    items: list[EstimateSummaryOut]
+    total: int
 
 
 class MatchCandidateOut(BaseModel):

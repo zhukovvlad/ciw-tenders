@@ -35,6 +35,12 @@ _NS_MATCH = 0x4D415443  # "MATC" — namespace advisory-лока матчинг�
 
 class SqlAlchemyEstimateRepository(EstimateRepository):
     _COMPLETABLE = ("ready", "partial_error")
+    # ЗЕРКАЛО фронтового progress()/requiresDecision (frontend/src/lib/reviewState.ts):
+    # фронт определяет «требует решения» инверсией (не confident/matched_fund),
+    # бэк — прямым перечислением. При добавлении статуса строки синхронизировать
+    # оба места; разбиение полного множества статусов пинует тест
+    # test_reviewable_partition_covers_all_statuses.
+    _REVIEWABLE = ("needs_review", "no_match", "error")
 
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -117,33 +123,59 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             self._session.rollback()
             raise
 
-    def list_for_owner(self, owner_id: int, *, is_admin: bool) -> list[EstimateSummary]:
+    def list_for_owner(
+        self, owner_id: int, *, is_admin: bool, limit: int = 50, offset: int = 0
+    ) -> tuple[list[EstimateSummary], int]:
         counts = (
             select(
                 EstimateRowModel.estimate_id,
-                func.count().label("n"),
+                func.count()
+                .filter(EstimateRowModel.status != "excluded")
+                .label("n"),
+                func.count()
+                .filter(EstimateRowModel.status.in_(self._REVIEWABLE))
+                .label("reviewable"),
+                func.count()
+                .filter(
+                    EstimateRowModel.status.in_(self._REVIEWABLE),
+                    EstimateRowModel.review_status != "unreviewed",
+                )
+                .label("reviewed"),
             )
-            .where(EstimateRowModel.status != "excluded")
             .group_by(EstimateRowModel.estimate_id)
             .subquery()
         )
-        stmt = select(EstimateModel, func.coalesce(counts.c.n, 0)).outerjoin(
-            counts, counts.c.estimate_id == EstimateModel.id
-        )
+        stmt = select(
+            EstimateModel,
+            func.coalesce(counts.c.n, 0),
+            func.coalesce(counts.c.reviewable, 0),
+            func.coalesce(counts.c.reviewed, 0),
+        ).outerjoin(counts, counts.c.estimate_id == EstimateModel.id)
+        total_stmt = select(func.count()).select_from(EstimateModel)
         if not is_admin:
             stmt = stmt.where(EstimateModel.user_id == owner_id)
-        stmt = stmt.order_by(EstimateModel.created_at.desc())
+            total_stmt = total_stmt.where(EstimateModel.user_id == owner_id)
+        # id.desc() — tie-breaker: без него при равных created_at (batch-загрузка)
+        # порядок между запросами не гарантирован → дубли/потери на границе страниц
+        stmt = (
+            stmt.order_by(EstimateModel.created_at.desc(), EstimateModel.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        total = self._session.execute(total_stmt).scalar_one()
         return [
             EstimateSummary(
                 id=m.id,
                 filename=m.filename,
                 status=m.status,
-                nodes_count=int(n),
+                nodes_count=n,
                 created_at=m.created_at,
                 completed_at=m.completed_at,
+                reviewed_count=reviewed,
+                total_reviewable=reviewable,
             )
-            for m, n in self._session.execute(stmt)
-        ]
+            for m, n, reviewable, reviewed in self._session.execute(stmt)
+        ], total
 
     def set_completed(
         self, estimate_id: int, requester_id: int, *, is_admin: bool, completed: bool

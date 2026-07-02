@@ -191,6 +191,19 @@ def object_storage(client, estimate_repo):
 
 
 @pytest.fixture()
+def client_with_three_estimates(client, estimate_repo):
+    """TestClient (uid=1) с тремя сметами владельца — для тестов пагинации GET /estimates."""
+    from app.domain.entities import NewEstimate
+
+    for i in range(3):
+        estimate_repo.create(
+            NewEstimate(user_id=1, filename=f"e{i}.xlsx", original_object_key=f"k/e{i}.xlsx"),
+            [],
+        )
+    return client
+
+
+@pytest.fixture()
 def seed_estimate_with_source_index(estimate_repo):
     """Фабрика: создаёт смету с одним узлом с заданным source_index.
 

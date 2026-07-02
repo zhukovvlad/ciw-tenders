@@ -259,6 +259,8 @@ class EstimateSummary:
     nodes_count: int
     created_at: datetime
     completed_at: datetime | None = None  # оператор закрыл ревью (этап 1 UX); None = открыта
+    reviewed_count: int = 0        # решённые из требующих решения (зеркало фронтового progress())
+    total_reviewable: int = 0      # строки status ∈ (needs_review, no_match, error)
 
 
 @dataclass(frozen=True, slots=True)

@@ -412,20 +412,34 @@ class FakeEstimateRepository(EstimateRepository):
         self._keys[eid] = new.original_object_key
         return est
 
-    def list_for_owner(self, owner_id: int, *, is_admin: bool) -> list[EstimateSummary]:
-        return [
-            EstimateSummary(
-                id=e.id,
-                filename=e.filename,
-                status=self.statuses.get(e.id, e.status),
-                nodes_count=sum(
-                    1 for r in e.rows if self.nodes[r.id]["status"] != "excluded"
-                ),
-                created_at=e.created_at,
-            )
-            for e in self.estimates.values()
-            if is_admin or e.user_id == owner_id
+    _REVIEWABLE = ("needs_review", "no_match", "error")
+
+    def list_for_owner(
+        self, owner_id: int, *, is_admin: bool, limit: int = 50, offset: int = 0
+    ) -> tuple[list[EstimateSummary], int]:
+        matches = [
+            e for e in self.estimates.values() if is_admin or e.user_id == owner_id
         ]
+        matches.sort(key=lambda e: (e.created_at, e.id), reverse=True)
+        total = len(matches)
+        page = matches[offset : offset + limit]
+        summaries = []
+        for e in page:
+            node_dicts = [self.nodes[r.id] for r in e.rows]
+            reviewable = [n for n in node_dicts if n["status"] in self._REVIEWABLE]
+            reviewed = sum(1 for n in reviewable if n["review_status"] != "unreviewed")
+            summaries.append(
+                EstimateSummary(
+                    id=e.id,
+                    filename=e.filename,
+                    status=self.statuses.get(e.id, e.status),
+                    nodes_count=sum(1 for n in node_dicts if n["status"] != "excluded"),
+                    created_at=e.created_at,
+                    reviewed_count=reviewed,
+                    total_reviewable=len(reviewable),
+                )
+            )
+        return summaries, total
 
     def get(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> Estimate | None:
         est = self.estimates.get(estimate_id)

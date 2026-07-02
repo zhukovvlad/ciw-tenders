@@ -179,7 +179,11 @@ class EstimateRepository(ABC):
     def create(self, new: NewEstimate, nodes: list[EstimateNode]) -> Estimate: ...
 
     @abstractmethod
-    def list_for_owner(self, owner_id: int, *, is_admin: bool) -> list[EstimateSummary]: ...
+    def list_for_owner(
+        self, owner_id: int, *, is_admin: bool, limit: int = 50, offset: int = 0
+    ) -> tuple[list[EstimateSummary], int]:
+        """Страница смет владельца (админ — все) + общее число. Сортировка: created_at DESC."""
+        ...
 
     @abstractmethod
     def set_completed(

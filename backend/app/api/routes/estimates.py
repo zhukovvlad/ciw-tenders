@@ -24,6 +24,7 @@ from app.api.schemas import (
     CompletionOut,
     CompletionToggleIn,
     EstimateDetailOut,
+    EstimateListOut,
     EstimateRowOut,
     EstimateSummaryOut,
     EstimateUploadResponse,
@@ -120,14 +121,18 @@ async def upload_estimate(
     )
 
 
-@router.get("", response_model=list[EstimateSummaryOut])
+@router.get("", response_model=EstimateListOut)
 def list_estimates(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
     service: EstimateService = Depends(get_estimate_service),
-) -> list[EstimateSummaryOut]:
+) -> EstimateListOut:
     is_admin = user.role is Role.ADMIN
-    items = service.list(user.id or 0, is_admin=is_admin)
-    return [EstimateSummaryOut.from_entity(s) for s in items]
+    items, total = service.list(user.id or 0, is_admin=is_admin, limit=limit, offset=offset)
+    return EstimateListOut(
+        items=[EstimateSummaryOut.from_entity(s) for s in items], total=total
+    )
 
 
 @router.get("/{estimate_id}", response_model=EstimateDetailOut)
