@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 from app.domain.decision_fund import AppliedFundHit, FundEntry, FundHit
 from app.domain.entities import (
@@ -31,7 +31,7 @@ from app.domain.entities import (
     User,
     WorkClass,
 )
-from app.domain.errors import StorageError, TokenError
+from app.domain.errors import EstimateNotCompletableError, StorageError, TokenError
 from app.domain.ports import (
     ArticleImportRepository,
     ArticleRepository,
@@ -355,6 +355,7 @@ class FakeEstimateRepository(EstimateRepository):
         self.stale_running: set[int] = set()
         self._node_seq = 0
         self.reference_ids: set[int] = set()  # золотой фонд: сметы-эталоны
+        self.completed: dict[int, datetime | None] = {}  # этап 1 UX: завершение ревью
 
     def create(self, new: NewEstimate, nodes: list[EstimateNode]) -> Estimate:
         self.create_calls += 1
@@ -437,6 +438,7 @@ class FakeEstimateRepository(EstimateRepository):
             created_at=est.created_at, rows=rows,
             status_detail=self.details.get(est.id),
             is_reference=estimate_id in self.reference_ids,
+            completed_at=self.completed.get(estimate_id),
         )
 
     @staticmethod
@@ -463,6 +465,18 @@ class FakeEstimateRepository(EstimateRepository):
             return None
         self.estimates.pop(estimate_id)
         return self._keys.pop(estimate_id)
+
+    def set_completed(
+        self, estimate_id: int, requester_id: int, *, is_admin: bool, completed: bool
+    ) -> tuple[str, datetime | None] | None:
+        est = self.estimates.get(estimate_id)
+        if est is None or (not is_admin and est.user_id != requester_id):
+            return None
+        status = self.statuses.get(estimate_id, est.status)
+        if completed and status not in ("ready", "partial_error"):
+            raise EstimateNotCompletableError(f"Смета в статусе '{status}' не может быть завершена")
+        self.completed[estimate_id] = datetime.now(UTC) if completed else None
+        return status, self.completed[estimate_id]
 
     # --- SP2 ---
     def try_matching_lock(self, estimate_id: int) -> bool:

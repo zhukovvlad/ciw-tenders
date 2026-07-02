@@ -54,3 +54,11 @@ class RowNotMatchedError(Exception):
 
 class InvalidReviewActionError(Exception):
     """Действие не применимо к строке (confirm без matched_*, статья не найдена). → 422."""
+
+
+class EstimateNotCompletableError(Exception):
+    """Завершить можно только смету в терминально-успешном статусе (ready/partial_error)."""
+
+
+class EstimateCompletedError(Exception):
+    """Смета завершена (completed_at) — решения ревью read-only до возобновления."""

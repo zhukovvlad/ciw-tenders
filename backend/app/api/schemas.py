@@ -198,6 +198,14 @@ class ReferenceToggleIn(BaseModel):
     is_reference: bool
 
 
+class CompletionToggleIn(BaseModel):
+    completed: bool
+
+
+class CompletionOut(BaseModel):
+    completed_at: datetime | None
+
+
 class EstimateDetailOut(BaseModel):
     id: int
     filename: str

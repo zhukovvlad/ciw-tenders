@@ -7,7 +7,7 @@ final_* морозятся в момент решения: кандидат → 
 from __future__ import annotations
 
 from app.domain.entities import ReviewStatus, StoredEstimateRow
-from app.domain.errors import InvalidReviewActionError, RowNotMatchedError
+from app.domain.errors import EstimateCompletedError, InvalidReviewActionError, RowNotMatchedError
 from app.domain.ports import ArticleRepository, EstimateRepository
 
 _PENDING = "pending"
@@ -31,6 +31,10 @@ class EstimateReviewService:
         est = self._estimates.get(estimate_id, requester_id, is_admin=is_admin)
         if est is None:
             raise LookupError("Смета не найдена")  # роут → 404
+        if est.completed_at is not None:
+            raise EstimateCompletedError(
+                "Смета завершена — возобновите проверку, чтобы менять решения"
+            )
         row = next((r for r in est.rows if r.id == row_id), None)
         if row is None:
             raise LookupError("Строка не найдена")

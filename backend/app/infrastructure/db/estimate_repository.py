@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from sqlalchemy import and_, bindparam, case, delete, func, or_, select, text, update
 from sqlalchemy.orm import Session
@@ -25,6 +26,7 @@ from app.domain.entities import (
     PromotableRow,
     StoredEstimateRow,
 )
+from app.domain.errors import EstimateNotCompletableError
 from app.domain.ports import EstimateRepository
 from app.infrastructure.db.models import EstimateModel, EstimateRowModel
 
@@ -32,6 +34,8 @@ _NS_MATCH = 0x4D415443  # "MATC" — namespace advisory-лока матчинг�
 
 
 class SqlAlchemyEstimateRepository(EstimateRepository):
+    _COMPLETABLE = ("ready", "partial_error")
+
     def __init__(self, session: Session) -> None:
         self._session = session
 
@@ -140,6 +144,20 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             )
             for m, n in self._session.execute(stmt)
         ]
+
+    def set_completed(
+        self, estimate_id: int, requester_id: int, *, is_admin: bool, completed: bool
+    ) -> tuple[str, datetime | None] | None:
+        est = self._session.get(EstimateModel, estimate_id)
+        if est is None or (not is_admin and est.user_id != requester_id):
+            return None
+        if completed and est.status not in self._COMPLETABLE:
+            raise EstimateNotCompletableError(
+                f"Смета в статусе '{est.status}' не может быть завершена"
+            )
+        est.completed_at = datetime.now(UTC) if completed else None
+        self._session.commit()
+        return est.status, est.completed_at
 
     def get(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> Estimate | None:
         est = self._session.get(EstimateModel, estimate_id)

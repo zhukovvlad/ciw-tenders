@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from app.domain.entities import Estimate, EstimateSummary, NewEstimate, StructuralAnomaly
 from app.domain.ports import EstimateRepository, ObjectStorage, TaskQueue
@@ -69,3 +70,14 @@ class EstimateService:
         except Exception:  # noqa: BLE001
             pass
         return True
+
+    def set_completed(
+        self, estimate_id: int, requester_id: int, *, is_admin: bool, completed: bool
+    ) -> datetime | None:
+        res = self._repository.set_completed(
+            estimate_id, requester_id, is_admin=is_admin, completed=completed
+        )
+        if res is None:
+            raise LookupError("Смета не найдена")
+        _, completed_at = res
+        return completed_at
