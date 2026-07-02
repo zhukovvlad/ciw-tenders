@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from sqlalchemy import and_, case, delete, func, or_, select, text, update
 from sqlalchemy.orm import Session
 
+from app.domain.decision_fund import AppliedFundHit
 from app.domain.entities import (
     ClassifiableNode,
     Estimate,
@@ -414,13 +417,19 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
         )
         return [PendingNode(r.id, r.embedding_input) for r in self._session.execute(stmt)]
 
-    def save_fund_hit(self, node_id: int, article_id: int, code: str, name: str) -> None:
-        # CAS по unreviewed — как save_node_match; candidates/score обнуляем (снимок без кандидатов)
-        self._session.execute(
-            update(EstimateRowModel)
-            .where(EstimateRowModel.id == node_id, EstimateRowModel.review_status == "unreviewed")
-            .values(status="matched_fund", matched_article_id=article_id,
-                    matched_code=code, matched_name=name, candidates=None, score=None,
-                    match_error=None)
-        )
+    def save_fund_hits(self, hits: Sequence[AppliedFundHit]) -> None:
+        # CAS по unreviewed — как save_node_match; candidates/score обнуляем (снимок без кандидатов).
+        # Один commit на весь фонд-пасс (зеркало save_node_classifications): N commits → 1
+        # (fsync + атомарность пасса); UPDATE-ы по-прежнему поштучные.
+        for h in hits:
+            self._session.execute(
+                update(EstimateRowModel)
+                .where(
+                    EstimateRowModel.id == h.row_id,
+                    EstimateRowModel.review_status == "unreviewed",
+                )
+                .values(status="matched_fund", matched_article_id=h.article_id,
+                        matched_code=h.code, matched_name=h.name, candidates=None, score=None,
+                        match_error=None)
+            )
         self._session.commit()

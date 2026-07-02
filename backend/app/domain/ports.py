@@ -9,7 +9,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
-from app.domain.decision_fund import FundEntry, FundHit
+from app.domain.decision_fund import AppliedFundHit, FundEntry, FundHit
 from app.domain.entities import (
     ArticleCandidate,
     BenchmarkNodeSeed,
@@ -311,10 +311,11 @@ class EstimateRepository(ABC):
         ...
 
     @abstractmethod
-    def save_fund_hit(self, node_id: int, article_id: int, code: str, name: str) -> None:
-        """Пишет снимок «решено фондом» (matched_fund) в обход арбитра. CAS по
-        review_status='unreviewed' — как save_node_match. candidates/score обнуляются
-        (снимок без кандидатов)."""
+    def save_fund_hits(self, hits: Sequence[AppliedFundHit]) -> None:
+        """Пишет снимки «решено фондом» (matched_fund) в обход арбитра. CAS по
+        review_status='unreviewed' на каждую строку — как save_node_match;
+        candidates/score обнуляются (снимок без кандидатов). Один commit на батч
+        (зеркало save_node_classifications)."""
         ...
 
 

@@ -7,35 +7,43 @@
 
 from __future__ import annotations
 
+from app.domain.decision_fund import AppliedFundHit
 from tests.fakes import FakeEstimateRepository, Row, seed_estimate_with_rows
 
 
-def test_save_fund_hit_writes_snapshot() -> None:
+def test_save_fund_hits_writes_snapshot_bulk() -> None:
     repo = FakeEstimateRepository()
     eid = seed_estimate_with_rows(
-        repo, [Row(embedding_input="к. лист", status="pending", review_status="unreviewed")]
+        repo,
+        [
+            Row(embedding_input="к. лист", status="pending", review_status="unreviewed"),
+            Row(embedding_input="к. лист 2", status="pending", review_status="unreviewed"),
+        ],
     )
-    rid = next(n["id"] for n in repo.nodes.values() if n["estimate_id"] == eid)
+    ids = sorted(n["id"] for n in repo.nodes.values() if n["estimate_id"] == eid)
 
-    repo.save_fund_hit(rid, article_id=5, code="1.4", name="Мокап")
+    repo.save_fund_hits([
+        AppliedFundHit(ids[0], article_id=5, code="1.4", name="Мокап"),
+        AppliedFundHit(ids[1], article_id=7, code="1.5", name="Иное"),
+    ])
 
-    node = repo.nodes[rid]
-    assert node["status"] == "matched_fund"
-    assert node["matched_article_id"] == 5
-    assert node["matched_code"] == "1.4"
-    assert node["matched_name"] == "Мокап"
-    assert node["candidates"] == []
-    assert node["score"] is None
+    assert [repo.nodes[i]["status"] for i in ids] == ["matched_fund", "matched_fund"]
+    assert repo.nodes[ids[0]]["matched_article_id"] == 5
+    assert repo.nodes[ids[0]]["matched_code"] == "1.4"
+    assert repo.nodes[ids[0]]["matched_name"] == "Мокап"
+    assert repo.nodes[ids[1]]["matched_code"] == "1.5"
+    assert repo.nodes[ids[0]]["candidates"] == []
+    assert repo.nodes[ids[0]]["score"] is None
 
 
-def test_save_fund_hit_cas_skips_reviewed() -> None:
+def test_save_fund_hits_cas_skips_reviewed() -> None:
     repo = FakeEstimateRepository()
     eid = seed_estimate_with_rows(
         repo, [Row(embedding_input="x", status="pending", review_status="confirmed")]
     )
     rid = next(n["id"] for n in repo.nodes.values() if n["estimate_id"] == eid)
 
-    repo.save_fund_hit(rid, article_id=5, code="1.4", name="Мокап")
+    repo.save_fund_hits([AppliedFundHit(rid, article_id=5, code="1.4", name="Мокап")])
 
     assert repo.nodes[rid]["status"] != "matched_fund"  # CAS по unreviewed не дал перезаписать
 

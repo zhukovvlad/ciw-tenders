@@ -19,7 +19,12 @@ from app.domain.classification import (
     leaf_flags,
     resolve_ancestor_indices,
 )
-from app.domain.decision_fund import cache_key_hash, normalize_cache_key, resolve_fund_decision
+from app.domain.decision_fund import (
+    AppliedFundHit,
+    cache_key_hash,
+    normalize_cache_key,
+    resolve_fund_decision,
+)
 from app.domain.entities import (
     EstimateRowStatus,
     EstimateStatus,
@@ -209,16 +214,17 @@ class EstimateMatchingService:
             return 0
         by_hash = {n.row_id: cache_key_hash(normalize_cache_key(n.embedding_input)) for n in nodes}
         found = self._fund.lookup(list(set(by_hash.values())), CRUMB_DERIVATION_VERSION)
-        hits = 0
+        applied: list[AppliedFundHit] = []
         for n in nodes:
             candidates = found.get(by_hash[n.row_id], [])
             decision = resolve_fund_decision([h.article_id for h in candidates])
             if decision is None:
                 continue  # промах/конфликт → остаётся pending → RAG
             hit = next(h for h in candidates if h.article_id == decision)
-            self._estimates.save_fund_hit(n.row_id, hit.article_id, hit.code, hit.name)
-            hits += 1
-        return hits
+            applied.append(AppliedFundHit(n.row_id, hit.article_id, hit.code, hit.name))
+        if applied:
+            self._estimates.save_fund_hits(applied)  # bulk: один commit на фонд-пасс
+        return len(applied)
 
     def _match_nodes(self, estimate_id: int) -> Counter[EstimateRowStatus]:
         counts: Counter[EstimateRowStatus] = Counter()

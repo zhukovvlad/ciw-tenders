@@ -22,6 +22,16 @@ class FundHit:
 
 
 @dataclass(frozen=True, slots=True)
+class AppliedFundHit:
+    """Решённый фонд-хит для bulk-записи снимков в строки сметы (один commit на пасс)."""
+
+    row_id: int
+    article_id: int
+    code: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
 class FundEntry:
     """Запись для upsert при промоушене."""
 

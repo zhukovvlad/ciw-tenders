@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from app.domain.decision_fund import FundEntry, FundHit
+from app.domain.decision_fund import AppliedFundHit, FundEntry, FundHit
 from app.domain.entities import (
     ArticleCandidate,
     ClassifiableNode,
@@ -642,17 +642,19 @@ class FakeEstimateRepository(EstimateRepository):
             and n["review_status"] == "unreviewed"
         ]
 
-    def save_fund_hit(self, node_id: int, article_id: int, code: str, name: str) -> None:
-        n = self.nodes[node_id]
-        if n["review_status"] != "unreviewed":
-            return  # CAS: зеркало save_node_match — человек тронул строку, не затираем
-        n["status"] = "matched_fund"
-        n["matched_article_id"] = article_id
-        n["matched_code"] = code
-        n["matched_name"] = name
-        n["candidates"] = []
-        n["score"] = None
-        n["match_error"] = None
+    def save_fund_hits(self, hits: Sequence[AppliedFundHit]) -> None:
+        # зеркало SQL: CAS по unreviewed на каждую строку, «один commit» на батч
+        for h in hits:
+            n = self.nodes[h.row_id]
+            if n["review_status"] != "unreviewed":
+                continue  # CAS: зеркало save_node_match — человек тронул строку, не затираем
+            n["status"] = "matched_fund"
+            n["matched_article_id"] = h.article_id
+            n["matched_code"] = h.code
+            n["matched_name"] = h.name
+            n["candidates"] = []
+            n["score"] = None
+            n["match_error"] = None
 
 
 @dataclass
