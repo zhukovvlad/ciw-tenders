@@ -41,7 +41,8 @@ def test_export_writes_final_code_to_node_physrow(
     assert resp.status_code == 200
     wb = openpyxl.load_workbook(BytesIO(resp.content))
     ws = wb.active
-    assert ws.cell(row=35, column=3).value == "ИТ-9"  # колонка «Статья СМР»
+    # колонка «Статья СМР»: формат «(код) Название»
+    assert ws.cell(row=35, column=3).value == "(ИТ-9) Выбрано"
 
 
 def test_export_unreviewed_needs_review_is_blank(

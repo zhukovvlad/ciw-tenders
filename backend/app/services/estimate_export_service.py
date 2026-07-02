@@ -67,7 +67,16 @@ class EstimateExportService:
         if row.status == "excluded":
             return ""  # орг-заголовок исключён из матчинга → «Статья СМР» всегда пуста
         if row.review_status in ("confirmed", "overridden"):
-            return row.final_code or ""  # для confirmed это matched_code (заморожен в правке)
-        if row.review_status == "unreviewed" and row.status == "confident":
-            return row.matched_code or ""
+            # для confirmed final_* = matched_* (заморожен в правке)
+            return _format_article(row.final_code, row.final_name)
+        if row.review_status == "unreviewed" and row.status in ("confident", "matched_fund"):
+            # matched_fund авто-подтверждается только на фронте (review_status в БД unreviewed)
+            return _format_article(row.matched_code, row.matched_name)
         return ""  # rejected ИЛИ unreviewed + needs_review/no_match/error/pending → пусто
+
+
+def _format_article(code: str | None, name: str | None) -> str:
+    """Ячейка «Статья СМР»: «(код) Название»; без имени — голый код, без кода — пусто."""
+    if not code:
+        return ""
+    return f"({code}) {name}" if name else code
