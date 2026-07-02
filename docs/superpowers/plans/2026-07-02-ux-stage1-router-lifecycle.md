@@ -156,9 +156,10 @@ git commit -m "feat(estimates): поле completed_at — серверное с�
 
 **Files:**
 - Modify: `backend/app/domain/ports.py` (EstimateRepository, рядом с `list_for_owner` ~181)
-- Modify: `backend/app/domain/errors.py` (новая ошибка)
+- Modify: `backend/app/domain/errors.py` (две новые ошибки)
 - Modify: `backend/app/infrastructure/db/estimate_repository.py`
 - Modify: `backend/app/services/estimate_service.py`
+- Modify: `backend/app/services/estimate_review_service.py` (guard read-only)
 - Modify: `backend/app/api/schemas.py` (CompletionToggleIn/Out)
 - Modify: `backend/app/api/routes/estimates.py`
 - Modify: `backend/tests/fakes.py` (FakeEstimateRepository)
@@ -216,7 +217,21 @@ def test_complete_foreign_estimate_raises_lookup_for_non_admin() -> None:
     service, est = _service_with_ready_estimate()  # владелец user_id=1
     with pytest.raises(LookupError):
         service.set_completed(est.id, 2, is_admin=False, completed=True)
+
+
+def test_review_patch_rejected_for_completed_estimate() -> None:
+    """Инвариант: завершённая смета read-only и на сервере, не только в UI.
+
+    Иначе вторая вкладка с живым экраном ревью (или прямой запрос) молча
+    перезапишет решения после того, как оператор закрыл смету.
+    """
+    review_service, repo, est = _review_service_with_ready_estimate()  # по паттерну test_estimate_review.py
+    repo.set_completed(est.id, 1, is_admin=False, completed=True)
+    with pytest.raises(EstimateCompletedError):
+        review_service.apply(est.id, _first_row_id(est), "confirm", None, 1, is_admin=False)
 ```
+
+(`EstimateCompletedError` — импорт из `app.domain.errors`; хелперы ревью-сервиса — по образцу `tests/test_estimate_review.py`.)
 
 - [ ] **Step 2: Убедиться, что падают**
 
@@ -230,6 +245,17 @@ Expected: FAIL — `ImportError: EstimateNotCompletableError` / `AttributeError:
 ```python
 class EstimateNotCompletableError(Exception):
     """Завершить можно только смету в терминально-успешном статусе (ready/partial_error)."""
+
+
+class EstimateCompletedError(Exception):
+    """Смета завершена (completed_at) — решения ревью read-only до возобновления."""
+```
+
+`services/estimate_review_service.py`, в `apply()` сразу после проверки `est is None`:
+
+```python
+        if est.completed_at is not None:
+            raise EstimateCompletedError("Смета завершена — возобновите проверку, чтобы менять решения")
 ```
 
 `domain/ports.py`, в `EstimateRepository`:
@@ -281,7 +307,7 @@ class EstimateNotCompletableError(Exception):
         return completed_at
 ```
 
-`tests/fakes.py`, `FakeEstimateRepository` (стиль соседних методов; хранить в `self.completed: dict[int, datetime | None]`):
+`tests/fakes.py`, `FakeEstimateRepository`: в `__init__` добавить `self.completed: dict[int, datetime | None] = {}`; в методе `get()` пробрасывать `completed_at=self.completed.get(estimate_id)` в собираемый `Estimate` (иначе guard ревью-сервиса не увидит завершение). Сам метод:
 
 ```python
     def set_completed(
@@ -324,6 +350,17 @@ def test_patch_completion_route_404(client_with_ready_estimate) -> None:
     client, _ = client_with_ready_estimate
     resp = client.patch("/estimates/9999/completion", json={"completed": True})
     assert resp.status_code == 404
+
+
+def test_review_row_conflict_when_estimate_completed(client_with_ready_estimate) -> None:
+    """Read-only инвариант сквозь роут: PATCH решения по завершённой смете → 409."""
+    client, est_id = client_with_ready_estimate
+    client.patch(f"/estimates/{est_id}/completion", json={"completed": True})
+    resp = client.patch(
+        f"/estimates/{est_id}/rows/{_first_row_id_of(client, est_id)}/review",
+        json={"action": "confirm", "article_id": None},
+    )
+    assert resp.status_code == 409
 ```
 
 Run: то же — Expected: FAIL 404/405 (роута нет).
@@ -362,6 +399,15 @@ def toggle_completion(
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return CompletionOut(completed_at=completed_at)
 ```
+
+В существующем `review_row` добавить ветку (перед `except RowNotMatchedError`):
+
+```python
+    except EstimateCompletedError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+```
+
+(Фронту нового кода не нужно: 409 попадает в существующий catch `patchRowReview` → `reopen` + toast с текстом ошибки. Роут-тест на этот путь — в Step 5.)
 
 - [ ] **Step 7: Все тесты бэка зелёные**
 
@@ -430,6 +476,19 @@ def test_list_route_paginates(client_with_three_estimates) -> None:
 def test_list_route_default_shape(client_with_three_estimates) -> None:
     body = client_with_three_estimates.get("/estimates").json()
     assert set(body.keys()) == {"items", "total"}
+
+
+def test_reviewable_partition_covers_all_statuses() -> None:
+    """Ломается громко при добавлении статуса строки: новый статус обязан быть
+    явно отнесён к «требует решения» / «решено без оператора» / «вне ревью» —
+    и синхронизирован с фронтовым requiresDecision (reviewState.ts)."""
+    from app.domain.entities import EstimateRowStatus
+    from app.infrastructure.db.estimate_repository import EstimateRepositoryImpl  # сверить имя класса
+
+    reviewable = set(EstimateRepositoryImpl._REVIEWABLE)
+    auto_decided = {"confident", "matched_fund"}
+    out_of_review = {"pending", "excluded"}
+    assert {s.value for s in EstimateRowStatus} == reviewable | auto_decided | out_of_review
 ```
 
 Плюс интеграционный тест SQL-агрегатов — в стиле `tests/test_decision_fund_repository_integration.py` (если в проекте есть маркер интеграции с реальной БД — использовать его; иначе пропустить SQL-тест и проверить агрегаты вручную через Step 6):
@@ -467,6 +526,11 @@ Expected: FAIL (нет полей/EstimateListOut).
 `infrastructure/db/estimate_repository.py` — заменить `list_for_owner` (строки 115–140):
 
 ```python
+    # ЗЕРКАЛО фронтового progress()/requiresDecision (frontend/src/lib/reviewState.ts):
+    # фронт определяет «требует решения» инверсией (не confident/matched_fund),
+    # бэк — прямым перечислением. При добавлении статуса строки синхронизировать
+    # оба места; разбиение полного множества статусов пинует тест
+    # test_reviewable_partition_covers_all_statuses.
     _REVIEWABLE = ("needs_review", "no_match", "error")
 
     def list_for_owner(
@@ -501,7 +565,13 @@ Expected: FAIL (нет полей/EstimateListOut).
         if not is_admin:
             stmt = stmt.where(EstimateModel.user_id == owner_id)
             total_stmt = total_stmt.where(EstimateModel.user_id == owner_id)
-        stmt = stmt.order_by(EstimateModel.created_at.desc()).limit(limit).offset(offset)
+        # id.desc() — tie-breaker: без него при равных created_at (batch-загрузка)
+        # порядок между запросами не гарантирован → дубли/потери на границе страниц
+        stmt = (
+            stmt.order_by(EstimateModel.created_at.desc(), EstimateModel.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         total = self._session.execute(total_stmt).scalar_one()
         return [
             EstimateSummary(
@@ -1001,11 +1071,25 @@ it("«Завершить» дергает setCompletion и показывает 
   vi.mocked(getEstimate).mockResolvedValue(READY)
   vi.mocked(setCompletion).mockResolvedValue({ completedAt: "2026-07-02T12:00:00Z" })
   renderAt(5)
-  await userEvent.click(await screen.findByRole("button", { name: /Завершить/ }))
+  // имя точное, не regex: после открытия диалога /Завершить/ матчил бы две кнопки
+  await userEvent.click(await screen.findByRole("button", { name: "Завершить" }))
   // строка нерешённая → AlertDialog «осталось N спорных»
-  await userEvent.click(screen.getByRole("button", { name: /Завершить всё равно/ }))
+  await userEvent.click(screen.getByRole("button", { name: "Завершить всё равно" }))
   expect(await screen.findByText(/Возобновить проверку/)).toBeInTheDocument()
   expect(setCompletion).toHaveBeenCalledWith(5, true)
+})
+
+it("blocked во время поллинга → алерт с деталью, а не generic-ошибка", async () => {
+  vi.mocked(getEstimate)
+    .mockResolvedValueOnce({ ...READY, status: "pending", rows: [] })
+    .mockResolvedValueOnce({
+      ...READY, status: "blocked", statusDetail: "нет строк СМР", rows: [],
+    })
+  vi.mocked(pollEstimate).mockRejectedValue(
+    new Error("Обработка сметы заблокирована")
+  )
+  renderAt(5)
+  expect(await screen.findByRole("alert")).toHaveTextContent("нет строк СМР")
 })
 ```
 
@@ -1065,6 +1149,7 @@ export function EstimatePage() {
 
   const [meta, setMeta] = useState<Meta>({ kind: "loading" })
   const [fileName, setFileName] = useState("")
+  const [isReference, setIsReference] = useState(false)
   const [prog, setProg] = useState<Progress>({
     phase: "parsing", done: 0, total: 0, etaSeconds: null,
   })
@@ -1077,23 +1162,36 @@ export function EstimatePage() {
     try {
       const detail = await getEstimate(id)
       setFileName(detail.fileName)
+      setIsReference(detail.isReference)
       if (detail.status === "blocked") {
         setMeta({ kind: "blocked", detail: detail.statusDetail })
         return
       }
       if (detail.status === "pending" || detail.status === "running") {
         setMeta({ kind: "processing" })
-        const { fileName: fn, rows } = await pollEstimate(
-          id,
-          (status, done, total) => {
-            setProg({
-              phase: status === "running" ? "matching" : "parsing",
-              done, total, etaSeconds: null,
-            })
+        try {
+          const { fileName: fn, rows } = await pollEstimate(
+            id,
+            (status, done, total) => {
+              setProg({
+                phase: status === "running" ? "matching" : "parsing",
+                done, total, etaSeconds: null,
+              })
+            }
+          )
+          dispatch({ type: "load", state: initReview(fn || detail.fileName, rows) })
+          setMeta({ kind: "open" })
+        } catch (pollErr) {
+          // Смета может уйти в blocked ВО ВРЕМЯ поллинга (напр., нет строк СМР):
+          // pollEstimate реджектится generic-ошибкой без statusDetail.
+          // Перечитываем статус один раз, чтобы показать честный алерт отказа.
+          const fresh = await getEstimate(id) // упадёт — поймает внешний catch
+          if (fresh.status === "blocked") {
+            setMeta({ kind: "blocked", detail: fresh.statusDetail })
+            return
           }
-        )
-        dispatch({ type: "load", state: initReview(fn || detail.fileName, rows) })
-        setMeta({ kind: "open" })
+          throw pollErr
+        }
         return
       }
       dispatch({
@@ -1184,6 +1282,7 @@ export function EstimatePage() {
       <DoneScreen
         state={state}
         estimateId={id}
+        isReference={isReference}
         onExport={() => void handleExport()}
         onResume={() => toggleCompletion(false)}
       />
@@ -1274,7 +1373,7 @@ function NotFound() {
 
 - [ ] **Step 4: DoneScreen — возобновление**
 
-Пропсы: `onNewEstimate: () => void` → убрать; добавить `onResume: () => void`. Вместо кнопки «＋ Загрузить следующую смету»:
+Пропсы: `onNewEstimate: () => void` → убрать; добавить `onResume: () => void` и `isReference: boolean`. Собственный `useEffect` с `getEstimate` ради гидратации `isReference` удалить — значение приходит пропсом от `EstimatePage` (который только что делал этот GET); `useState(false)` → `useState(isReference)`, логика тумблера (`setReference`, `toggleSeq`) не меняется. Вместо кнопки «＋ Загрузить следующую смету»:
 
 ```tsx
 <div className="mt-4 flex flex-col items-center gap-2">
