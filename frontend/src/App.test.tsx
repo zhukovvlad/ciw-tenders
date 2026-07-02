@@ -7,12 +7,10 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { AUTH_TOKEN_KEY } from "@/lib/api/client"
 import * as authApi from "@/lib/api/auth"
 import * as articlesApi from "@/lib/api/articles"
-import { clearReview } from "@/lib/session"
 
 afterEach(() => {
   sessionStorage.clear()
   vi.restoreAllMocks()
-  clearReview()
 })
 
 describe("App", () => {
