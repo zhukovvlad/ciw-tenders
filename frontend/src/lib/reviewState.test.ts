@@ -142,6 +142,50 @@ describe("reviewState", () => {
     })
   })
 
+  it("initReview гидратирует решения из review_status бэка (повторное открытие сметы)", () => {
+    const base = MOCK_ROWS.find((r) => r.status === "needs_review")!
+    const confirmed = {
+      ...base,
+      row_number: 9101,
+      review_status: "confirmed" as const,
+      final_code: "СМР-1",
+      final_name: "Подтверждённая",
+    }
+    const overridden = {
+      ...base,
+      row_number: 9102,
+      review_status: "overridden" as const,
+      final_code: "СМР-2",
+      final_name: "Ручная",
+    }
+    const rejected = {
+      ...base,
+      row_number: 9103,
+      review_status: "rejected" as const,
+    }
+    const untouched = { ...base, row_number: 9104 }
+    const s = initReview("смета.xlsx", [
+      confirmed,
+      overridden,
+      rejected,
+      untouched,
+    ])
+    expect(decisionFor(s, confirmed)).toMatchObject({
+      kind: "confirmed",
+      manual: false,
+      code: "СМР-1",
+    })
+    expect(decisionFor(s, overridden)).toMatchObject({
+      kind: "confirmed",
+      manual: true,
+      code: "СМР-2",
+    })
+    expect(decisionFor(s, rejected)).toEqual({ kind: "no_match" })
+    expect(decisionFor(s, untouched)).toEqual({ kind: "pending" })
+    // прогресс сразу учитывает уже решённые строки
+    expect(progress(s).reviewed).toBe(3)
+  })
+
   it("decisionFromRow выводит решение из review_status бэка", () => {
     const row = MOCK_ROWS.find((r) => r.status === "needs_review")!
     expect(decisionFromRow({ ...row, review_status: "unreviewed" })).toEqual({
