@@ -248,6 +248,7 @@ class Estimate:
     rows: list[StoredEstimateRow] = field(default_factory=list)
     status_detail: str | None = None
     is_reference: bool = False  # эталонная (источник фонда) — UI гидратирует тумблер
+    completed_at: datetime | None = None  # оператор закрыл ревью (этап 1 UX); None = открыта
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +258,7 @@ class EstimateSummary:
     status: str
     nodes_count: int
     created_at: datetime
+    completed_at: datetime | None = None  # оператор закрыл ревью (этап 1 UX); None = открыта
 
 
 @dataclass(frozen=True, slots=True)

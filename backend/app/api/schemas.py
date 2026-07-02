@@ -136,12 +136,14 @@ class EstimateSummaryOut(BaseModel):
     status: str
     nodes_count: int
     created_at: datetime
+    completed_at: datetime | None = None
 
     @classmethod
     def from_entity(cls, s: EstimateSummary) -> EstimateSummaryOut:
         return cls(
             id=s.id, filename=s.filename, status=s.status,
             nodes_count=s.nodes_count, created_at=s.created_at,
+            completed_at=s.completed_at,
         )
 
 
@@ -203,13 +205,14 @@ class EstimateDetailOut(BaseModel):
     status_detail: str | None = None
     created_at: datetime
     is_reference: bool = False
+    completed_at: datetime | None = None
     rows: list[EstimateRowOut]
 
     @classmethod
     def from_entity(cls, e: Estimate) -> EstimateDetailOut:
         return cls(
             id=e.id, filename=e.filename, status=e.status, status_detail=e.status_detail,
-            created_at=e.created_at, is_reference=e.is_reference,
+            created_at=e.created_at, is_reference=e.is_reference, completed_at=e.completed_at,
             rows=[EstimateRowOut.from_entity(r) for r in e.rows],
         )
 
