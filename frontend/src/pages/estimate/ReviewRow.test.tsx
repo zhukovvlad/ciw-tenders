@@ -57,8 +57,9 @@ describe("ReviewRow", () => {
     expect(
       screen.queryByText(/подтверждено оператором/i)
     ).not.toBeInTheDocument()
-    // score у фонд-хита нет by design (спека §4.3) — ячейка должна быть пустой, не «0.00»
-    expect(screen.queryByText("0.00")).not.toBeInTheDocument()
+    // score у фонд-хита нет by design (спека §4.3) — ячейка пустая; проверяем отсутствие
+    // РЕАЛЬНОГО значения фикстуры (0.96), иначе ассерция не упадёт при сломанном гарде
+    expect(screen.queryByText(fundRow.score.toFixed(2))).not.toBeInTheDocument()
   })
 
   it("фонд-строка кликабельна: клик зовёт onToggle (переопределение доступно)", async () => {
