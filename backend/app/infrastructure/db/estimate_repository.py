@@ -35,10 +35,10 @@ _NS_MATCH = 0x4D415443  # "MATC" — namespace advisory-лока матчинг�
 
 class SqlAlchemyEstimateRepository(EstimateRepository):
     _COMPLETABLE = ("ready", "partial_error")
-    # ЗЕРКАЛО фронтового progress()/requiresDecision (frontend/src/lib/reviewState.ts):
-    # фронт определяет «требует решения» инверсией (не confident/matched_fund),
-    # бэк — прямым перечислением. При добавлении статуса строки синхронизировать
-    # оба места; разбиение полного множества статусов пинует тест
+    # ЗЕРКАЛО фронтового requiresDecision (frontend/src/lib/reviewState.ts): оба
+    # места определяют «требует решения» одним и тем же прямым перечислением.
+    # При добавлении статуса строки синхронизировать оба места; разбиение
+    # полного множества статусов пинует тест
     # test_reviewable_partition_covers_all_statuses.
     _REVIEWABLE = ("needs_review", "no_match", "error")
 

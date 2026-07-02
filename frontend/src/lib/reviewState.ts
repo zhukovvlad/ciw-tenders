@@ -1,7 +1,17 @@
 import type { Candidate, Decision, MatchRow, ReviewState } from "@/lib/types"
 
+// ЗЕРКАЛО бэкового _REVIEWABLE (estimate_repository.py): бэк определяет «требует
+// решения» прямым перечислением, фронт — тем же перечислением здесь. При
+// добавлении статуса строки синхронизировать оба места; разбиение полного
+// множества статусов пинует test_reviewable_partition_covers_all_statuses.
+const REVIEWABLE: ReadonlyArray<MatchRow["status"]> = [
+  "needs_review",
+  "no_match",
+  "error",
+]
+
 export function requiresDecision(row: MatchRow): boolean {
-  return row.status !== "confident" && row.status !== "matched_fund"
+  return REVIEWABLE.includes(row.status)
 }
 
 export function initReview(fileName: string, rows: MatchRow[]): ReviewState {

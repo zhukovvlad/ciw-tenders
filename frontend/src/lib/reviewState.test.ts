@@ -131,6 +131,36 @@ describe("reviewState", () => {
     expect(requiresDecision(fundRow())).toBe(false)
   })
 
+  // Пин-тест на дефект финального ревью: requiresDecision был инверсией
+  // (не confident/matched_fund), из-за чего excluded (орг-заголовки) и pending
+  // ошибочно попадали в «требует решения» и в знаменатель progress().total.
+  // Тип MatchStatus (lib/types.ts) не включает "excluded"/"pending", хотя бэк
+  // присылает их в rows — см. docs/TECH_DEBT.md, «Этап 1 UX-роадмапа: полировка
+  // из ревью», п. (4). Кастуем статус точечно здесь, тип не расширяем.
+  it("requiresDecision: excluded и pending — вне ревью, не входят в progress().total", () => {
+    const excludedRow: MatchRow = {
+      ...fundRow(),
+      row_number: 9201,
+      status: "excluded" as unknown as MatchRow["status"],
+    }
+    const pendingStatusRow: MatchRow = {
+      ...fundRow(),
+      row_number: 9202,
+      status: "pending" as unknown as MatchRow["status"],
+    }
+    expect(requiresDecision(excludedRow)).toBe(false)
+    expect(requiresDecision(pendingStatusRow)).toBe(false)
+
+    const totalBefore = progress(base()).total
+    const s = initReview("смета.xlsx", [
+      ...MOCK_ROWS,
+      excludedRow,
+      pendingStatusRow,
+    ])
+    // добавление excluded/pending-строк не должно раздувать знаменатель прогресса
+    expect(progress(s).total).toBe(totalBefore)
+  })
+
   it("initReview авто-подтверждает matched_fund строку (не остаётся pending)", () => {
     const row = fundRow()
     const s = initReview("смета.xlsx", [row])
