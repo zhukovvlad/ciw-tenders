@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import case, delete, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -44,25 +44,30 @@ class SqlAlchemyDecisionFundRepository:
     def upsert(self, entries: Sequence[FundEntry]) -> None:
         if not entries:
             return
-        stmt = (
-            pg_insert(DecisionFundModel)
-            .values([
-                {
-                    "cache_key_hash": e.cache_key_hash, "cache_key": e.cache_key,
-                    "crumb_version": e.crumb_version, "article_id": e.article_id,
-                    "source_estimate_id": e.source_estimate_id, "source_row_id": e.source_row_id,
-                }
-                for e in entries
-            ])
-            .on_conflict_do_update(
-                constraint="uq_decision_fund_key_version_article",
-                set_={
-                    "votes": DecisionFundModel.votes + 1,
-                    "source_estimate_id": pg_insert(DecisionFundModel).excluded.source_estimate_id,
-                    "source_row_id": pg_insert(DecisionFundModel).excluded.source_row_id,
-                    "updated_at": text("now()"),
-                },
-            )
+        ins = pg_insert(DecisionFundModel).values([
+            {
+                "cache_key_hash": e.cache_key_hash, "cache_key": e.cache_key,
+                "crumb_version": e.crumb_version, "article_id": e.article_id,
+                "source_estimate_id": e.source_estimate_id, "source_row_id": e.source_row_id,
+            }
+            for e in entries
+        ])
+        stmt = ins.on_conflict_do_update(
+            constraint="uq_decision_fund_key_version_article",
+            set_={
+                # голос растёт только от НОВОГО источника: повторный промоушен той же сметы
+                # (ON→OFF→ON тумблера) не накручивает консенсус
+                "votes": case(
+                    (
+                        DecisionFundModel.source_estimate_id == ins.excluded.source_estimate_id,
+                        DecisionFundModel.votes,
+                    ),
+                    else_=DecisionFundModel.votes + 1,
+                ),
+                "source_estimate_id": ins.excluded.source_estimate_id,
+                "source_row_id": ins.excluded.source_row_id,
+                "updated_at": text("now()"),
+            },
         )
         self._session.execute(stmt)
         self._session.commit()  # один commit на весь промоушен (атомарность + латентность)

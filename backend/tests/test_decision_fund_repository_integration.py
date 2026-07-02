@@ -101,6 +101,26 @@ def test_lookup_filters_by_version(session: Session) -> None:
         _cleanup(session, hashes=[key_hash], article_ids=[a])
 
 
+def test_upsert_same_source_does_not_inflate_votes(session: Session) -> None:
+    # повторный промоушен той же сметы (ON→OFF→ON тумблера) не должен накручивать votes
+    a = _seed_article(session, "it_fund_1.7", "Мокап4")
+    repo = SqlAlchemyDecisionFundRepository(session)
+    key_hash = "it_fund_h4"
+    try:
+        repo.upsert([FundEntry(key_hash, "k4", 1, a, 10, 100)])
+        repo.upsert([FundEntry(key_hash, "k4", 1, a, 10, 100)])  # тот же источник
+        row = session.execute(
+            sa.text(
+                "SELECT votes, source_estimate_id FROM decision_fund "
+                "WHERE cache_key_hash=:h AND crumb_version=1 AND article_id=:a"
+            ),
+            {"h": key_hash, "a": a},
+        ).one()
+        assert row.votes == 1 and row.source_estimate_id == 10
+    finally:
+        _cleanup(session, hashes=[key_hash], article_ids=[a])
+
+
 def test_upsert_increments_votes_and_updates_source(session: Session) -> None:
     a = _seed_article(session, "it_fund_1.6", "Мокап3")
     repo = SqlAlchemyDecisionFundRepository(session)
