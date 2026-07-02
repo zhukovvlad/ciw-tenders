@@ -48,6 +48,25 @@ def test_promote_anti_inflation_skips_confirmed_fund_hit() -> None:
     assert (cache_key_hash(normalize_cache_key("b")), 1) in fund.entries
 
 
+def test_promote_dedupes_repeated_rows_in_one_batch() -> None:
+    # Повторяющаяся работа = один ключ (ядро фичи): две строки с одинаковым embedding_input,
+    # подтверждённые на одну статью, НЕ должны дать дубль conflict-ключа в одном upsert-батче
+    # (Postgres: CardinalityViolation → 500 на PATCH /reference, rebuild умирает после clear()).
+    repo, fund = FakeEstimateRepository(), FakeDecisionFundRepository()
+    eid = seed_estimate_with_rows(
+        repo,
+        [
+            Row("демонтаж перегородок", "needs_review", "confirmed", final_article_id=5),
+            Row("демонтаж перегородок", "needs_review", "confirmed", final_article_id=5),
+        ],
+    )
+    promoted = DecisionFundService(repo, fund).promote(eid)
+    assert promoted == 1  # одна запись фонда, не две
+    key = cache_key_hash(normalize_cache_key("демонтаж перегородок"))
+    assert set(fund.entries) == {(key, 1)}
+    assert repo.is_reference(eid) is True
+
+
 def test_rebuild_clears_and_repromotes_reference_only() -> None:
     repo, fund = FakeEstimateRepository(), FakeDecisionFundRepository()
     e1 = seed_estimate_with_rows(repo, [Row("a", "needs_review", "confirmed", 5)])

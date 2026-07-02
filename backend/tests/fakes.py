@@ -763,6 +763,15 @@ class FakeDecisionFundRepository(DecisionFundRepository):
         return out
 
     def upsert(self, entries: Sequence[FundEntry]) -> None:
+        # ЧЕСТЕН ПО ДУБЛЯМ: Postgres кидает CardinalityViolation, если один INSERT..ON CONFLICT
+        # DO UPDATE дважды бьёт в тот же conflict-ключ. Фейк воспроизводит — иначе дубликаты
+        # в батче promote() тестами не ловятся.
+        keys = [(e.cache_key_hash, e.crumb_version, e.article_id) for e in entries]
+        if len(keys) != len(set(keys)):
+            raise ValueError(
+                "duplicate conflict key in one upsert batch "
+                "(Postgres: ON CONFLICT DO UPDATE cannot affect row a second time)"
+            )
         for e in entries:
             bucket = self.entries.setdefault((e.cache_key_hash, e.crumb_version), {})
             # фейк хранит FundHit напрямую (тест задаёт code/name через seed_hit-хелпер)

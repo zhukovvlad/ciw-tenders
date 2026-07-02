@@ -22,7 +22,9 @@ class DecisionFundService:
         self._fund = fund
 
     def promote(self, estimate_id: int) -> int:
-        entries: list[FundEntry] = []
+        # дедуп по conflict-ключу: повторяющаяся работа в одной смете даёт один и тот же ключ,
+        # а дубль в одном INSERT..ON CONFLICT DO UPDATE — CardinalityViolation в Postgres
+        by_key: dict[tuple[str, int, int], FundEntry] = {}
         for r in self._estimates.fetch_promotable_rows(estimate_id):
             if r.review_status not in _PROMOTABLE_REVIEW:
                 continue
@@ -33,11 +35,16 @@ class DecisionFundService:
                 # перестраховка (confirmed/overridden гарантируют непустой, см. спеку §2.1)
                 continue
             key = normalize_cache_key(r.embedding_input)
-            entries.append(FundEntry(
-                cache_key_hash=cache_key_hash(key), cache_key=key,
-                crumb_version=CRUMB_DERIVATION_VERSION, article_id=r.final_article_id,
-                source_estimate_id=estimate_id, source_row_id=r.row_id,
-            ))
+            key_hash = cache_key_hash(key)
+            by_key.setdefault(
+                (key_hash, CRUMB_DERIVATION_VERSION, r.final_article_id),
+                FundEntry(
+                    cache_key_hash=key_hash, cache_key=key,
+                    crumb_version=CRUMB_DERIVATION_VERSION, article_id=r.final_article_id,
+                    source_estimate_id=estimate_id, source_row_id=r.row_id,
+                ),
+            )
+        entries = list(by_key.values())
         self._fund.upsert(entries)
         # флаг ставим только если реально что-то запромоутили — иначе «пустая» эталонная смета
         # (0 confirmed-строк), которую rebuild гоняет вхолостую.
