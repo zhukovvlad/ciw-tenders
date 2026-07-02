@@ -32,8 +32,8 @@ const fundRow = { ...confidentRow, status: "matched_fund" as const }
 // реалистичное решение фонд-строки: initReview авто-подтверждает её (manual:false)
 const fundDecision = {
   kind: "confirmed" as const,
-  code: fundRow.matched_code,
-  name: fundRow.matched_name,
+  code: fundRow.matched_code!,
+  name: fundRow.matched_name!,
   manual: false,
 }
 
