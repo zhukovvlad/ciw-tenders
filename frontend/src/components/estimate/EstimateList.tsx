@@ -13,6 +13,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -74,23 +75,29 @@ function formatDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : dateFmt.format(d)
 }
 
+const PAGE = 50
+
 export function EstimateList({ onOpen }: EstimateListProps) {
   const [items, setItems] = useState<EstimateListItem[] | null>(null)
+  const [total, setTotal] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
 
   const triggerReload = useCallback(() => {
     setError(null)
+    setItems(null)
+    setTotal(0)
     setReloadKey((k) => k + 1)
   }, [])
 
   useEffect(() => {
     let cancelled = false
-    // TODO(Task 8): полноценная пагинация — сейчас берём только items,
-    // total из ответа пока не используется.
-    listEstimates()
+    listEstimates({ limit: PAGE, offset: 0 })
       .then((data) => {
-        if (!cancelled) setItems(data.items)
+        if (!cancelled) {
+          setItems(data.items)
+          setTotal(data.total)
+        }
       })
       .catch((err) => {
         if (!cancelled)
@@ -102,6 +109,18 @@ export function EstimateList({ onOpen }: EstimateListProps) {
       cancelled = true
     }
   }, [reloadKey])
+
+  async function loadMore() {
+    if (items === null) return
+    try {
+      const r = await listEstimates({ limit: PAGE, offset: items.length })
+      setItems((prev) => [...(prev ?? []), ...r.items])
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось загрузить сметы"
+      )
+    }
+  }
 
   async function remove(id: number) {
     try {
@@ -142,76 +161,95 @@ export function EstimateList({ onOpen }: EstimateListProps) {
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Файл</TableHead>
-          <TableHead>Статус</TableHead>
-          <TableHead className="text-right">Узлов</TableHead>
-          <TableHead>Дата</TableHead>
-          <TableHead className="w-10" />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {items.map((item) => {
-          const meta = metaFor(item.status)
-          return (
-            <TableRow key={item.id}>
-              <TableCell>
-                {meta.clickable ? (
-                  <button
-                    type="button"
-                    className="text-left font-medium hover:underline"
-                    onClick={() => onOpen(item)}
-                  >
-                    {item.filename}
-                  </button>
-                ) : (
-                  <span className="font-medium text-muted-foreground">
-                    {item.filename}
-                  </span>
-                )}
-              </TableCell>
-              <TableCell>
-                <Badge variant={meta.variant}>{meta.label}</Badge>
-              </TableCell>
-              <TableCell className="text-right tabular-nums">
-                {item.nodesCount}
-              </TableCell>
-              <TableCell className="text-muted-foreground">
-                {formatDate(item.createdAt)}
-              </TableCell>
-              <TableCell>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
+    <>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Файл</TableHead>
+            <TableHead>Статус</TableHead>
+            <TableHead>Проверка</TableHead>
+            <TableHead className="text-right">Узлов</TableHead>
+            <TableHead>Дата</TableHead>
+            <TableHead className="w-10" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {items.map((item) => {
+            const meta = metaFor(item.status)
+            return (
+              <TableRow key={item.id}>
+                <TableCell>
+                  {meta.clickable ? (
                     <button
                       type="button"
-                      aria-label={`Удалить ${item.filename}`}
-                      className="rounded-sm p-1 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+                      className="text-left font-medium hover:underline"
+                      onClick={() => onOpen(item)}
                     >
-                      <Trash2 className="size-4 text-destructive" />
+                      {item.filename}
                     </button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Удалить смету?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        «{item.filename}» будет удалена безвозвратно.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Отмена</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => void remove(item.id)}>
-                        Удалить
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </TableCell>
-            </TableRow>
-          )
-        })}
-      </TableBody>
-    </Table>
+                  ) : (
+                    <span className="font-medium text-muted-foreground">
+                      {item.filename}
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <Badge variant={meta.variant}>{meta.label}</Badge>
+                </TableCell>
+                <TableCell className="text-muted-foreground tabular-nums">
+                  {item.completedAt !== null ? (
+                    <Badge>Завершена</Badge>
+                  ) : item.totalReviewable > 0 ? (
+                    `${item.reviewedCount} из ${item.totalReviewable}`
+                  ) : (
+                    "—"
+                  )}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {item.nodesCount}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {formatDate(item.createdAt)}
+                </TableCell>
+                <TableCell>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={`Удалить ${item.filename}`}
+                        className="rounded-sm p-1 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+                      >
+                        <Trash2 className="size-4 text-destructive" />
+                      </button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Удалить смету?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          «{item.filename}» будет удалена безвозвратно.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Отмена</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => void remove(item.id)}>
+                          Удалить
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </TableCell>
+              </TableRow>
+            )
+          })}
+        </TableBody>
+      </Table>
+      {items.length < total && (
+        <div className="pt-3">
+          <Button variant="outline" size="sm" onClick={() => void loadMore()}>
+            Показать ещё
+          </Button>
+        </div>
+      )}
+    </>
   )
 }

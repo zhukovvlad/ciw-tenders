@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
 import * as estimatesApi from "@/lib/api/estimates"
 import { ApiError } from "@/lib/api/client"
 import { EstimateList } from "./EstimateList"
@@ -37,6 +38,17 @@ const ITEMS: estimatesApi.EstimateListItem[] = [
     totalReviewable: 0,
   },
 ]
+
+const ITEM: estimatesApi.EstimateListItem = {
+  id: 1,
+  filename: "smeta.xlsx",
+  status: "ready",
+  nodesCount: 5,
+  createdAt: "2026-06-24T10:00:00Z",
+  completedAt: null,
+  reviewedCount: 0,
+  totalReviewable: 0,
+}
 
 describe("EstimateList", () => {
   it("показывает пустое состояние, когда смет нет", async () => {
@@ -111,5 +123,38 @@ describe("EstimateList", () => {
     )
     render(<EstimateList onOpen={vi.fn()} />)
     expect(await screen.findByText(/не удалось загрузить/i)).toBeInTheDocument()
+  })
+
+  it("показывает прогресс ревью и бейдж завершённой", async () => {
+    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue({
+      items: [
+        {
+          ...ITEM,
+          id: 1,
+          reviewedCount: 3,
+          totalReviewable: 7,
+          completedAt: null,
+        },
+        { ...ITEM, id: 2, completedAt: "2026-07-02T12:00:00Z" },
+      ],
+      total: 2,
+    })
+    render(<EstimateList onOpen={vi.fn()} />, { wrapper: MemoryRouter })
+    expect(await screen.findByText("3 из 7")).toBeInTheDocument()
+    expect(screen.getByText("Завершена")).toBeInTheDocument()
+  })
+
+  it("«Показать ещё» дозагружает следующую страницу", async () => {
+    vi.spyOn(estimatesApi, "listEstimates")
+      .mockResolvedValueOnce({ items: [{ ...ITEM, id: 1 }], total: 2 })
+      .mockResolvedValueOnce({ items: [{ ...ITEM, id: 2 }], total: 2 })
+    render(<EstimateList onOpen={vi.fn()} />, { wrapper: MemoryRouter })
+    await userEvent.click(
+      await screen.findByRole("button", { name: /Показать ещё/ })
+    )
+    expect(estimatesApi.listEstimates).toHaveBeenLastCalledWith({
+      limit: 50,
+      offset: 1,
+    })
   })
 })
