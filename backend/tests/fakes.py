@@ -579,6 +579,10 @@ class FakeEstimateRepository(EstimateRepository):
             return None
         return self._keys.get(estimate_id)
 
+    def exists(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> bool:
+        est = self.estimates.get(estimate_id)
+        return est is not None and (is_admin or est.user_id == requester_id)
+
     def fetch_all_nodes(self, estimate_id: int) -> list[ClassifiableNode]:
         base = {r.id: r for e in self.estimates.values() for r in e.rows}
         # Порядок по source_index — как реальный репозиторий (ORDER BY source_index);

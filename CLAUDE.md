@@ -8,8 +8,10 @@
 видов работ («Вид раздела» = `СМР`) и через RAG (векторный поиск pgvector + LLM)
 сопоставляет их с эталонным справочником статей СМР.
 
-Сметы нигде не хранятся — поток stateless: загрузил → распарсили → обогатили из
-справочника → вернули результат. Персистентен только справочник (`template_articles`).
+Поток: загрузил → распарсили → обогатили из справочника → ревью → выгрузка .xlsx.
+Персистентны: справочник (`template_articles`), сметы (`estimates`/`estimate_rows` +
+оригинал в MinIO) и золотой фонд решений (`decision_fund` — exact-match кэш
+подтверждённых оператором сопоставлений, применяется перед RAG).
 
 - `backend/` — FastAPI, Clean Architecture, Python 3.11+, управляется `uv`.
 - `frontend/` — Vite + React + TypeScript + Tailwind v4 + shadcn/ui.
@@ -51,8 +53,11 @@
 **Правила:**
 - Новая зависимость от внешнего сервиса → сначала порт в `domain/ports.py`, потом реализация в `infrastructure/`.
 - Бизнес-логику не писать в роутах и репозиториях — её место в `services/`.
-- Сопоставление: эмбеддинг → топ-3 (pgvector) → `score > 0.90` ⇒ «Уверенное совпадение»,
-  иначе LLM-арбитр (Claude) выбирает из топ-3 ⇒ «Требует проверки». См.
+- Сопоставление: сначала фонд решений (`_apply_fund`, exact-match по нормализованной крошке,
+  до эмбеддинга; хит ⇒ статус `matched_fund`, см.
+  [decision_fund_service.py](backend/app/services/decision_fund_service.py)); промахи → RAG:
+  эмбеддинг → топ-3 (pgvector) → `score > 0.90` ⇒ «Уверенное совпадение», иначе LLM-арбитр
+  (Claude) выбирает из топ-3 ⇒ «Требует проверки». См.
   [matching_service.py](backend/app/services/matching_service.py).
 - **Auth-слой:** порты `UserRepository` / `PasswordHasher` / `TokenService` в `domain/ports.py`;
   роли `user` / `admin`; enforcement через `get_current_user` / `require_admin` в `api/deps.py`.

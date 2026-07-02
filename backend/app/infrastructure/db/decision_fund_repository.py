@@ -9,10 +9,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.domain.decision_fund import FundEntry, FundHit
+from app.domain.ports import DecisionFundRepository
 from app.infrastructure.db.models import DecisionFundModel, TemplateArticleModel
 
 
-class SqlAlchemyDecisionFundRepository:
+class SqlAlchemyDecisionFundRepository(DecisionFundRepository):
     def __init__(self, session: Session) -> None:
         self._session = session
 

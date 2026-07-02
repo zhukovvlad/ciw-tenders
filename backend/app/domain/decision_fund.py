@@ -45,7 +45,11 @@ class FundEntry:
 
 def normalize_cache_key(embedding_input: str) -> str:
     """Детерминированная нормализация: регистр + схлопывание пробелов. Версия крошки НЕ внутри
-    ключа (хранится отдельной колонкой)."""
+    ключа (хранится отдельной колонкой).
+
+    Меняешь нормализацию → бампай CRUMB_DERIVATION_VERSION (domain/classification.py):
+    хранящиеся cache_key_hash посчитаны старой логикой, без бампа весь фонд молча остынет.
+    """
     return re.sub(r"\s+", " ", embedding_input.strip().lower())
 
 

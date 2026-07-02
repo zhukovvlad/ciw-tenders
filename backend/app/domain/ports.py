@@ -306,6 +306,11 @@ class EstimateRepository(ABC):
         ...
 
     @abstractmethod
+    def exists(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> bool:
+        """Смета существует и доступна запрашивающему (без загрузки строк/векторов)."""
+        ...
+
+    @abstractmethod
     def fetch_pending_nodes(self, estimate_id: int) -> list[PendingNode]:
         """Узлы status='pending' И review_status='unreviewed' (кандидаты на fund-look-up)."""
         ...

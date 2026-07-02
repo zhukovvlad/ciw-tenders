@@ -174,8 +174,8 @@ def toggle_reference(
     fund_service: DecisionFundService = Depends(get_decision_fund_service),
     repository: EstimateRepository = Depends(get_estimate_repository),
 ) -> dict:
-    est = repository.get(estimate_id, user.id or 0, is_admin=user.role == Role.ADMIN)
-    if est is None:
+    # лёгкая проверка владения: get() тянул бы все строки с векторами ради 404
+    if not repository.exists(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
     if body.is_reference:
         promoted = fund_service.promote(estimate_id)  # 0 → is_reference не выставлен (см. Task 5)

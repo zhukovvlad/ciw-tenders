@@ -410,6 +410,12 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             for r in self._session.execute(stmt)
         ]
 
+    def exists(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> bool:
+        # лёгкая проверка владения (зеркало delete/get_object_key) — get() тянул бы
+        # все строки с векторами ради одного bool
+        est = self._session.get(EstimateModel, estimate_id)
+        return est is not None and (is_admin or est.user_id == requester_id)
+
     def fetch_pending_nodes(self, estimate_id: int) -> list[PendingNode]:
         stmt = select(EstimateRowModel.id, EstimateRowModel.embedding_input).where(
             EstimateRowModel.estimate_id == estimate_id,
@@ -419,8 +425,8 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
         return [PendingNode(r.id, r.embedding_input) for r in self._session.execute(stmt)]
 
     def save_fund_hits(self, hits: Sequence[AppliedFundHit]) -> None:
-        # CAS по unreviewed — как save_node_match; candidates/score обнуляем (снимок без кандидатов).
-        # Один commit на весь фонд-пасс (зеркало save_node_classifications): N commits → 1
+        # CAS по unreviewed — как save_node_match; candidates/score обнуляем (снимок без
+        # кандидатов). Один commit на весь фонд-пасс (зеркало save_node_classifications): N → 1
         # (fsync + атомарность пасса); UPDATE-ы по-прежнему поштучные.
         for h in hits:
             self._session.execute(
