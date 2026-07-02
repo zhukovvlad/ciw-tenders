@@ -73,6 +73,7 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             created_at=m.created_at,
             rows=[cls._row_to_entity(r) for r in rows],
             status_detail=m.status_detail,
+            is_reference=m.is_reference,
         )
 
     def create(self, new: NewEstimate, nodes: list[EstimateNode]) -> Estimate:

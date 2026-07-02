@@ -4,10 +4,15 @@ import userEvent from "@testing-library/user-event"
 import { DoneScreen } from "@/pages/estimate/DoneScreen"
 import { initReview } from "@/lib/reviewState"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
-import { setReference } from "@/lib/api/estimates"
+import { getEstimate, setReference } from "@/lib/api/estimates"
 
 vi.mock("@/lib/api/estimates", () => ({
   setReference: vi.fn().mockResolvedValue({ is_reference: true, promoted: 1 }),
+  getEstimate: vi.fn().mockResolvedValue({
+    fileName: "смета.xlsx",
+    rows: [],
+    isReference: false,
+  }),
 }))
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), info: vi.fn() } }))
 import { toast } from "sonner"
@@ -79,6 +84,25 @@ describe("DoneScreen", () => {
     expect(setReference).toHaveBeenCalledWith(1, true)
     await vi.waitFor(() => {
       expect(toggle).toHaveAttribute("aria-checked", "false")
+    })
+  })
+
+  it("тумблер гидратируется из серверного is_reference при открытии", async () => {
+    vi.mocked(getEstimate).mockResolvedValueOnce({
+      fileName: "смета.xlsx",
+      rows: [],
+      isReference: true,
+    })
+    render(
+      <DoneScreen
+        state={initReview("смета.xlsx", MOCK_ROWS)}
+        onExport={vi.fn()}
+        onNewEstimate={vi.fn()}
+        estimateId={7}
+      />
+    )
+    await vi.waitFor(() => {
+      expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true")
     })
   })
 

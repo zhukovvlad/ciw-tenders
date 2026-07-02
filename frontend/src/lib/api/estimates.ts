@@ -27,6 +27,8 @@ interface DetailDto {
   id: number
   filename: string
   status: string
+  // опционален защитно: бэк до фичи гидратации тумблера его не присылал
+  is_reference?: boolean
   rows: RowDto[]
 }
 
@@ -78,9 +80,13 @@ export function rowFromDto(r: RowDto): MatchRow {
 
 export async function getEstimate(
   id: number
-): Promise<{ fileName: string; rows: MatchRow[] }> {
+): Promise<{ fileName: string; rows: MatchRow[]; isReference: boolean }> {
   const dto = await apiGet<DetailDto>(`/estimates/${id}`)
-  return { fileName: dto.filename, rows: dto.rows.map(rowFromDto) }
+  return {
+    fileName: dto.filename,
+    rows: dto.rows.map(rowFromDto),
+    isReference: dto.is_reference ?? false,
+  }
 }
 
 export async function uploadEstimate(file: File): Promise<UploadResult> {

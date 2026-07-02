@@ -1,11 +1,11 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Download } from "lucide-react"
 import { toast } from "sonner"
 import type { ReviewState } from "@/lib/types"
 import { decisionFor } from "@/lib/reviewState"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { setReference } from "@/lib/api/estimates"
+import { getEstimate, setReference } from "@/lib/api/estimates"
 
 interface DoneScreenProps {
   state: ReviewState
@@ -22,6 +22,23 @@ export function DoneScreen({
 }: DoneScreenProps) {
   const [inFund, setInFund] = useState(false)
   const toggleSeq = useRef(0)
+
+  // Гидратация из серверного is_reference: уже-эталонная смета показывает тумблер
+  // включённым. Не перетираем состояние, если пользователь успел щёлкнуть (seq > 0).
+  useEffect(() => {
+    if (estimateId === null) return
+    let cancelled = false
+    void getEstimate(estimateId)
+      .then((r) => {
+        if (!cancelled && toggleSeq.current === 0) setInFund(r.isReference)
+      })
+      .catch((err: unknown) => {
+        console.warn("не удалось прочитать флаг фонда", err) // best-effort
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [estimateId])
   const matched = state.rows.filter(
     (r) => decisionFor(state, r).kind === "confirmed"
   ).length
