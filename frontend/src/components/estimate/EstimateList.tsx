@@ -86,9 +86,11 @@ export function EstimateList({ onOpen }: EstimateListProps) {
 
   useEffect(() => {
     let cancelled = false
+    // TODO(Task 8): полноценная пагинация — сейчас берём только items,
+    // total из ответа пока не используется.
     listEstimates()
       .then((data) => {
-        if (!cancelled) setItems(data)
+        if (!cancelled) setItems(data.items)
       })
       .catch((err) => {
         if (!cancelled)

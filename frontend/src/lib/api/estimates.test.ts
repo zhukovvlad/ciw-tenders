@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import * as client from "@/lib/api/client"
 import {
   deleteEstimate,
+  getEstimate,
   listEstimates,
   rebuildFund,
   rowFromDto,
+  setCompletion,
   setReference,
 } from "@/lib/api/estimates"
 
@@ -37,16 +39,23 @@ describe("rowFromDto", () => {
 
 describe("estimates api list/delete", () => {
   it("listEstimates маппит snake_case DTO в camelCase", async () => {
-    vi.spyOn(client, "apiGet").mockResolvedValue([
-      {
-        id: 1,
-        filename: "a.xlsx",
-        status: "ready",
-        nodes_count: 12,
-        created_at: "2026-06-24T10:00:00Z",
-      },
-    ])
-    const items = await listEstimates()
+    vi.spyOn(client, "apiGet").mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          filename: "a.xlsx",
+          status: "ready",
+          nodes_count: 12,
+          created_at: "2026-06-24T10:00:00Z",
+          completed_at: null,
+          reviewed_count: 0,
+          total_reviewable: 0,
+        },
+      ],
+      total: 1,
+    })
+    const { items, total } = await listEstimates()
+    expect(total).toBe(1)
     expect(items).toEqual([
       {
         id: 1,
@@ -54,14 +63,67 @@ describe("estimates api list/delete", () => {
         status: "ready",
         nodesCount: 12,
         createdAt: "2026-06-24T10:00:00Z",
+        completedAt: null,
+        reviewedCount: 0,
+        totalReviewable: 0,
       },
     ])
   })
 
-  it("listEstimates ходит на GET /estimates", async () => {
-    const spy = vi.spyOn(client, "apiGet").mockResolvedValue([])
+  it("listEstimates ходит на GET /estimates с дефолтными limit/offset", async () => {
+    const spy = vi
+      .spyOn(client, "apiGet")
+      .mockResolvedValue({ items: [], total: 0 })
     await listEstimates()
-    expect(spy).toHaveBeenCalledWith("/estimates")
+    expect(spy).toHaveBeenCalledWith("/estimates?limit=50&offset=0")
+  })
+
+  it("getEstimate возвращает status и completedAt", async () => {
+    vi.spyOn(client, "apiGet").mockResolvedValue({
+      id: 5,
+      filename: "a.xlsx",
+      status: "ready",
+      status_detail: null,
+      completed_at: "2026-07-02T12:00:00Z",
+      is_reference: false,
+      rows: [],
+    })
+    const d = await getEstimate(5)
+    expect(d.status).toBe("ready")
+    expect(d.completedAt).toBe("2026-07-02T12:00:00Z")
+  })
+
+  it("setCompletion шлёт PATCH /completion", async () => {
+    const spy = vi
+      .spyOn(client, "apiSend")
+      .mockResolvedValue({ completed_at: null })
+    const r = await setCompletion(5, false)
+    expect(r.completedAt).toBeNull()
+    expect(spy).toHaveBeenCalledWith("PATCH", "/estimates/5/completion", {
+      completed: false,
+    })
+  })
+
+  it("listEstimates отдаёт items+total и прокидывает limit/offset", async () => {
+    const spy = vi.spyOn(client, "apiGet").mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          filename: "a.xlsx",
+          status: "ready",
+          nodes_count: 3,
+          created_at: "2026-07-01T00:00:00Z",
+          completed_at: null,
+          reviewed_count: 1,
+          total_reviewable: 2,
+        },
+      ],
+      total: 7,
+    })
+    const r = await listEstimates({ limit: 10, offset: 20 })
+    expect(spy).toHaveBeenCalledWith("/estimates?limit=10&offset=20")
+    expect(r.total).toBe(7)
+    expect(r.items[0].reviewedCount).toBe(1)
   })
 
   it("deleteEstimate шлёт DELETE по id", async () => {

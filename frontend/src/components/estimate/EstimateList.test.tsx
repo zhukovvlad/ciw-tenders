@@ -22,6 +22,9 @@ const ITEMS: estimatesApi.EstimateListItem[] = [
     status: "ready",
     nodesCount: 10,
     createdAt: "2026-06-24T10:00:00Z",
+    completedAt: null,
+    reviewedCount: 0,
+    totalReviewable: 0,
   },
   {
     id: 2,
@@ -29,12 +32,18 @@ const ITEMS: estimatesApi.EstimateListItem[] = [
     status: "blocked",
     nodesCount: 0,
     createdAt: "2026-06-24T11:00:00Z",
+    completedAt: null,
+    reviewedCount: 0,
+    totalReviewable: 0,
   },
 ]
 
 describe("EstimateList", () => {
   it("показывает пустое состояние, когда смет нет", async () => {
-    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue([])
+    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue({
+      items: [],
+      total: 0,
+    })
     render(<EstimateList onOpen={vi.fn()} />)
     expect(
       await screen.findByText(/пока нет разобранных смет/i)
@@ -42,7 +51,10 @@ describe("EstimateList", () => {
   })
 
   it("рисует строки и бейджи статусов", async () => {
-    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue(ITEMS)
+    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue({
+      items: ITEMS,
+      total: ITEMS.length,
+    })
     render(<EstimateList onOpen={vi.fn()} />)
     expect(await screen.findByText("ready.xlsx")).toBeInTheDocument()
     expect(screen.getByText("Готово")).toBeInTheDocument()
@@ -50,7 +62,10 @@ describe("EstimateList", () => {
   })
 
   it("клик по готовой смете зовёт onOpen с item", async () => {
-    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue(ITEMS)
+    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue({
+      items: ITEMS,
+      total: ITEMS.length,
+    })
     const onOpen = vi.fn()
     render(<EstimateList onOpen={onOpen} />)
     await userEvent.click(await screen.findByText("ready.xlsx"))
@@ -58,7 +73,10 @@ describe("EstimateList", () => {
   })
 
   it("blocked-смета не кликабельна (onOpen не зовётся)", async () => {
-    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue(ITEMS)
+    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue({
+      items: ITEMS,
+      total: ITEMS.length,
+    })
     const onOpen = vi.fn()
     render(<EstimateList onOpen={onOpen} />)
     await userEvent.click(await screen.findByText("blocked.xlsx"))
@@ -68,8 +86,8 @@ describe("EstimateList", () => {
   it("удаление через диалог зовёт deleteEstimate и рефетчит список", async () => {
     const listSpy = vi
       .spyOn(estimatesApi, "listEstimates")
-      .mockResolvedValueOnce(ITEMS)
-      .mockResolvedValueOnce([ITEMS[1]])
+      .mockResolvedValueOnce({ items: ITEMS, total: ITEMS.length })
+      .mockResolvedValueOnce({ items: [ITEMS[1]], total: 1 })
     const delSpy = vi
       .spyOn(estimatesApi, "deleteEstimate")
       .mockResolvedValue(undefined)

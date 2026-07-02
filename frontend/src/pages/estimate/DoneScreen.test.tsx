@@ -9,7 +9,11 @@ import { getEstimate, setReference } from "@/lib/api/estimates"
 vi.mock("@/lib/api/estimates", () => ({
   setReference: vi.fn().mockResolvedValue({ is_reference: true, promoted: 1 }),
   getEstimate: vi.fn().mockResolvedValue({
+    id: 1,
     fileName: "смета.xlsx",
+    status: "ready",
+    statusDetail: null,
+    completedAt: null,
     rows: [],
     isReference: false,
   }),
@@ -89,7 +93,11 @@ describe("DoneScreen", () => {
 
   it("тумблер гидратируется из серверного is_reference при открытии", async () => {
     vi.mocked(getEstimate).mockResolvedValueOnce({
+      id: 7,
       fileName: "смета.xlsx",
+      status: "ready",
+      statusDetail: null,
+      completedAt: null,
       rows: [],
       isReference: true,
     })

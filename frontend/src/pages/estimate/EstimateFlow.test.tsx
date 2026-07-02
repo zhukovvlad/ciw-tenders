@@ -12,7 +12,12 @@ const exportEstimate = vi.fn((id: number) => {
   void id
   return Promise.resolve(new Blob(["test"]))
 })
-const listEstimates = vi.fn(async (): Promise<EstimateListItem[]> => [])
+const listEstimates = vi.fn(
+  async (): Promise<{ items: EstimateListItem[]; total: number }> => ({
+    items: [],
+    total: 0,
+  })
+)
 const deleteEstimate = vi.fn(async (id: number) => {
   void id
 })
@@ -58,7 +63,7 @@ beforeEach(() => {
   URL.revokeObjectURL = vi.fn()
   patchRowReview.mockReset()
   exportEstimate.mockClear()
-  listEstimates.mockReset().mockResolvedValue([])
+  listEstimates.mockReset().mockResolvedValue({ items: [], total: 0 })
   deleteEstimate.mockReset().mockResolvedValue(undefined)
   getEstimate
     .mockReset()
@@ -141,15 +146,21 @@ describe("EstimateFlow", () => {
   })
 
   it("открывает готовую смету из списка → экран проверки", async () => {
-    listEstimates.mockResolvedValue([
-      {
-        id: 7,
-        filename: "old.xlsx",
-        status: "ready",
-        nodesCount: 3,
-        createdAt: "2026-06-24T10:00:00Z",
-      },
-    ])
+    listEstimates.mockResolvedValue({
+      items: [
+        {
+          id: 7,
+          filename: "old.xlsx",
+          status: "ready",
+          nodesCount: 3,
+          createdAt: "2026-06-24T10:00:00Z",
+          completedAt: null,
+          reviewedCount: 0,
+          totalReviewable: 0,
+        },
+      ],
+      total: 1,
+    })
     render(<EstimateFlow />)
     await userEvent.click(await screen.findByText("old.xlsx"))
     await waitFor(() =>
@@ -159,15 +170,21 @@ describe("EstimateFlow", () => {
   })
 
   it("открывает считающуюся смету через poll, не через getEstimate", async () => {
-    listEstimates.mockResolvedValue([
-      {
-        id: 9,
-        filename: "calc.xlsx",
-        status: "running",
-        nodesCount: 5,
-        createdAt: "2026-06-24T10:00:00Z",
-      },
-    ])
+    listEstimates.mockResolvedValue({
+      items: [
+        {
+          id: 9,
+          filename: "calc.xlsx",
+          status: "running",
+          nodesCount: 5,
+          createdAt: "2026-06-24T10:00:00Z",
+          completedAt: null,
+          reviewedCount: 0,
+          totalReviewable: 0,
+        },
+      ],
+      total: 1,
+    })
     render(<EstimateFlow />)
     await userEvent.click(await screen.findByText("calc.xlsx"))
     await waitFor(() =>
