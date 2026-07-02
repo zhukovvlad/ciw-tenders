@@ -209,6 +209,11 @@ export function ReviewScreen({
                 onReview?.(row.row_number, "reject")
                 gotoNext()
               }}
+              onConfirmRecommendation={() => {
+                dispatch({ type: "confirmArbiter", row: row.row_number })
+                onReview?.(row.row_number, "confirm")
+                gotoNext()
+              }}
             />
           ))}
         </tbody>
