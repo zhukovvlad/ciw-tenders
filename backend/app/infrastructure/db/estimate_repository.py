@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import and_, case, delete, func, or_, select, text, update
+from sqlalchemy import and_, bindparam, case, delete, func, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from app.domain.decision_fund import AppliedFundHit
@@ -426,17 +426,25 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
 
     def save_fund_hits(self, hits: Sequence[AppliedFundHit]) -> None:
         # CAS по unreviewed — как save_node_match; candidates/score обнуляем (снимок без
-        # кандидатов). Один commit на весь фонд-пасс (зеркало save_node_classifications): N → 1
-        # (fsync + атомарность пасса); UPDATE-ы по-прежнему поштучные.
-        for h in hits:
+        # кандидатов). Один executemany-UPDATE (psycopg3 батчит в pipeline) + один commit
+        # на весь фонд-пасс: горячий путь фонда не платит round-trip за строку.
+        # Core-UPDATE по __table__, НЕ update(EstimateRowModel): ORM-путь bulk-UPDATE требует
+        # PK в параметрах и синк identity map, что с кастомным WHERE-CAS не работает.
+        if hits:
+            tbl = EstimateRowModel.__table__
             self._session.execute(
-                update(EstimateRowModel)
+                tbl.update()
                 .where(
-                    EstimateRowModel.id == h.row_id,
-                    EstimateRowModel.review_status == "unreviewed",
+                    tbl.c.id == bindparam("_row_id"),
+                    tbl.c.review_status == "unreviewed",
                 )
-                .values(status="matched_fund", matched_article_id=h.article_id,
-                        matched_code=h.code, matched_name=h.name, candidates=None, score=None,
-                        match_error=None)
+                .values(status="matched_fund", matched_article_id=bindparam("_article_id"),
+                        matched_code=bindparam("_code"), matched_name=bindparam("_name"),
+                        candidates=None, score=None, match_error=None),
+                [
+                    {"_row_id": h.row_id, "_article_id": h.article_id,
+                     "_code": h.code, "_name": h.name}
+                    for h in hits
+                ],
             )
         self._session.commit()
