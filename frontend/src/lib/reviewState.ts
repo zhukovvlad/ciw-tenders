@@ -155,8 +155,11 @@ export function filteredRows(state: ReviewState): MatchRow[] {
 }
 
 export function statusLabel(row: MatchRow, d: Decision): string {
-  if (row.status === "matched_fund") return "Из фонда"
+  // решение оператора важнее происхождения снимка: override/reject поверх
+  // фонд-хита не должны маскироваться меткой «Из фонда» (спека фонда §12.4)
   if (d.kind === "no_match") return "Нет совпадения"
   if (d.kind === "pending") return "Требует проверки"
-  return d.manual ? "Ручной выбор" : "Подтверждено оператором"
+  if (d.manual) return "Ручной выбор"
+  if (row.status === "matched_fund") return "Из фонда"
+  return "Подтверждено оператором"
 }

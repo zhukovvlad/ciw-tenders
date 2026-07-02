@@ -106,6 +106,17 @@ describe("reviewState", () => {
     )
   })
 
+  it("statusLabel: нетронутый фонд-хит → «Из фонда», override → «Ручной выбор», reject → «Нет совпадения»", () => {
+    const row = fundRow()
+    expect(
+      statusLabel(row, { kind: "confirmed", code: "a", name: "b", manual: false })
+    ).toBe("Из фонда")
+    expect(
+      statusLabel(row, { kind: "confirmed", code: "a", name: "b", manual: true })
+    ).toBe("Ручной выбор")
+    expect(statusLabel(row, { kind: "no_match" })).toBe("Нет совпадения")
+  })
+
   it("requiresDecision: matched_fund не требует ревью (как confident)", () => {
     expect(requiresDecision(fundRow())).toBe(false)
   })
