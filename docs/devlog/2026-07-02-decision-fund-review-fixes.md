@@ -53,7 +53,8 @@
 ## Верификация
 
 - Бэкенд: `uv run pytest -q` — **362 passed, 3 skipped** (skipped — прежние гейтованные
-  lock/sweep-интеграционные; интеграционные фонда — **4 PASSED, не skipped**, с тест-эндпоинтом Neon).
+  lock/sweep-интеграционные; интеграционные тесты фонда — **4 PASSED, не skipped**,
+  с тест-эндпоинтом Neon).
 - Фронт: vitest **124 passed (26 файлов)**, `tsc -b` чист, eslint чист, prettier чист.
 - `uv run ruff check .` чист.
 
@@ -62,7 +63,7 @@
 - Отложенное — в [TECH_DEBT.md](../TECH_DEBT.md) «Золотой фонд: полировка из пост-мерж ревью»:
   Out-схемы тумблера/rebuild, guard-only `require_admin`, votes при чередовании источников,
   вопрос редундантного `ix_decision_fund_lookup` (после замера).
-- `just fmt` попутно вскрыл, что ~64 бэкенд-файла не соответствуют текущему `ruff format`
-  (в `just lint` формат не проверяется — только `ruff check`). Переформатирование отложено в
+- `just fmt` попутно вскрыл, что ~64 бэкенд-файла отстают от текущего `ruff format`
+  (`just lint` гоняет только `ruff check`, без проверки формата). Переформатирование отложено в
   `git stash` («ruff-format churn от just fmt»), чтобы не зашумлять дифф PR; решить отдельно:
   либо один style-коммит в main, либо добавить `ruff format --check` в `just lint`.
