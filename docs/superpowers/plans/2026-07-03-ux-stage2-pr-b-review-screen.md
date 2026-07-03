@@ -164,10 +164,17 @@ export interface ReviewQueue {
   origin: CardOrigin
   canUndo: boolean
   openFromGrid: (rowNumber: number) => void // любая строка, включая confident/фонд
-  skip: () => void // N: активную в хвост сессионного порядка
+  /** N. Строка ИЗ порядка спорных — в хвост, exit {next}. Ad-hoc строка НЕ из
+   * порядка (confident/фонд, открытая из грида) — порядок НЕ трогается,
+   * карточка закрывается по origin: «пропустить» точечную правку = передумал,
+   * уходи туда, откуда пришёл. */
+  skip: () => CommitExit
   undo: () => void // ←: снять вершину стека, открыть с её решением; no-op на пустом
   committed: (rowNumber: number) => CommitExit // после dispatch решения (оптимистично)
   commitFailed: (rowNumber: number) => void // PATCH упал: из undo-стека вон, в голову очереди
+  /** Сброс явного выбора (ручной уход в грид через таб): вернувшись в очередь,
+   * оператор увидит поток, а не давно открытую из грида карточку. */
+  deselect: () => void
 }
 
 export function useReviewQueue(state: ReviewState): ReviewQueue
@@ -178,7 +185,7 @@ export function useReviewQueue(state: ReviewState): ReviewQueue
 - Активная — первая с `decisionFor(...).kind === "pending"` в сессионном порядке, либо явный выбор (`openFromGrid`, `undo`).
 - `committed` пушит номер строки в undo-стек **всегда** (ad-hoc-решения из грида и после `←` — наравне с потоком) и возвращает, куда идти, по `origin` на момент коммита: `grid` → `{grid}` (явный выбор сбрасывается); `undo` c `returnTo` → `{row}` (и активной пиннится `returnTo` с origin `flow`); иначе `{next}` (сброс на авто).
 - `undo()`: `returnTo` = текущая активная (или null); вершина стека становится активной с origin `{kind:"undo", returnTo}`. Перерешение открытой строки = существующий PATCH-перезапись — хук этим не занимается.
-- `commitFailed(n)`: `n` удаляется из undo-стека (последнее вхождение — решение не состоялось); если `n` есть в сессионном порядке — переставляется в **голову**; текущая активная НЕ прыгает (если явного выбора не было — пиннится текущая активная, чтобы вернувшаяся строка стала следующей, а не немедленной). Строка не из очереди спорных (confident из грида) в порядок не добавляется — для неё достаточно toast+reopen (Task 9).
+- `commitFailed(n)`: `n` удаляется из undo-стека (последнее вхождение — решение не состоялось); если `n` есть в сессионном порядке — переставляется в **голову**; текущая активная НЕ прыгает (если явного выбора не было — пиннится текущая активная, чтобы вернувшаяся строка стала следующей, а не немедленной). Строка не из очереди спорных (confident из грида) в порядок не добавляется — для неё достаточно toast+reopen (Task 9). **ВНИМАНИЕ, асинхронность:** `commitFailed` зовётся из `.then` PATCH-промиса — замыкание захвачено рендером ДО `committed()`, где активной была сама упавшая строка. Пиннинг обязан читать активную из **ref-на-последний-рендер** (`activeRowRef`), а не из замыкания — иначе ветка «cur !== n» даст false и оператора выдернет из текущей строки назад (запрещено этим же пунктом спеки). Воспроизводится юнитом «stale closure» ниже.
 - Сессионный порядок пересобирается только при смене **набора** спорных строк (загрузка сметы); `syncRow`-обновления объектов строк порядок не трогают.
 
 - [ ] **Step 1: Падающие тесты**
@@ -256,9 +263,36 @@ describe("useReviewQueue: порядок и активная", () => {
 describe("useReviewQueue: skip (N)", () => {
   it("активная уходит в хвост, следующей встаёт очередная нерешённая", () => {
     const { result } = setup()
-    act(() => result.current.skip())
+    let exit
+    act(() => {
+      exit = result.current.skip()
+    })
+    expect(exit).toEqual({ kind: "next" })
     expect(result.current.activeRow?.row_number).toBe(50)
     expect(result.current.queue.map((r) => r.row_number)).toEqual([50, 10, 20])
+  })
+
+  it("N на ad-hoc строке из грида (не в порядке спорных): порядок цел, выход в грид", () => {
+    const { result } = setup()
+    act(() => result.current.openFromGrid(30)) // confident — не в очереди
+    let exit
+    act(() => {
+      exit = result.current.skip()
+    })
+    expect(exit).toEqual({ kind: "grid" })
+    // confident-строка НЕ просочилась в очередь спорных
+    expect(result.current.queue.map((r) => r.row_number)).toEqual([20, 50, 10])
+    expect(result.current.activeRow?.row_number).toBe(20) // выбор сброшен
+  })
+})
+
+describe("useReviewQueue: deselect (ручной уход в грид табом)", () => {
+  it("сбрасывает явный выбор — очередь возвращается к потоку", () => {
+    const { result } = setup()
+    act(() => result.current.openFromGrid(30))
+    act(() => result.current.deselect())
+    expect(result.current.activeRow?.row_number).toBe(20)
+    expect(result.current.origin).toEqual({ kind: "flow" })
   })
 })
 
@@ -333,6 +367,20 @@ describe("useReviewQueue: ошибка PATCH", () => {
     act(() => result.current.openFromGrid(30))
     act(() => void result.current.committed(30))
     act(() => result.current.commitFailed(30))
+    expect(result.current.queue.map((r) => r.row_number)).toEqual([20, 50, 10])
+  })
+
+  it("STALE CLOSURE: commitFailed из рендера ДО коммита не выдёргивает оператора", () => {
+    // Прод-сценарий: commit(A) захватывает queue рендера R0 (активная A=20),
+    // committed(20) двигает активную на 50, PATCH падает ПОЗЖЕ — .then зовёт
+    // commitFailed из СТАРОГО замыкания. Пиннинг обязан читать активную из
+    // ref-на-последний-рендер, иначе «cur !== n» видит A===A и не пиннит →
+    // активная прыгает назад на 20 (запрещено спекой §3a).
+    const { result } = setup()
+    const stale = result.current // ← замыкание рендера до коммита
+    act(() => void result.current.committed(20)) // активная стала 50
+    act(() => stale.commitFailed(20)) // асинхронный фейл со старым замыканием
+    expect(result.current.activeRow?.row_number).toBe(50) // осталась 50
     expect(result.current.queue.map((r) => r.row_number)).toEqual([20, 50, 10])
   })
 })
@@ -437,14 +485,39 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     : autoActive
   const origin: CardOrigin = selection?.origin ?? { kind: "flow" }
 
+  // Свежая активная для АСИНХРОННЫХ вызовов (commitFailed из .then PATCH-а):
+  // замыкание там — из рендера до committed(), где активной была сама упавшая
+  // строка; читать её из замыкания нельзя (пин-тест «STALE CLOSURE»)
+  const activeRowRef = useRef(activeRow)
+  activeRowRef.current = activeRow
+
+  const exitFor = (o: CardOrigin): CommitExit =>
+    o.kind === "grid"
+      ? { kind: "grid" }
+      : o.kind === "undo" && o.returnTo !== null
+        ? { kind: "row", rowNumber: o.returnTo }
+        : { kind: "next" }
+
   const openFromGrid = (rowNumber: number) =>
     setSelection({ row: rowNumber, origin: { kind: "grid" } })
 
-  const skip = () => {
+  const deselect = () => setSelection(null)
+
+  const skip = (): CommitExit => {
     const n = activeRow?.row_number
-    if (n === undefined) return
+    if (n === undefined) return { kind: "next" }
+    if (!order.includes(n)) {
+      // Ad-hoc строка (confident/фонд из грида): «пропустить» = передумал —
+      // порядок спорных НЕ загрязняем, уходим туда, откуда пришли
+      const exit = exitFor(origin)
+      if (exit.kind === "row")
+        setSelection({ row: exit.rowNumber, origin: { kind: "flow" } })
+      else setSelection(null)
+      return exit
+    }
     setOrder((o) => [...o.filter((x) => x !== n), n])
     setSelection(null)
+    return { kind: "next" }
   }
 
   const undo = () => {
@@ -459,12 +532,7 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
   const committed = (rowNumber: number): CommitExit => {
     setUndoStack((s) => [...s, rowNumber])
     sessionDecided.current.add(rowNumber)
-    const exit: CommitExit =
-      origin.kind === "grid"
-        ? { kind: "grid" }
-        : origin.kind === "undo" && origin.returnTo !== null
-          ? { kind: "row", rowNumber: origin.returnTo }
-          : { kind: "next" }
+    const exit = exitFor(origin)
     if (exit.kind === "row")
       setSelection({ row: exit.rowNumber, origin: { kind: "flow" } })
     else setSelection(null)
@@ -483,10 +551,13 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
         : o
     )
     // Не выдёргивать оператора из текущей строки: пиннуть её, если явного
-    // выбора не было — вернувшаяся строка станет СЛЕДУЮЩЕЙ (голова очереди)
+    // выбора не было — вернувшаяся строка станет СЛЕДУЮЩЕЙ (голова очереди).
+    // ВАЖНО: активная — из ref-а, НЕ из замыкания: commitFailed зовётся из
+    // .then PATCH-а, а замыкание захвачено рендером ДО committed(), где
+    // активной была сама упавшая строка (пин-тест «STALE CLOSURE»)
     setSelection((prev) => {
       if (prev) return prev
-      const cur = activeRow
+      const cur = activeRowRef.current
       return cur && cur.row_number !== rowNumber
         ? { row: cur.row_number, origin: { kind: "flow" } }
         : null
@@ -503,6 +574,7 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     undo,
     committed,
     commitFailed,
+    deselect,
   }
 }
 ```
@@ -798,6 +870,8 @@ export function hasRecommendation(row: MatchRow): boolean {
 }
 ```
 
+Корневой `Card` несёт **`data-testid="review-card"`** — обязательный якорь: полоса контекста (Task 6) дублирует имена соседних строк в DOM, поэтому все ассерты «чья карточка открыта» в тестах экрана (Task 9) скоупятся `within(getByTestId("review-card"))`, а не `screen.getByText` (иначе тест зелёный при чужой активной карточке — ложноположительный сьют).
+
 **Содержимое сверху вниз (спека §3b, дословно):**
 1. Крошка сметы: `<CrumbTrail levels={row.breadcrumb} />` (muted; средний эллипсис уже внутри).
 2. Работа: `row.section_code` (font-mono muted) + `row.source_name` **полным текстом, без клампа**.
@@ -1041,6 +1115,8 @@ function topSection(r: MatchRow): string {
 }
 
 function rightSide(state: ReviewState, r: MatchRow): string {
+  // форма Decision сверена по types.ts: confirmed-вариант несёт code/name
+  // (при изменении Decision сверь по lib/types.ts, не выдумывай поля)
   const d = decisionFor(state, r)
   if (d.kind === "confirmed") return `${d.code} ${d.name}`
   return statusLabel(r, d)
@@ -1402,7 +1478,8 @@ git commit -m "feat(review): терминальный экран пустой о
 - Rewrite: `frontend/src/pages/estimate/ReviewScreen.tsx`
 - Delete: `frontend/src/pages/estimate/ReviewRow.tsx`, `frontend/src/pages/estimate/ReviewRow.test.tsx`
 - Modify: `frontend/src/pages/estimate/EstimatePage.tsx`
-- Test: `frontend/src/pages/estimate/ReviewScreen.test.tsx` (переписывается), `frontend/src/pages/estimate/EstimatePage.test.tsx` (дополнить)
+- Modify: `frontend/src/pages/estimate/DoneScreen.tsx` (кнопка «Просмотреть строки» → read-only грид)
+- Test: `frontend/src/pages/estimate/ReviewScreen.test.tsx` (переписывается), `frontend/src/pages/estimate/EstimatePage.test.tsx` (дополнить), `frontend/src/pages/estimate/DoneScreen.test.tsx` (дополнить)
 
 **Interfaces:**
 - Consumes: `useReviewQueue` (Task 2), `useReviewKeyboard` (Task 3), `ReviewCard`/`hasRecommendation` (Task 5), `ContextStrip` (Task 6), `ReviewGrid` (Task 7), `QueueDone` (Task 8); `useSearchParams` (react-router v7); `progress` (`@/lib/reviewState`); shadcn `Tabs` (`@/components/ui/tabs`), `AlertDialog` (диалог «остались нерешённые» — переезжает из старого экрана без изменений).
@@ -1429,7 +1506,7 @@ interface ReviewScreenProps {
 
 **Устройство:**
 
-*Режим из URL* (спека §1): `const [searchParams, setSearchParams] = useSearchParams()`; `view = readOnly || searchParams.get("view") === "grid" ? "grid" : "queue"`. Переключение — `setSearchParams`, мутируя копию: view=grid ставит параметр, очередь — удаляет (дефолт без параметра). F5/back работают через URL автоматически.
+*Режим из URL* (спека §1): `const [searchParams, setSearchParams] = useSearchParams()`; `view = readOnly || searchParams.get("view") === "grid" ? "grid" : "queue"`. Переключение — `setSearchParams`, мутируя копию: view=grid ставит параметр, очередь — удаляет (дефолт без параметра). F5/back работают через URL автоматически. **Ручной уход в грид (таб или «Посмотреть таблицу») обязан звать `queue.deselect()`** — иначе, вернувшись в очередь, оператор увидит давно открытую из грида карточку вместо потока (пин-тест «возврат в очередь табом»). Программный уход после коммита (`exit.kind === "grid"`) `deselect` не зовёт — selection уже сброшен самим `committed`.
 
 *Шапка (оба режима)*: имя файла · «спорных решено {reviewed} из {Y}» из `progress(state)` (ЧЕСТНАЯ: excluded не считается — гасит ложь «N строк СМР») · Tabs «Очередь | Таблица» (в `readOnly` скрыт) · «Ко всем сметам» · «Выгрузить Excel» · «Завершить» (диалог при `pending > 0` — блок AlertDialog из старого экрана дословно; в `readOnly` вместо «Завершить» ничего — экспорт остаётся).
 
@@ -1482,7 +1559,12 @@ useReviewKeyboard({
         "confirm"
       )
   },
-  onNext: queue.skip, // N = пропустить (в хвост)
+  onNext: () => {
+    // N = пропустить; для ad-hoc строки из грида skip возвращает выход
+    // по происхождению — обработать как у committed
+    const exit = queue.skip()
+    if (exit.kind === "grid") switchToGrid()
+  },
   onReject: () => {
     if (active)
       commit(
@@ -1514,8 +1596,11 @@ function handleReview(
     .catch((err: unknown) => {
       console.error(err)
       dispatch({ type: "reopen", row: rowNumber })
+      // Текст нейтральный: «возвращена в начало очереди» была бы ложью для
+      // confident-строки из грида (она не в очереди спорных — commitFailed
+      // порядок для неё не трогает). Имя строки — требование спеки §3a.
       toast.error(
-        `Не удалось сохранить решение по строке «${prev?.source_name ?? rowNumber}» — она возвращена в начало очереди`
+        `Не удалось сохранить решение по строке «${prev?.source_name ?? rowNumber}»`
       )
       return false
     })
@@ -1524,19 +1609,34 @@ function handleReview(
 
 Completed-ветка: `const [searchParams] = useSearchParams()`; при `meta.kind === "completed"` и `searchParams.get("view") === "grid"` → `<ReviewScreen ... readOnly onComplete={() => {}} />` (экспорт доступен, клики выключены, решение недоступно), иначе `DoneScreen` как сейчас. `processing`/`blocked`/`loading` ветки НЕ трогаются — `?view=grid` там молча игнорируется (фаза серверная и главнее режима, спека §3c).
 
+*`DoneScreen` — вход в read-only грид из UI* (роадмап §3/§4.2d: «итоговый экран … с переходом "Просмотреть строки" → read-only грид»; без этого ветка `completed+?view=grid` достижима только ручной правкой URL): рядом с «Возобновить проверку» добавить
+
+```tsx
+<Button variant="outline" size="sm" asChild>
+  <Link to="?view=grid">Просмотреть строки</Link>
+</Button>
+```
+
+(`Link` уже импортирован в `DoneScreen.tsx`; relative `to="?view=grid"` сохраняет путь `/estimates/:id`.) Тест в `DoneScreen.test.tsx` — по паттернам файла: кнопка отрендерена, `href` содержит `view=grid`.
+
 - [ ] **Step 1: Переписать `ReviewScreen.test.tsx` (падающие тесты)**
 
 Полностью замени файл. Обёртка — `MemoryRouter` с `initialEntries` (для `?view=grid`); `WrapRows` как раньше, но с `onReview`-пропом и роутами:
 
 ```tsx
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useReducer } from "react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ReviewScreen } from "@/pages/estimate/ReviewScreen"
 import { initReview, reviewReducer } from "@/lib/reviewState"
 import type { MatchRow } from "@/lib/types"
+
+// ВСЕ ассерты «чья карточка открыта» — ТОЛЬКО внутри карточки: полоса
+// контекста (±2 соседа) дублирует имена строк в DOM, screen.getByText по
+// имени строки ловит не карточку, а полосу (ложноположительный тест)
+const card = () => within(screen.getByTestId("review-card"))
 
 vi.mock("@/lib/api/articles", () => ({
   searchArticles: vi.fn().mockResolvedValue([]),
@@ -1600,7 +1700,7 @@ const ROWS: MatchRow[] = [
 describe("режимы", () => {
   it("дефолт — очередь: карточка первой спорной", () => {
     render(<Wrap rows={ROWS} />)
-    expect(screen.getByText("Спорная А")).toBeInTheDocument()
+    expect(card().getByText("Спорная А")).toBeInTheDocument()
     // это карточка, а не таблица: у грида роль table
     expect(screen.queryByRole("table")).not.toBeInTheDocument()
   })
@@ -1622,7 +1722,9 @@ describe("поток очереди", () => {
     render(<Wrap rows={ROWS} onReview={onReview} />)
     await userEvent.keyboard("{Enter}")
     expect(onReview).toHaveBeenCalledWith(3, "confirm", undefined)
-    expect(await screen.findByText("Спорная Б")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(card().getByText("Спорная Б")).toBeInTheDocument()
+    )
   })
 
   it("0 — без пары; ← возвращает к решённой", async () => {
@@ -1631,20 +1733,24 @@ describe("поток очереди", () => {
     await userEvent.keyboard("0")
     expect(onReview).toHaveBeenCalledWith(3, "reject", undefined)
     await userEvent.keyboard("{ArrowLeft}")
-    expect(screen.getByText("Спорная А")).toBeInTheDocument()
+    expect(card().getByText("Спорная А")).toBeInTheDocument()
   })
 
-  it("ошибка PATCH: строка в голову очереди (после текущей)", async () => {
+  it("ошибка PATCH: строка в голову очереди — СЛЕДУЮЩЕЙ, активную не выдёргивает", async () => {
     const onReview = vi
       .fn()
       .mockResolvedValueOnce(false) // первый коммит падает
       .mockResolvedValue(true)
     render(<Wrap rows={ROWS} onReview={onReview} />)
-    await userEvent.keyboard("{Enter}") // Спорная А → упало, активной стала Б
-    expect(await screen.findByText("Спорная Б")).toBeInTheDocument()
+    await userEvent.keyboard("{Enter}") // Спорная А → упало (async), активной стала Б
+    // даже ПОСЛЕ отработки фейла активная остаётся Б (пин; страж stale closure)
+    await waitFor(() => expect(onReview).toHaveBeenCalledTimes(1))
+    expect(card().getByText("Спорная Б")).toBeInTheDocument()
     await userEvent.keyboard("{Enter}") // решаем Б
-    // Спорная А вернулась в голову — снова активна
-    expect(await screen.findByText("Спорная А")).toBeInTheDocument()
+    // Спорная А вернулась в голову — теперь активна она
+    await waitFor(() =>
+      expect(card().getByText("Спорная А")).toBeInTheDocument()
+    )
   })
 
   it("пустая очередь — терминальный экран", () => {
@@ -1658,8 +1764,18 @@ describe("грид ↔ очередь", () => {
     render(<Wrap rows={ROWS} url="/estimates/5?view=grid" />)
     await userEvent.click(screen.getByText("Уверенная"))
     expect(screen.queryByRole("table")).not.toBeInTheDocument()
-    // карточка уверенной строки (перерешение)
-    expect(screen.getByText("Уверенная")).toBeInTheDocument()
+    // карточка ИМЕННО уверенной строки (перерешение) — скоуп обязателен,
+    // «Уверенная» есть и в полосе контекста
+    expect(card().getByText("Уверенная")).toBeInTheDocument()
+  })
+
+  it("возврат в очередь табом после клика из грида — поток, а не старая карточка", async () => {
+    render(<Wrap rows={ROWS} url="/estimates/5?view=grid" />)
+    await userEvent.click(screen.getByText("Уверенная")) // очередь, карточка «Уверенная»
+    await userEvent.click(screen.getByRole("tab", { name: /таблица/i })) // ушли в грид табом
+    await userEvent.click(screen.getByRole("tab", { name: /очередь/i })) // вернулись
+    // явный выбор сброшен (deselect при уходе в грид) — активна первая спорная
+    expect(card().getByText("Спорная А")).toBeInTheDocument()
   })
 })
 
@@ -1686,7 +1802,8 @@ describe("read-only (завершённая смета)", () => {
 it("completed + ?view=grid → read-only грид; без view — DoneScreen", async () => {
   // getEstimate → completed_at != null; рендер с initialEntries
   // ["/estimates/5?view=grid"] → findByRole("table");
-  // с ["/estimates/5"] → текст DoneScreen («Скачать обогащённый»)
+  // с ["/estimates/5"] → текст DoneScreen («Скачать обогащённый») и
+  // кнопка «Просмотреть строки» с href, содержащим view=grid
 })
 
 it("processing + ?view=grid молча игнорируется (ProcessingScreen)", async () => {
@@ -1711,7 +1828,8 @@ Expected: FAIL.
 
 1. Перепиши `ReviewScreen.tsx` по устройству выше. Удали `ReviewRow.tsx` и `ReviewRow.test.tsx` (`git rm`). Из старого экрана переезжают: блок AlertDialog «Остались нерешённые строки» (дословно), кнопки шапки, `counts`/`chip` — в `ReviewGrid` (Task 7 уже создал грид с чипами — если чипы там уже есть, здесь просто не дублировать).
 2. Обнови `EstimatePage.tsx` (handleReview → Promise<boolean> с toast-именем; completed+view=grid ветка; `useSearchParams` импорт).
-3. `npm run typecheck` — чини по списку (например, `ReviewActionKind` экспорт остаётся в `ReviewScreen.tsx`).
+3. Добавь в `DoneScreen.tsx` кнопку «Просмотреть строки» (сниппет выше) + тест.
+4. `npm run typecheck` — чини по списку (например, `ReviewActionKind` экспорт остаётся в `ReviewScreen.tsx`).
 
 - [ ] **Step 5: Всё зелёное**
 
@@ -1750,7 +1868,8 @@ Expected: всё зелёное (бэк 407+ passed / 3 skipped; фронт 150�
 4. Переключение «Очередь ↔ Таблица»: из грида клик по строке (спорной и confident) → карточка; после решения из грида — возврат в грид на ту же позицию скролла; «к таблице» без клика — скролл к активной.
 5. F5 в каждом режиме: `?view=grid` держит таблицу, без параметра — очередь; порядок очереди после F5 исходный, `←` неактивна.
 6. Пустая очередь → терминальный экран; «Завершить» из обоих режимов (и диалог при остатке нерешённых из грида).
-7. Завершённая смета: дефолт — итоговый экран; `?view=grid` — read-only грид, клики не открывают карточку, экспорт работает; `?view=grid` на processing-смете игнорируется.
+7. Завершённая смета: дефолт — итоговый экран, кнопка «Просмотреть строки» ведёт в read-only грид; там клики не открывают карточку, экспорт работает; `?view=grid` на processing-смете игнорируется.
+7а. `N` на карточке, открытой кликом из грида по confident-строке, — возврат в грид, строка в очереди спорных не появляется; таб «Таблица» → таб «Очередь» после клика из грида — поток, не старая карточка.
 8. Замер: фиксированная высота строки грида на реальных названиях сметы 16 (кламп 2 строки не рвётся, эллипсис честный); высота скролл-контейнера не оставляет мёртвых зон. Расхождение — правка токена `ROW_H`/оффсета, не архитектуры.
 9. Excluded-строки: приглушены в гриде, некликабельны; PATCH руками (curl/DevTools) на excluded → 409.
 
@@ -1777,6 +1896,8 @@ git commit -m "docs: devlog PR-B этапа 2 — экран ревью (оче�
 | §3a: `N` — skip-в-хвост, после F5 порядок исходный | 2, 9 (гейт 5) |
 | §3a: undo-стек `←` = ВСЕ коммиты сессии (включая ad-hoc из грида/после `←`); после F5 пуст | 2 |
 | §3a: ошибка PATCH → голова очереди + toast с именем строки | 2, 9 |
+| §3a: активную НЕ выдёргивает при асинхронном фейле (страж stale closure) | 2 (пин-тест), 9 |
+| §3a: `N`/таб на ad-hoc строке из грида не загрязняет очередь спорных (guard skip, deselect) | 2, 9 |
 | §3a: память «откуда пришла»: грид→грид (та же позиция), `←`→прежняя строка, поток→следующая | 2 (CommitExit), 9 |
 | §3a: очередь = все спорные; фильтры/чипы — только в гриде | 2, 7, 9 |
 | §3b: карточка — крошка сметы (полная, средний эллипсис, первый+последние видимы) | 4, 5 |
@@ -1798,6 +1919,7 @@ git commit -m "docs: devlog PR-B этапа 2 — экран ревью (оче�
 | §3c: `ReviewRow`/аккордеон удалены, тесты переписаны | 9 |
 | §3d: пустая очередь → терминальный экран (сводка, CTA, ссылка на таблицу) | 8, 9 |
 | §3d: завершённая смета — дефолт итоговый; `?view=grid` — read-only грид, экспорт доступен | 9 |
+| Роадмап §3/§4.2d: «Просмотреть строки» с итогового экрана → read-only грид (достижимость из UI) | 9 (DoneScreen) |
 | §4: юниты `useReviewQueue` (порядок/skip/undo/голова/пустая) | 2 |
 | §4: карточка (рекомендация/кандидаты/поиск/без пары/error/крошки) | 5 |
 | §4: клавиатура (`0`, `←`, глушение) | 3 |
