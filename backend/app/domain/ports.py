@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from datetime import datetime
 
 from app.domain.decision_fund import AppliedFundHit, FundEntry, FundHit
 from app.domain.entities import (
@@ -178,7 +179,19 @@ class EstimateRepository(ABC):
     def create(self, new: NewEstimate, nodes: list[EstimateNode]) -> Estimate: ...
 
     @abstractmethod
-    def list_for_owner(self, owner_id: int, *, is_admin: bool) -> list[EstimateSummary]: ...
+    def list_for_owner(
+        self, owner_id: int, *, is_admin: bool, limit: int = 50, offset: int = 0
+    ) -> tuple[list[EstimateSummary], int]:
+        """Страница смет владельца (админ — все) + общее число. Сортировка: created_at DESC."""
+        ...
+
+    @abstractmethod
+    def set_completed(
+        self, estimate_id: int, requester_id: int, *, is_admin: bool, completed: bool
+    ) -> tuple[str, datetime | None] | None:
+        """Выставить/снять completed_at. None — не найдена/чужая.
+        Возвращает (status, completed_at) после записи. Идемпотентен."""
+        ...
 
     @abstractmethod
     def get(self, estimate_id: int, requester_id: int, *, is_admin: bool) -> Estimate | None: ...

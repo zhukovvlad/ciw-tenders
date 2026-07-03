@@ -1,6 +1,7 @@
 // frontend/src/pages/estimate/ReviewScreen.tsx
 import { useMemo, useState } from "react"
-import { Download, Plus } from "lucide-react"
+import { Link } from "react-router-dom"
+import { ArrowLeft, Check, Download } from "lucide-react"
 import type { ReviewState } from "@/lib/types"
 import {
   type ReviewAction,
@@ -9,6 +10,17 @@ import {
   progress,
 } from "@/lib/reviewState"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { ReviewRow } from "@/pages/estimate/ReviewRow"
 import { useReviewKeyboard } from "@/lib/useReviewKeyboard"
 
@@ -18,7 +30,7 @@ interface ReviewScreenProps {
   state: ReviewState
   dispatch: React.Dispatch<ReviewAction>
   onExport: () => void
-  onNewEstimate: () => void
+  onComplete: () => void
   /**
    * Коммит решения на бэк (PATCH .../review). Вызывается параллельно локальному
    * dispatch (оптимистичный UI). Если не передан — работает в офлайн/мок-режиме.
@@ -40,7 +52,7 @@ export function ReviewScreen({
   state,
   dispatch,
   onExport,
-  onNewEstimate,
+  onComplete,
   onReview,
 }: ReviewScreenProps) {
   // useMemo: rows/queue стабильны между рендерами, пока не изменился state — иначе
@@ -48,6 +60,7 @@ export function ReviewScreen({
   // react-hooks/exhaustive-deps). Стабилизируем, а не глушим правило.
   const rows = useMemo(() => filteredRows(state), [state])
   const { reviewed, total } = progress(state)
+  const pending = total - reviewed
   const c = counts(state)
   const [activeRowOverride, setActiveRowOverride] = useState<
     number | null | "auto"
@@ -144,15 +157,49 @@ export function ReviewScreen({
             {c.no_match} без пары
           </span>
         </div>
-        <div className="ml-auto flex gap-2">
-          <Button variant="outline" size="sm" onClick={onNewEstimate}>
-            <Plus className="size-4" />
-            Новая смета
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/estimates">
+              <ArrowLeft className="size-4" />
+              Ко всем сметам
+            </Link>
           </Button>
-          <Button size="sm" onClick={onExport}>
+          <Button size="sm" variant="outline" onClick={onExport}>
             <Download className="size-4" />
             Выгрузить Excel
           </Button>
+          {pending === 0 ? (
+            <Button size="sm" onClick={onComplete}>
+              <Check className="size-4" />
+              Завершить
+            </Button>
+          ) : (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button size="sm">
+                  <Check className="size-4" />
+                  Завершить
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    Остались нерешённые строки
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Осталось {pending} спорных строк без решения. Завершить
+                    проверку всё равно? Возобновить можно в любой момент.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Отмена</AlertDialogCancel>
+                  <AlertDialogAction onClick={onComplete}>
+                    Завершить всё равно
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
         </div>
       </div>
 

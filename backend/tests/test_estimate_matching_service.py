@@ -180,7 +180,7 @@ def test_fake_repo_excludes_marked_org() -> None:
     )
     assert repo.fetch_unembedded_nodes(1, after_id=0, limit=10) == []
     assert repo.count_unfinished_nodes(1) == 0
-    assert repo.list_for_owner(1, is_admin=True)[0].nodes_count == 0
+    assert repo.list_for_owner(1, is_admin=True)[0][0].nodes_count == 0
 
 
 def test_fake_repo_survivor_keeps_pending_and_new_breadcrumb() -> None:

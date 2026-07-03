@@ -1,64 +1,54 @@
 import { describe, expect, it, vi } from "vitest"
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
 import { DoneScreen } from "@/pages/estimate/DoneScreen"
 import { initReview } from "@/lib/reviewState"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
-import { getEstimate, setReference } from "@/lib/api/estimates"
+import { setReference } from "@/lib/api/estimates"
 
 vi.mock("@/lib/api/estimates", () => ({
   setReference: vi.fn().mockResolvedValue({ is_reference: true, promoted: 1 }),
-  getEstimate: vi.fn().mockResolvedValue({
-    fileName: "смета.xlsx",
-    rows: [],
-    isReference: false,
-  }),
 }))
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), info: vi.fn() } }))
 import { toast } from "sonner"
 
-describe("DoneScreen", () => {
-  it("кнопки выгрузки и новой сметы работают", async () => {
-    const onExport = vi.fn(),
-      onNew = vi.fn()
-    render(
-      <DoneScreen
-        state={initReview("смета.xlsx", MOCK_ROWS)}
-        onExport={onExport}
-        onNewEstimate={onNew}
-        estimateId={1}
-      />
-    )
-    await userEvent.click(screen.getByRole("button", { name: /Скачать/ }))
-    expect(onExport).toHaveBeenCalled()
-    await userEvent.click(
-      screen.getByRole("button", { name: /следующую смету/ })
-    )
-    expect(onNew).toHaveBeenCalled()
-  })
-
-  it("тумблер «в фонд» вызывает setReference(id, true)", async () => {
-    render(
+function renderDone(props: Partial<React.ComponentProps<typeof DoneScreen>>) {
+  return render(
+    <MemoryRouter>
       <DoneScreen
         state={initReview("смета.xlsx", MOCK_ROWS)}
         onExport={vi.fn()}
-        onNewEstimate={vi.fn()}
+        onResume={vi.fn()}
         estimateId={1}
+        isReference={false}
+        {...props}
       />
+    </MemoryRouter>
+  )
+}
+
+describe("DoneScreen", () => {
+  it("кнопки выгрузки и возобновления работают", async () => {
+    const onExport = vi.fn(),
+      onResume = vi.fn()
+    renderDone({ onExport, onResume })
+    await userEvent.click(screen.getByRole("button", { name: /Скачать/ }))
+    expect(onExport).toHaveBeenCalled()
+    await userEvent.click(
+      screen.getByRole("button", { name: /Возобновить проверку/ })
     )
+    expect(onResume).toHaveBeenCalled()
+  })
+
+  it("тумблер «в фонд» вызывает setReference(id, true)", async () => {
+    renderDone({})
     await userEvent.click(screen.getByRole("switch"))
     expect(setReference).toHaveBeenCalledWith(1, true)
   })
 
   it("тумблер имеет aria-label для доступности", () => {
-    render(
-      <DoneScreen
-        state={initReview("смета.xlsx", MOCK_ROWS)}
-        onExport={vi.fn()}
-        onNewEstimate={vi.fn()}
-        estimateId={1}
-      />
-    )
+    renderDone({})
     expect(
       screen.getByRole("switch", {
         name: "Эталонная смета — добавить в фонд решений",
@@ -71,14 +61,7 @@ describe("DoneScreen", () => {
       is_reference: false,
       promoted: 0,
     })
-    render(
-      <DoneScreen
-        state={initReview("смета.xlsx", MOCK_ROWS)}
-        onExport={vi.fn()}
-        onNewEstimate={vi.fn()}
-        estimateId={1}
-      />
-    )
+    renderDone({})
     const toggle = screen.getByRole("switch")
     await userEvent.click(toggle)
     expect(setReference).toHaveBeenCalledWith(1, true)
@@ -87,22 +70,21 @@ describe("DoneScreen", () => {
     })
   })
 
-  it("тумблер гидратируется из серверного is_reference при открытии", async () => {
-    vi.mocked(getEstimate).mockResolvedValueOnce({
-      fileName: "смета.xlsx",
-      rows: [],
-      isReference: true,
+  it("тумблер инициализируется из пропа isReference", () => {
+    renderDone({ isReference: true })
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("успешный тумблер зовёт onReferenceChange с ответом бэка", async () => {
+    vi.mocked(setReference).mockResolvedValueOnce({
+      is_reference: true,
+      promoted: 2,
     })
-    render(
-      <DoneScreen
-        state={initReview("смета.xlsx", MOCK_ROWS)}
-        onExport={vi.fn()}
-        onNewEstimate={vi.fn()}
-        estimateId={7}
-      />
-    )
+    const onReferenceChange = vi.fn()
+    renderDone({ onReferenceChange })
+    await userEvent.click(screen.getByRole("switch"))
     await vi.waitFor(() => {
-      expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true")
+      expect(onReferenceChange).toHaveBeenCalledWith(true)
     })
   })
 
@@ -111,14 +93,7 @@ describe("DoneScreen", () => {
       is_reference: false,
       promoted: 0,
     })
-    render(
-      <DoneScreen
-        state={initReview("смета.xlsx", MOCK_ROWS)}
-        onExport={vi.fn()}
-        onNewEstimate={vi.fn()}
-        estimateId={1}
-      />
-    )
+    renderDone({})
     await userEvent.click(screen.getByRole("switch"))
     await vi.waitFor(() => {
       expect(toast.info).toHaveBeenCalled()
@@ -135,14 +110,7 @@ describe("DoneScreen", () => {
     vi.mocked(setReference)
       .mockReturnValueOnce(first)
       .mockResolvedValueOnce({ is_reference: false, promoted: 0 })
-    render(
-      <DoneScreen
-        state={initReview("смета.xlsx", MOCK_ROWS)}
-        onExport={vi.fn()}
-        onNewEstimate={vi.fn()}
-        estimateId={1}
-      />
-    )
+    renderDone({})
     const toggle = screen.getByRole("switch")
     // первый клик (ON) — ответ придёт позже
     await userEvent.click(toggle)

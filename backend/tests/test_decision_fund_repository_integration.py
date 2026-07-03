@@ -34,7 +34,7 @@ def _test_db_url() -> str | None:
 
 
 _TEST_DB_URL = _test_db_url()
-_SKIP_REASON = "нужен TEST_DATABASE_URL (backend/.env) — тест-Postgres со схемой 0007"
+_SKIP_REASON = "нужен TEST_DATABASE_URL (backend/.env) — тест-Postgres со схемой alembic head"
 pytestmark = pytest.mark.skipif(_TEST_DB_URL is None, reason=_SKIP_REASON)
 
 

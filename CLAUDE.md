@@ -69,13 +69,19 @@
 
 - Реальный API-слой — `frontend/src/lib/api/`: `client.ts` (единый `ApiError`, Bearer-токен из
   `sessionStorage` по ключу `ciw.auth.token`, колбэк `onUnauthorized`, multipart-загрузка) + модули
-  `auth` / `articles`. `client.ts` — единственный, кто читает токен из стораджа.
+  `auth` / `articles` / `estimates`. `client.ts` — единственный, кто читает токен из стораджа.
 - Аутентификация — `lib/auth/AuthContext` (JWT в `sessionStorage`, **не** localStorage); хук `useAuth`
   вынесен в отдельный `lib/auth/useAuth.ts` (требование `react-refresh`). Гейтинг по роли на клиенте —
-  косметика; реальный enforcement на бэке (`require_admin`).
-- Справочник СМР (`pages/ArticlesPage` + `components/articles/*`: таблица, ручное добавление, загрузка
-  шаблона, полная очистка) ходит в **реальный** бэкенд. Поток смет (`pages/estimate/`) пока на **моках**
-  (`lib/mock/`) — не трогать его и `Candidate`/`MOCK_*` при работе со справочником.
+  косметика; реальный enforcement на бэке (`require_admin`). В `sessionStorage` живёт **только** JWT —
+  никакого кэша данных ревью.
+- Навигация — react-router v7 (library mode): `/estimates` (загрузка + список), `/estimates/:id`
+  (смета), `/articles` (справочник); логин-гейт поверх роутера. Фаза сметы выводится из ответа
+  `GET /estimates/:id` (`status` + `completed_at`) в `pages/estimate/EstimatePage.tsx` — он
+  единственный владелец маппинга статус→экран; источник истины — сервер (F5/прямая ссылка
+  восстанавливают фазу).
+- И справочник СМР (`pages/ArticlesPage` + `components/articles/*`), и поток смет
+  (`pages/estimate/*`) ходят в **реальный** бэкенд. Сетевых моков в проде нет: из `lib/mock/`
+  прод-код берёт только типы (`Progress`), остальное — фикстуры тестов.
 
 ## БД
 

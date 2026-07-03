@@ -1,44 +1,33 @@
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
+import { Link } from "react-router-dom"
 import { Download } from "lucide-react"
 import { toast } from "sonner"
 import type { ReviewState } from "@/lib/types"
 import { decisionFor } from "@/lib/reviewState"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { getEstimate, setReference } from "@/lib/api/estimates"
+import { setReference } from "@/lib/api/estimates"
 
 interface DoneScreenProps {
   state: ReviewState
   onExport: () => void
-  onNewEstimate: () => void
+  onResume: () => void
   estimateId: number | null
+  isReference: boolean
+  onReferenceChange?: (value: boolean) => void
 }
 
 export function DoneScreen({
   state,
   onExport,
-  onNewEstimate,
+  onResume,
   estimateId,
+  isReference,
+  onReferenceChange,
 }: DoneScreenProps) {
-  const [inFund, setInFund] = useState(false)
+  const [inFund, setInFund] = useState(isReference)
   const toggleSeq = useRef(0)
 
-  // Гидратация из серверного is_reference: уже-эталонная смета показывает тумблер
-  // включённым. Не перетираем состояние, если пользователь успел щёлкнуть (seq > 0).
-  useEffect(() => {
-    if (estimateId === null) return
-    let cancelled = false
-    void getEstimate(estimateId)
-      .then((r) => {
-        if (!cancelled && toggleSeq.current === 0) setInFund(r.isReference)
-      })
-      .catch((err: unknown) => {
-        console.warn("не удалось прочитать флаг фонда", err) // best-effort
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [estimateId])
   const matched = state.rows.filter(
     (r) => decisionFor(state, r).kind === "confirmed"
   ).length
@@ -57,6 +46,7 @@ export function DoneScreen({
       .then((r) => {
         if (seq !== toggleSeq.current) return
         setInFund(r.is_reference)
+        onReferenceChange?.(r.is_reference)
         if (next && !r.is_reference && r.promoted === 0) {
           // бэк не ставит is_reference при 0 промоученных строк (toggle_reference) —
           // объясняем отщёлкивание, иначе тумблер выглядит сломанным
@@ -115,13 +105,13 @@ export function DoneScreen({
           aria-label="Эталонная смета — добавить в фонд решений"
         />
       </div>
-      <div className="mt-4">
-        <button
-          onClick={onNewEstimate}
-          className="text-sm text-[var(--ds-accent-hover)]"
-        >
+      <div className="mt-4 flex flex-col items-center gap-2">
+        <Button variant="outline" size="sm" onClick={onResume}>
+          Возобновить проверку
+        </Button>
+        <Link to="/estimates" className="text-sm text-[var(--ds-accent-hover)]">
           ＋ Загрузить следующую смету
-        </button>
+        </Link>
       </div>
     </div>
   )

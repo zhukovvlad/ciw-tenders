@@ -1,5 +1,6 @@
 // frontend/src/components/AppShell.tsx
 import { ChevronDown, FileSpreadsheet, Library } from "lucide-react"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   DropdownMenu,
@@ -10,27 +11,25 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useAuth } from "@/lib/auth/useAuth"
-import { clearReview } from "@/lib/session"
 
-interface AppShellProps {
-  tab: "estimate" | "articles"
-  onTab: (t: "estimate" | "articles") => void
-  children: React.ReactNode
-}
-
-export function AppShell({ tab, onTab, children }: AppShellProps) {
+export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, role, logout } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const tab = location.pathname.startsWith("/articles")
+    ? "articles"
+    : "estimate"
   return (
     <div className="min-h-svh bg-background">
       <header className="flex items-center gap-5 border-b border-[var(--ds-hairline)] bg-[var(--ds-surface-sunken)] px-6 py-3">
-        <span className="font-display text-base">
+        <Link to="/estimates" className="font-display text-base">
           MR <span className="text-[var(--ds-accent-hover)]">·</span> Сметы
-        </span>
+        </Link>
         <Tabs
           value={tab}
-          onValueChange={(v) => {
-            if (v === "estimate" || v === "articles") onTab(v)
-          }}
+          onValueChange={(v) =>
+            navigate(v === "articles" ? "/articles" : "/estimates")
+          }
         >
           <TabsList>
             <TabsTrigger value="estimate">
@@ -54,12 +53,7 @@ export function AppShell({ tab, onTab, children }: AppShellProps) {
                 {role === "admin" ? "Администратор" : "Пользователь"}
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={() => {
-                  clearReview()
-                  logout()
-                }}
-              >
+              <DropdownMenuItem onSelect={() => logout()}>
                 Выйти
               </DropdownMenuItem>
             </DropdownMenuContent>

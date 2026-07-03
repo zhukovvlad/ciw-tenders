@@ -136,13 +136,23 @@ class EstimateSummaryOut(BaseModel):
     status: str
     nodes_count: int
     created_at: datetime
+    completed_at: datetime | None = None
+    reviewed_count: int = 0
+    total_reviewable: int = 0
 
     @classmethod
     def from_entity(cls, s: EstimateSummary) -> EstimateSummaryOut:
         return cls(
             id=s.id, filename=s.filename, status=s.status,
             nodes_count=s.nodes_count, created_at=s.created_at,
+            completed_at=s.completed_at,
+            reviewed_count=s.reviewed_count, total_reviewable=s.total_reviewable,
         )
+
+
+class EstimateListOut(BaseModel):
+    items: list[EstimateSummaryOut]
+    total: int
 
 
 class MatchCandidateOut(BaseModel):
@@ -196,6 +206,14 @@ class ReferenceToggleIn(BaseModel):
     is_reference: bool
 
 
+class CompletionToggleIn(BaseModel):
+    completed: bool
+
+
+class CompletionOut(BaseModel):
+    completed_at: datetime | None
+
+
 class EstimateDetailOut(BaseModel):
     id: int
     filename: str
@@ -203,13 +221,14 @@ class EstimateDetailOut(BaseModel):
     status_detail: str | None = None
     created_at: datetime
     is_reference: bool = False
+    completed_at: datetime | None = None
     rows: list[EstimateRowOut]
 
     @classmethod
     def from_entity(cls, e: Estimate) -> EstimateDetailOut:
         return cls(
             id=e.id, filename=e.filename, status=e.status, status_detail=e.status_detail,
-            created_at=e.created_at, is_reference=e.is_reference,
+            created_at=e.created_at, is_reference=e.is_reference, completed_at=e.completed_at,
             rows=[EstimateRowOut.from_entity(r) for r in e.rows],
         )
 

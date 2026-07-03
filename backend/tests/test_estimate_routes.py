@@ -147,7 +147,7 @@ def test_list_and_get_ownership() -> None:
         _xlsx(), "a.xlsx", owner_id=2
     )
     client = _client(repo, storage)  # user id=2
-    assert len(client.get("/api/estimates").json()) == 1
+    assert len(client.get("/api/estimates").json()["items"]) == 1
     other = _client(repo, storage, user=_user(uid=9))  # чужой
     assert other.get("/api/estimates/1").status_code == 404
 

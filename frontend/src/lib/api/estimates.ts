@@ -27,7 +27,9 @@ interface DetailDto {
   id: number
   filename: string
   status: string
-  // опционален защитно: бэк до фичи гидратации тумблера его не присылал
+  // опциональны защитно: старый бэк (до соответствующих фич) их не присылал
+  status_detail?: string | null
+  completed_at?: string | null
   is_reference?: boolean
   rows: RowDto[]
 }
@@ -78,15 +80,39 @@ export function rowFromDto(r: RowDto): MatchRow {
   }
 }
 
-export async function getEstimate(
+export interface EstimateDetail {
   id: number
-): Promise<{ fileName: string; rows: MatchRow[]; isReference: boolean }> {
+  fileName: string
+  status: string
+  statusDetail: string | null
+  completedAt: string | null // ISO
+  isReference: boolean
+  rows: MatchRow[]
+}
+
+export async function getEstimate(id: number): Promise<EstimateDetail> {
   const dto = await apiGet<DetailDto>(`/estimates/${id}`)
   return {
+    id: dto.id,
     fileName: dto.filename,
-    rows: dto.rows.map(rowFromDto),
+    status: dto.status,
+    statusDetail: dto.status_detail ?? null,
+    completedAt: dto.completed_at ?? null,
     isReference: dto.is_reference ?? false,
+    rows: dto.rows.map(rowFromDto),
   }
+}
+
+export async function setCompletion(
+  id: number,
+  completed: boolean
+): Promise<{ completedAt: string | null }> {
+  const dto = await apiSend<{ completed_at: string | null }>(
+    "PATCH",
+    `/estimates/${id}/completion`,
+    { completed }
+  )
+  return { completedAt: dto.completed_at }
 }
 
 export async function uploadEstimate(file: File): Promise<UploadResult> {
@@ -112,17 +138,36 @@ const TERMINAL_OK = new Set(["ready", "partial_error"])
 export async function pollEstimate(
   id: number,
   onProgress: (status: string, done: number, total: number) => void,
-  intervalMs = 1500
+  intervalMs = 1500,
+  opts?: { signal?: AbortSignal }
 ): Promise<{ fileName: string; rows: MatchRow[] }> {
   return new Promise((resolve, reject) => {
+    const signal = opts?.signal
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onAbort = () => {
+      if (timer !== undefined) clearTimeout(timer)
+      reject(new DOMException("Aborted", "AbortError"))
+    }
+    if (signal) {
+      if (signal.aborted) {
+        onAbort()
+        return
+      }
+      signal.addEventListener("abort", onAbort)
+    }
+    const cleanup = () => signal?.removeEventListener("abort", onAbort)
     const check = async () => {
+      if (signal?.aborted) return // onAbort уже отверг промис
       try {
         const dto = await apiGet<DetailDto>(`/estimates/${id}`)
+        if (signal?.aborted) return // отменили, пока ждали ответ — не резолвим дальше
         if (TERMINAL_OK.has(dto.status)) {
+          cleanup()
           resolve({ fileName: dto.filename, rows: dto.rows.map(rowFromDto) })
           return
         }
         if (dto.status === "blocked") {
+          cleanup()
           reject(new Error("Обработка сметы заблокирована"))
           return
         }
@@ -132,8 +177,9 @@ export async function pollEstimate(
           (r) => (r.status as string) !== "pending"
         ).length
         onProgress(dto.status, done, dto.rows.length)
-        setTimeout(() => void check(), intervalMs)
+        timer = setTimeout(() => void check(), intervalMs)
       } catch (err) {
+        cleanup()
         reject(err)
       }
     }
@@ -165,6 +211,10 @@ interface SummaryDto {
   status: string
   nodes_count: number
   created_at: string // ISO
+  // опциональны защитно: старый бэк (до соответствующих фич) их не присылал
+  completed_at?: string | null
+  reviewed_count?: number
+  total_reviewable?: number
 }
 
 export interface EstimateListItem {
@@ -173,17 +223,33 @@ export interface EstimateListItem {
   status: string
   nodesCount: number
   createdAt: string // ISO — форматируется в UI
+  completedAt: string | null
+  reviewedCount: number
+  totalReviewable: number
 }
 
-export async function listEstimates(): Promise<EstimateListItem[]> {
-  const dtos = await apiGet<SummaryDto[]>("/estimates")
-  return dtos.map((d) => ({
-    id: d.id,
-    filename: d.filename,
-    status: d.status,
-    nodesCount: d.nodes_count,
-    createdAt: d.created_at,
-  }))
+export async function listEstimates(opts?: {
+  limit?: number
+  offset?: number
+}): Promise<{ items: EstimateListItem[]; total: number }> {
+  const limit = opts?.limit ?? 50
+  const offset = opts?.offset ?? 0
+  const dto = await apiGet<{ items: SummaryDto[]; total: number }>(
+    `/estimates?limit=${limit}&offset=${offset}`
+  )
+  return {
+    items: dto.items.map((d) => ({
+      id: d.id,
+      filename: d.filename,
+      status: d.status,
+      nodesCount: d.nodes_count,
+      createdAt: d.created_at,
+      completedAt: d.completed_at ?? null,
+      reviewedCount: d.reviewed_count ?? 0,
+      totalReviewable: d.total_reviewable ?? 0,
+    })),
+    total: dto.total,
+  }
 }
 
 export async function deleteEstimate(id: number): Promise<void> {
