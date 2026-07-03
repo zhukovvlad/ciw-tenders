@@ -155,7 +155,8 @@ export function EstimatePage() {
     action: ReviewActionKind,
     articleId?: number
   ) {
-    void patchRowReview(id, rowNumber, action, articleId)
+    const prev = state.rows.find((r) => r.row_number === rowNumber)
+    void patchRowReview(id, rowNumber, action, articleId, prev)
       .then((updated) => dispatch({ type: "syncRow", row: updated }))
       .catch((err: unknown) => {
         console.error(err)

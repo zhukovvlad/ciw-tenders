@@ -6,6 +6,7 @@ import {
   deleteArticle,
   importTemplate,
   listArticles,
+  searchArticles,
 } from "./articles"
 
 afterEach(() => vi.restoreAllMocks())
@@ -46,5 +47,15 @@ describe("articles api", () => {
       "/articles/import?dry_run=true&force=false",
       file
     )
+  })
+
+  it("searchArticles мапит breadcrumb из ответа (?? [] для старого бэка)", async () => {
+    vi.spyOn(client, "apiGet").mockResolvedValue([
+      { id: 3, code: "03.04", name: "Фунд.", breadcrumb: ["03 Фундаменты"] },
+      { id: 4, code: "03.05", name: "Без крошки" },
+    ])
+    const result = await searchArticles("фунд")
+    expect(result[0].breadcrumb).toEqual(["03 Фундаменты"])
+    expect(result[1].breadcrumb).toEqual([])
   })
 })

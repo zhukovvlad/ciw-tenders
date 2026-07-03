@@ -36,13 +36,14 @@ export function importTemplate(
 export async function searchArticles(query: string): Promise<Candidate[]> {
   const q = query.trim()
   if (q.length < 2) return []
-  const hits = await apiGet<{ id: number; code: string; name: string }[]>(
-    `/articles/search?q=${encodeURIComponent(q)}`
-  )
+  const hits = await apiGet<
+    { id: number; code: string; name: string; breadcrumb?: string[] }[]
+  >(`/articles/search?q=${encodeURIComponent(q)}`)
   return hits.map((h) => ({
     id: h.id,
     article_code: h.code,
     name: h.name,
     score: 0,
+    breadcrumb: h.breadcrumb ?? [],
   }))
 }

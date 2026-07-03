@@ -13,12 +13,24 @@ interface RowDto {
   name: string
   status: MatchStatus
   score: number | null
+  // опциональны защитно: старый бэк (до контракта крошек, Task 5) их не присылал
+  source_index?: number
+  breadcrumb?: string[]
+  match_error?: string | null
   matched_code: string | null
   matched_name: string | null
   matched_article_id: number | null
-  candidates: { id: number | null; code: string; name: string; score: number }[]
+  matched_breadcrumb?: string[]
+  candidates: {
+    id: number | null
+    code: string
+    name: string
+    score: number
+    breadcrumb?: string[]
+  }[]
   review_status: ReviewStatus
   final_article_id: number | null
+  final_breadcrumb?: string[]
   final_code: string | null
   final_name: string | null
 }
@@ -55,26 +67,41 @@ export interface UploadResult {
   outlineOverrides: number
 }
 
-export function rowFromDto(r: RowDto): MatchRow {
+export function rowFromDto(r: RowDto, prev?: MatchRow): MatchRow {
   return {
     row_number: r.id,
     section_code: r.code,
     source_name: r.name,
+    sourceIndex: r.source_index ?? prev?.sourceIndex ?? 0,
+    // ЕДИНСТВЕННАЯ merge-ветка: крошка СТРОКИ. PATCH её не пересчитывает
+    // (нужны все строки сметы) и несёт [] — проверка длины, не ??, иначе
+    // пустой массив затёр бы prev. Крошки СТАТЕЙ (final/matched/кандидаты)
+    // НЕ мержатся: PATCH гидратирует их на бэке, а final_article_id меняется
+    // самим PATCH-ем — наследование из prev подставило бы крошку прежней
+    // статьи под новую (пин-тест «переигрывание решения...»).
+    breadcrumb:
+      r.breadcrumb && r.breadcrumb.length > 0
+        ? r.breadcrumb
+        : (prev?.breadcrumb ?? []),
+    matchError: r.match_error ?? prev?.matchError ?? null,
     status: r.status,
     score: r.score ?? 0,
     matched_code: r.matched_code,
     matched_name: r.matched_name,
     matched_article_id: r.matched_article_id,
+    matchedBreadcrumb: r.matched_breadcrumb ?? [],
     candidates: r.candidates.map(
       (c): Candidate => ({
         id: c.id,
         article_code: c.code,
         name: c.name,
         score: c.score,
+        breadcrumb: c.breadcrumb ?? [],
       })
     ),
     review_status: r.review_status,
     final_article_id: r.final_article_id,
+    finalBreadcrumb: r.final_breadcrumb ?? [],
     final_code: r.final_code,
     final_name: r.final_name,
   }
@@ -99,7 +126,7 @@ export async function getEstimate(id: number): Promise<EstimateDetail> {
     statusDetail: dto.status_detail ?? null,
     completedAt: dto.completed_at ?? null,
     isReference: dto.is_reference ?? false,
-    rows: dto.rows.map(rowFromDto),
+    rows: dto.rows.map((r) => rowFromDto(r)),
   }
 }
 
@@ -163,7 +190,10 @@ export async function pollEstimate(
         if (signal?.aborted) return // отменили, пока ждали ответ — не резолвим дальше
         if (TERMINAL_OK.has(dto.status)) {
           cleanup()
-          resolve({ fileName: dto.filename, rows: dto.rows.map(rowFromDto) })
+          resolve({
+            fileName: dto.filename,
+            rows: dto.rows.map((r) => rowFromDto(r)),
+          })
           return
         }
         if (dto.status === "blocked") {
@@ -191,14 +221,15 @@ export async function patchRowReview(
   estimateId: number,
   rowId: number,
   action: "confirm" | "pick" | "reject",
-  articleId?: number
+  articleId?: number,
+  prev?: MatchRow
 ): Promise<MatchRow> {
   const dto = await apiSend<RowDto>(
     "PATCH",
     `/estimates/${estimateId}/rows/${rowId}/review`,
     { action, article_id: articleId ?? null }
   )
-  return rowFromDto(dto)
+  return rowFromDto(dto, prev)
 }
 
 export async function exportEstimate(id: number): Promise<Blob> {
