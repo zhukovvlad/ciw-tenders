@@ -122,7 +122,7 @@ export function ReviewGrid({
         onScroll={(e) => {
           scrollOffsetRef.current = e.currentTarget.scrollTop
         }}
-        className="relative h-[calc(100vh-220px)] overflow-auto"
+        className="relative h-[calc(100vh-184px)] overflow-auto"
         role="table"
       >
         <div
