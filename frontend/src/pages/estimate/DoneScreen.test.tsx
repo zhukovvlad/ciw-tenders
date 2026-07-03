@@ -41,6 +41,12 @@ describe("DoneScreen", () => {
     expect(onResume).toHaveBeenCalled()
   })
 
+  it("кнопка «Просмотреть строки» ведёт в read-only грид (?view=grid)", () => {
+    renderDone({})
+    const link = screen.getByRole("link", { name: /Просмотреть строки/ })
+    expect(link).toHaveAttribute("href", expect.stringContaining("view=grid"))
+  })
+
   it("тумблер «в фонд» вызывает setReference(id, true)", async () => {
     renderDone({})
     await userEvent.click(screen.getByRole("switch"))

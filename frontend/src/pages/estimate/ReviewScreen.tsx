@@ -1,16 +1,11 @@
 // frontend/src/pages/estimate/ReviewScreen.tsx
-import { useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { useRef } from "react"
+import { Link, useSearchParams } from "react-router-dom"
 import { ArrowLeft, Check, Download } from "lucide-react"
-import type { ReviewState } from "@/lib/types"
-import {
-  type ReviewAction,
-  decisionFor,
-  filteredRows,
-  progress,
-  requiresDecision,
-} from "@/lib/reviewState"
+import type { MatchRow, ReviewState } from "@/lib/types"
+import { type ReviewAction, decisionFor, progress } from "@/lib/reviewState"
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,7 +17,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { ReviewRow } from "@/pages/estimate/ReviewRow"
+import { ReviewCard, hasRecommendation } from "@/pages/estimate/ReviewCard"
+import { ContextStrip } from "@/pages/estimate/ContextStrip"
+import { ReviewGrid } from "@/pages/estimate/ReviewGrid"
+import { QueueDone } from "@/pages/estimate/QueueDone"
+import { useReviewQueue } from "@/lib/useReviewQueue"
 import { useReviewKeyboard } from "@/lib/useReviewKeyboard"
 
 export type ReviewActionKind = "confirm" | "pick" | "reject"
@@ -32,22 +31,30 @@ interface ReviewScreenProps {
   dispatch: React.Dispatch<ReviewAction>
   onExport: () => void
   onComplete: () => void
-  /**
-   * Коммит решения на бэк (PATCH .../review). Вызывается параллельно локальному
-   * dispatch (оптимистичный UI). Если не передан — работает в офлайн/мок-режиме.
-   */
+  /** Коммит на бэк; резолвится true=сохранено / false=ошибка (откат+toast сделал вызывающий) */
   onReview?: (
     rowNumber: number,
     action: ReviewActionKind,
     articleId?: number
-  ) => void
+  ) => Promise<boolean>
+  /** Завершённая смета + ?view=grid: только грид, клики и решение выключены */
+  readOnly?: boolean
+  /**
+   * ТЕСТОВЫЙ проп: под vitest (jsdom) ResizeObserver — no-op заглушка
+   * (см. src/test/setup.ts), и виртуализатор ReviewGrid с нулевым rect не
+   * отрисовывает ни одной строки (проверено эмпирически при разработке
+   * Task 9). В production не передаётся: реальный ResizeObserver измеряет
+   * контейнер сразу после монтирования, initialRect не нужен. Явное
+   * значение здесь имеет приоритет над авто-дефолтом для vitest ниже.
+   */
+  gridInitialRect?: { width: number; height: number }
 }
 
-const counts = (state: ReviewState) => ({
-  confident: state.rows.filter((r) => r.status === "confident").length,
-  review: state.rows.filter((r) => r.status === "needs_review").length,
-  no_match: state.rows.filter((r) => r.status === "no_match").length,
-})
+// Дефолт для интеграционных тестов экрана (jsdom): включается только под
+// vitest (import.meta.env.MODE === "test"), в собранном приложении остаётся
+// undefined — ReviewGrid не подменяет observeElementRect и слушает реальный
+// ResizeObserver (см. комментарий у gridInitialRect выше).
+const TEST_GRID_RECT = { width: 1024, height: 600 }
 
 export function ReviewScreen({
   state,
@@ -55,107 +62,147 @@ export function ReviewScreen({
   onExport,
   onComplete,
   onReview,
+  readOnly = false,
+  gridInitialRect,
 }: ReviewScreenProps) {
-  // useMemo: rows/queue стабильны между рендерами, пока не изменился state — иначе
-  // новый массив на каждый рендер пересоздавал бы автостарт-эффект (и нервировал
-  // react-hooks/exhaustive-deps). Стабилизируем, а не глушим правило.
-  const rows = useMemo(() => filteredRows(state), [state])
-  const { reviewed, total } = progress(state)
-  const pending = total - reviewed
-  const c = counts(state)
-  const [activeRowOverride, setActiveRowOverride] = useState<
-    number | null | "auto"
-  >("auto")
+  const [searchParams, setSearchParams] = useSearchParams()
+  const view: "queue" | "grid" =
+    readOnly || searchParams.get("view") === "grid" ? "grid" : "queue"
 
-  // Очередь навигации = СПОРНЫЕ строки из видимого набора (requiresDecision —
-  // позитивное зеркало бэкового _REVIEWABLE): excluded/pending/фонд-хиты
-  // клавиатура обходит (спека этапа 2 §2b)
-  const queue = useMemo(() => rows.filter(requiresDecision), [rows])
+  const queue = useReviewQueue(state)
+  const active = queue.activeRow
 
-  // Производное: если "auto" — первая нерешённая; иначе — явное значение
-  const activeRow = useMemo<number | null>(() => {
-    if (activeRowOverride === "auto") {
-      const first = queue.find((r) => decisionFor(state, r).kind === "pending")
-      return first ? first.row_number : null
-    }
-    return activeRowOverride
-  }, [activeRowOverride, queue, state])
+  // Переживает переключение режимов очередь↔грид (спека §3c): «к таблице»
+  // возвращает на позицию скролла.
+  const scrollOffsetRef = useRef<number | null>(null)
 
-  const setActiveRow = (v: number | null) => setActiveRowOverride(v)
+  const switchToGrid = () =>
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set("view", "grid")
+      return next
+    })
 
-  const gotoNext = () => {
-    const idx = queue.findIndex((r) => r.row_number === activeRow)
-    const next =
-      queue
-        .slice(idx + 1)
-        .find((r) => decisionFor(state, r).kind === "pending") ??
-      queue.find((r) => decisionFor(state, r).kind === "pending")
-    setActiveRowOverride(next ? next.row_number : null)
+  const switchToQueue = () =>
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete("view")
+      return next
+    })
+
+  // Ручной уход в грид (таб или «Посмотреть таблицу») обязан сбросить явный
+  // выбор — иначе, вернувшись в очередь, оператор увидит давно открытую из
+  // грида карточку вместо потока. Программный уход после коммита
+  // (exit.kind === "grid") deselect НЕ зовёт — selection уже сброшен самим
+  // queue.committed().
+  const goToGridManually = () => {
+    queue.deselect()
+    switchToGrid()
   }
 
-  const active = queue.find((r) => r.row_number === activeRow)
+  const commit = (
+    row: MatchRow,
+    action: ReviewAction,
+    kind: ReviewActionKind,
+    articleId?: number
+  ) => {
+    dispatch(action)
+    const exit = queue.committed(row.row_number)
+    if (exit.kind === "grid") switchToGrid()
+    const p = onReview?.(row.row_number, kind, articleId)
+    if (p)
+      void p.then((ok) => {
+        if (!ok) queue.commitFailed(row.row_number)
+      })
+  }
+
   useReviewKeyboard({
-    enabled: Boolean(active),
+    enabled: view === "queue" && !readOnly && active !== null,
     candidateCount: active?.candidates.length ?? 0,
+    canConfirm: active ? hasRecommendation(active) : false,
     onPick: (i) => {
-      const cand = active?.candidates[i]
-      if (active && cand) {
-        dispatch({
-          type: "pickCandidate",
-          row: active.row_number,
-          code: cand.article_code,
-        })
-        onReview?.(active.row_number, "pick", cand.id ?? undefined)
-        gotoNext()
-      }
+      const c = active?.candidates[i]
+      if (active && c)
+        commit(
+          active,
+          {
+            type: "pickCandidate",
+            row: active.row_number,
+            code: c.article_code,
+          },
+          "pick",
+          c.id ?? undefined
+        )
     },
     onConfirm: () => {
-      if (active) {
-        if (active.status === "no_match") {
-          dispatch({ type: "confirmNoMatch", row: active.row_number })
-          onReview?.(active.row_number, "reject")
-        } else {
-          dispatch({ type: "confirmArbiter", row: active.row_number })
-          onReview?.(active.row_number, "confirm")
-        }
-        gotoNext()
-      }
+      if (active)
+        commit(
+          active,
+          { type: "confirmArbiter", row: active.row_number },
+          "confirm"
+        )
     },
-    onNext: gotoNext,
+    onNext: () => {
+      // N = пропустить; для ad-hoc строки из грида skip возвращает выход по
+      // происхождению — обрабатываем так же, как committed
+      const exit = queue.skip()
+      if (exit.kind === "grid") switchToGrid()
+    },
+    onReject: () => {
+      if (active)
+        commit(
+          active,
+          { type: "confirmNoMatch", row: active.row_number },
+          "reject"
+        )
+    },
+    onUndo: queue.undo,
   })
 
-  const chip = (key: ReviewState["filter"], label: string) => (
-    <button
-      onClick={() => dispatch({ type: "setFilter", filter: key })}
-      className={
-        "rounded-full border px-3 py-1.5 text-xs " +
-        (state.filter === key
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border text-[var(--ds-text-2)]")
-      }
-    >
-      {label}
-    </button>
-  )
+  const { reviewed, total } = progress(state)
+  const pending = total - reviewed
+
+  const effectiveGridRect =
+    gridInitialRect ??
+    (import.meta.env.MODE === "test" ? TEST_GRID_RECT : undefined)
+
+  // Спека §3c: грид открытый впервые (в очередь вошли не из него, скролл
+  // ещё не запоминался) — скроллит к активной строке; «к таблице» после
+  // скролла — к запомненной позиции. Читаем ref во время рендера сознательно
+  // (см. аналогичный паттерн и обоснование в lib/useReviewQueue.ts): значение
+  // меняется только синхронно с onScroll в самом ReviewGrid, а ReviewGrid
+  // использует его лишь в эффекте на монтаж — устаревшего вывода не бывает.
+  /* eslint-disable react-hooks/refs -- см. комментарий выше; блочный disable,
+     т.к. Prettier переносит строки внутри тернарника и next-line не попадает
+     на нужную строку после форматирования */
+  const focusRowNumber =
+    scrollOffsetRef.current === null
+      ? (queue.activeRow?.row_number ?? null)
+      : null
+  /* eslint-enable react-hooks/refs */
 
   return (
     <div className="flex flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b border-[var(--ds-hairline)] px-4 py-3">
         <span className="text-sm">{state.fileName}</span>
         <span className="text-xs text-muted-foreground">
-          · {state.rows.length} строк СМР
+          · спорных решено {reviewed} из {total}
         </span>
-        <div className="flex gap-2">
-          <span className="rounded-full bg-[color-mix(in_srgb,var(--success)_16%,transparent)] px-2.5 py-1 text-xs text-[var(--success)]">
-            {c.confident} уверенных
-          </span>
-          <span className="rounded-full bg-[color-mix(in_srgb,var(--warning)_18%,transparent)] px-2.5 py-1 text-xs text-[var(--warning)]">
-            {c.review} проверить
-          </span>
-          <span className="rounded-full bg-[color-mix(in_srgb,var(--destructive)_16%,transparent)] px-2.5 py-1 text-xs text-destructive">
-            {c.no_match} без пары
-          </span>
-        </div>
+
+        {!readOnly && (
+          <Tabs
+            value={view}
+            onValueChange={(v) =>
+              v === "grid" ? goToGridManually() : switchToQueue()
+            }
+          >
+            <TabsList>
+              <TabsTrigger value="queue">Очередь</TabsTrigger>
+              <TabsTrigger value="grid">Таблица</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        )}
+
         <div className="ml-auto flex items-center gap-2">
           <Button variant="ghost" size="sm" asChild>
             <Link to="/estimates">
@@ -167,103 +214,112 @@ export function ReviewScreen({
             <Download className="size-4" />
             Выгрузить Excel
           </Button>
-          {pending === 0 ? (
-            <Button size="sm" onClick={onComplete}>
-              <Check className="size-4" />
-              Завершить
-            </Button>
-          ) : (
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button size="sm">
-                  <Check className="size-4" />
-                  Завершить
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>
-                    Остались нерешённые строки
-                  </AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Осталось {pending} спорных строк без решения. Завершить
-                    проверку всё равно? Возобновить можно в любой момент.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Отмена</AlertDialogCancel>
-                  <AlertDialogAction onClick={onComplete}>
-                    Завершить всё равно
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          )}
+          {!readOnly &&
+            (pending === 0 ? (
+              <Button size="sm" onClick={onComplete}>
+                <Check className="size-4" />
+                Завершить
+              </Button>
+            ) : (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm">
+                    <Check className="size-4" />
+                    Завершить
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      Остались нерешённые строки
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Осталось {pending} спорных строк без решения. Завершить
+                      проверку всё равно? Возобновить можно в любой момент.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Отмена</AlertDialogCancel>
+                    <AlertDialogAction onClick={onComplete}>
+                      Завершить всё равно
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ))}
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-        <div className="flex gap-2">
-          {chip("all", `Все · ${state.rows.length}`)}
-          {chip("review", `Проверить · ${c.review}`)}
-          {chip("no_match", `Без пары · ${c.no_match}`)}
-        </div>
-        <span className="ml-2 text-xs text-muted-foreground">
-          проверено {reviewed} из {total}
-        </span>
-      </div>
-
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="bg-[var(--ds-surface-sunken)] text-left text-xs tracking-wide text-muted-foreground uppercase">
-            <th className="px-4 py-2.5 font-normal">№ раздела</th>
-            <th className="px-4 py-2.5 font-normal">Работа из сметы</th>
-            <th className="px-4 py-2.5 font-normal">Статья справочника СМР</th>
-            <th className="px-4 py-2.5 text-right font-normal">Score</th>
-            <th className="px-4 py-2.5 font-normal">Статус</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <ReviewRow
-              key={row.row_number}
-              row={row}
-              decision={decisionFor(state, row)}
-              expanded={activeRow === row.row_number}
-              onToggle={() =>
-                setActiveRow(
-                  activeRow === row.row_number ? null : row.row_number
-                )
-              }
-              onPickCandidate={(code) => {
-                const cand = row.candidates.find((x) => x.article_code === code)
-                dispatch({ type: "pickCandidate", row: row.row_number, code })
-                onReview?.(row.row_number, "pick", cand?.id ?? undefined)
-                gotoNext()
-              }}
-              onManualPick={(cand) => {
-                dispatch({
+      {view === "grid" ? (
+        <ReviewGrid
+          state={state}
+          dispatch={dispatch}
+          onOpenRow={
+            readOnly
+              ? undefined
+              : (n) => {
+                  queue.openFromGrid(n)
+                  switchToQueue()
+                }
+          }
+          scrollOffsetRef={scrollOffsetRef}
+          focusRowNumber={focusRowNumber}
+          initialRect={effectiveGridRect}
+        />
+      ) : active === null ? (
+        <QueueDone
+          state={state}
+          onComplete={onComplete}
+          onShowGrid={goToGridManually}
+        />
+      ) : (
+        <>
+          <ReviewCard
+            row={active}
+            decision={decisionFor(state, active)}
+            canUndo={queue.canUndo}
+            onConfirmRecommendation={() =>
+              commit(
+                active,
+                { type: "confirmArbiter", row: active.row_number },
+                "confirm"
+              )
+            }
+            onPickCandidate={(c) =>
+              commit(
+                active,
+                {
+                  type: "pickCandidate",
+                  row: active.row_number,
+                  code: c.article_code,
+                },
+                "pick",
+                c.id ?? undefined
+              )
+            }
+            onManualPick={(c) =>
+              commit(
+                active,
+                {
                   type: "manualPick",
-                  row: row.row_number,
-                  candidate: cand,
-                })
-                onReview?.(row.row_number, "pick", cand.id ?? undefined)
-                gotoNext()
-              }}
-              onConfirmNoMatch={() => {
-                dispatch({ type: "confirmNoMatch", row: row.row_number })
-                onReview?.(row.row_number, "reject")
-                gotoNext()
-              }}
-              onConfirmRecommendation={() => {
-                dispatch({ type: "confirmArbiter", row: row.row_number })
-                onReview?.(row.row_number, "confirm")
-                gotoNext()
-              }}
-            />
-          ))}
-        </tbody>
-      </table>
+                  row: active.row_number,
+                  candidate: c,
+                },
+                "pick",
+                c.id ?? undefined
+              )
+            }
+            onReject={() =>
+              commit(
+                active,
+                { type: "confirmNoMatch", row: active.row_number },
+                "reject"
+              )
+            }
+          />
+          <ContextStrip state={state} activeRowNumber={active.row_number} />
+        </>
+      )}
     </div>
   )
 }
