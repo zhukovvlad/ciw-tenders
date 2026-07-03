@@ -465,6 +465,7 @@ class FakeEstimateRepository(EstimateRepository):
             status=n["status"], has_embedding=n["embedding"] is not None,
             matched_article_id=n["matched_article_id"], matched_code=n["matched_code"],
             matched_name=n["matched_name"], score=n["score"],
+            match_error=n.get("match_error"),
             candidates=[
                 MatchCandidate(id=c.get("id"), code=c["code"], name=c["name"], score=c["score"])
                 for c in n["candidates"]

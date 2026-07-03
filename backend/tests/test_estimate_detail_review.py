@@ -24,7 +24,7 @@ def test_detail_exposes_candidates_and_review_axis(
     assert row["id"] == nid
     assert row["review_status"] == "unreviewed"
     assert row["candidates"][0]["code"] == "2.1"
-    assert "source_index" not in row
+    assert "source_index" in row
 
 
 def test_detail_exposes_is_reference(client, auth_headers, estimate_repo, seed_estimate):

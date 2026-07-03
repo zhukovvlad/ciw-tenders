@@ -170,10 +170,12 @@ class EstimateRowOut(BaseModel):
     section_type: str | None
     depth: int
     status: str
+    source_index: int = 0
     matched_article_id: int | None = None
     matched_code: str | None = None
     matched_name: str | None = None
     score: float | None = None
+    match_error: str | None = None
     candidates: list[MatchCandidateOut] = []
     review_status: str = "unreviewed"
     final_article_id: int | None = None
@@ -186,8 +188,9 @@ class EstimateRowOut(BaseModel):
         return cls(
             id=r.id, code=r.code, name=r.name, parent_code=r.parent_code,
             section_type=r.section_type, depth=r.depth, status=r.status,
-            matched_article_id=r.matched_article_id, matched_code=r.matched_code,
-            matched_name=r.matched_name, score=r.score,
+            source_index=r.source_index, matched_article_id=r.matched_article_id,
+            matched_code=r.matched_code, matched_name=r.matched_name, score=r.score,
+            match_error=r.match_error,
             candidates=[
                 MatchCandidateOut(id=c.id, code=c.code, name=c.name, score=c.score)
                 for c in r.candidates
