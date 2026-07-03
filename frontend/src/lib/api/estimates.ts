@@ -75,15 +75,17 @@ export function rowFromDto(r: RowDto, prev?: MatchRow): MatchRow {
     sourceIndex: r.source_index ?? prev?.sourceIndex ?? 0,
     // ЕДИНСТВЕННАЯ merge-ветка: крошка СТРОКИ. PATCH её не пересчитывает
     // (нужны все строки сметы) и несёт [] — проверка длины, не ??, иначе
-    // пустой массив затёр бы prev. Крошки СТАТЕЙ (final/matched/кандидаты)
-    // НЕ мержатся: PATCH гидратирует их на бэке, а final_article_id меняется
-    // самим PATCH-ем — наследование из prev подставило бы крошку прежней
-    // статьи под новую (пин-тест «переигрывание решения...»).
+    // пустой массив затёр бы prev. Крошки СТАТЕЙ (final/matched/кандидаты) и
+    // matchError НЕ мержатся из prev: легитимный null от сервера (например,
+    // будущий PATCH, очищающий match_error) не должен воскрешать устаревший
+    // текст ошибки; final_article_id меняется самим PATCH-ем — наследование
+    // из prev подставило бы крошку прежней статьи под новую (пин-тест
+    // «переигрывание решения...»).
     breadcrumb:
       r.breadcrumb && r.breadcrumb.length > 0
         ? r.breadcrumb
         : (prev?.breadcrumb ?? []),
-    matchError: r.match_error ?? prev?.matchError ?? null,
+    matchError: r.match_error ?? null,
     status: r.status,
     score: r.score ?? 0,
     matched_code: r.matched_code,
