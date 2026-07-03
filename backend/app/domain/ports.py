@@ -79,6 +79,12 @@ class ArticleRepository(ABC):
         """(total, pending): всего статей и сколько с embedding IS NULL. Для gate матчинга."""
         ...
 
+    @abstractmethod
+    def ancestor_names_by_ids(self, article_ids: Sequence[int]) -> dict[int, list[str]]:
+        """Имена предков root→parent (без самой статьи) для каждого id;
+        неизвестные id опускаются. Для крошек справочника в UI ревью."""
+        ...
+
 
 class Embedder(ABC):
     """Порт векторизации текста (RAG: retrieval)."""
