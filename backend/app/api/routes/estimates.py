@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -34,12 +34,13 @@ from app.api.schemas import (
     StructuralAnomalyOut,
 )
 from app.core.config import Settings
-from app.domain.entities import Role, User
+from app.domain.entities import Role, StoredEstimateRow, User
 from app.domain.errors import (
     EstimateCompletedError,
     EstimateNotCompletableError,
     InvalidReviewActionError,
     RowNotMatchedError,
+    RowNotReviewableError,
     StorageError,
 )
 from app.domain.ports import EstimateRepository, TaskQueue
@@ -54,6 +55,15 @@ router = APIRouter(
 )
 
 _XLSX_SIGNATURE = b"PK\x03\x04"
+
+
+def _collect_article_ids(rows: Iterable[StoredEstimateRow]) -> list[int]:
+    """id статей, чьи крошки нужны payload'у: рекомендация + финал + кандидаты."""
+    return sorted(
+        {r.matched_article_id for r in rows if r.matched_article_id}
+        | {r.final_article_id for r in rows if r.final_article_id}
+        | {c.id for r in rows for c in r.candidates if c.id}
+    )
 
 
 @router.post("/{estimate_id}/match", status_code=status.HTTP_202_ACCEPTED)
@@ -147,11 +157,7 @@ def get_estimate(
     est = service.get(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN)
     if est is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
-    ids = sorted(
-        {r.matched_article_id for r in est.rows if r.matched_article_id}
-        | {r.final_article_id for r in est.rows if r.final_article_id}
-        | {c.id for r in est.rows for c in r.candidates if c.id}
-    )
+    ids = _collect_article_ids(est.rows)
     crumbs = article_service.ancestor_names_by_ids(ids) if ids else {}
     return EstimateDetailOut.from_entity(est, article_crumbs=crumbs)
 
@@ -186,14 +192,13 @@ def review_row(
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except RowNotMatchedError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except RowNotReviewableError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except InvalidReviewActionError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     # Крошка СТРОКИ не гидратируется здесь: её пересчёт требует всех строк сметы —
     # PATCH отдаёт крошки СТАТЕЙ (одной строки), breadcrumb остаётся [] (Task 6 мержит prev).
-    ids = sorted(
-        {i for i in (row.matched_article_id, row.final_article_id) if i}
-        | {c.id for c in row.candidates if c.id}
-    )
+    ids = _collect_article_ids([row])
     crumbs = article_service.ancestor_names_by_ids(ids) if ids else {}
     return EstimateRowOut.from_entity(row, article_crumbs=crumbs)
 

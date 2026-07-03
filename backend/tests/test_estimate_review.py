@@ -85,6 +85,20 @@ def test_review_pending_row_409(client, auth_headers, estimate_repo, seed_estima
     assert resp.status_code == 409
 
 
+def test_review_excluded_row_409(client, auth_headers, estimate_repo, seed_estimate):
+    """Спека этапа 2 §2b/§3: excluded — контекст, НЕ решается в ревью.
+    До этого PR контракт держал только клиент (финальное ревью PR-A)."""
+    eid, nid = seed_estimate
+    estimate_repo.nodes[nid]["status"] = "excluded"
+    for action in ({"action": "confirm"}, {"action": "reject"},
+                   {"action": "pick", "article_id": 1}):
+        resp = client.patch(
+            f"/api/estimates/{eid}/rows/{nid}/review",
+            headers=auth_headers, json=action,
+        )
+        assert resp.status_code == 409, action
+
+
 def test_review_foreign_estimate_404(client, other_auth_headers, estimate_repo, seed_estimate):
     eid, nid = seed_estimate
     _match(estimate_repo, nid, EstimateRowStatus.NEEDS_REVIEW, mid=7, code="2.1",

@@ -52,6 +52,10 @@ class RowNotMatchedError(Exception):
     """Строка ещё не сматчена (status=pending) — ревью невозможно. → 409."""
 
 
+class RowNotReviewableError(Exception):
+    """Строка-контекст (excluded) не решается в ревью. → 409."""
+
+
 class InvalidReviewActionError(Exception):
     """Действие не применимо к строке (confirm без matched_*, статья не найдена). → 422."""
 
