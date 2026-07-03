@@ -45,7 +45,7 @@ export function useReviewKeyboard({
         )
       )
         return
-      if (e.key === "1" || e.key === "2" || e.key === "3") {
+      if (e.key >= "1" && e.key <= "9") {
         const idx = Number(e.key) - 1
         if (idx < candidateCount) {
           e.preventDefault()

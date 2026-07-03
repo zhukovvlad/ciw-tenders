@@ -139,6 +139,71 @@ describe("ReviewCard: подсветка рекомендации арбитра
   })
 })
 
+describe("ReviewCard: no_match — реджект открыт из грида", () => {
+  // matched_code входит в кандидаты — до фикса старая рекомендация
+  // подсвечивалась бы, хотя решение «без пары».
+  const r = row(8, 5, "needs_review", {
+    matched_code: CAND.article_code,
+    matched_name: CAND.name,
+    candidates: [CAND],
+  })
+
+  it("ни один кандидат не подсвечен, кнопка «без пары» несёт selected-класс", () => {
+    renderCard(r, { decision: { kind: "no_match" } })
+    const candidateButton = screen
+      .getByText("Фундаменты под оборудование")
+      .closest("button")
+    expect(candidateButton?.className).not.toContain("border-primary")
+    const rejectButton = screen.getByRole("button", { name: /без пары/i })
+    expect(rejectButton.className).toContain("border-primary")
+  })
+})
+
+describe("ReviewCard: pending — рекомендация пре-подсвечена (регресс)", () => {
+  const r = row(6, 4, "needs_review", {
+    matched_code: CAND.article_code,
+    matched_name: CAND.name,
+    candidates: [CAND],
+  })
+
+  it("кандидат-рекомендация подсвечен при pending", () => {
+    renderCard(r, { decision: { kind: "pending" } })
+    const candidateButton = screen
+      .getByText("Фундаменты под оборудование")
+      .closest("button")
+    expect(candidateButton?.className).toContain("border-primary")
+  })
+})
+
+describe("ReviewCard: легенда клавиш кандидатов по числу кандидатов", () => {
+  // легенда и кнопки-кандидаты оба несут числовые kbd-чипы — скоуп через
+  // span легенды («выбрать кандидата») отличает её от кнопки первого
+  // кандидата (kbd «1» внутри её собственной кнопки).
+  function legendCandidateKey() {
+    return screen
+      .getByText("выбрать кандидата")
+      .closest("span")
+      ?.querySelector("kbd")?.textContent
+  }
+
+  it("4 кандидата — легенда «1–4»", () => {
+    const cand2 = { ...CAND, id: 4, article_code: "04.01" }
+    const cand3 = { ...CAND, id: 5, article_code: "05.01" }
+    const cand4 = { ...CAND, id: 6, article_code: "06.01" }
+    renderCard(
+      row(9, 6, "needs_review", {
+        candidates: [CAND, cand2, cand3, cand4],
+      })
+    )
+    expect(legendCandidateKey()).toBe("1–4")
+  })
+
+  it("1 кандидат — легенда «1» (не «1–1»)", () => {
+    renderCard(row(10, 7, "needs_review", { candidates: [CAND] }))
+    expect(legendCandidateKey()).toBe("1")
+  })
+})
+
 describe("ReviewCard: error-строка", () => {
   const err = row(7, 3, "error", {
     matched_code: null,

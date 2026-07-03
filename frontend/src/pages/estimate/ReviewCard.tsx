@@ -54,8 +54,15 @@ export function ReviewCard({
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<Candidate[]>([])
   const recommended = hasRecommendation(row)
+  // no_match (реджект, в т.ч. переоткрытый из грида) — ни один кандидат не
+  // подсвечен; pending — донный кейс, пре-подсветка рекомендации остаётся.
   const chosenCode =
-    decision.kind === "confirmed" ? decision.code : row.matched_code
+    decision.kind === "confirmed"
+      ? decision.code
+      : decision.kind === "no_match"
+        ? null
+        : row.matched_code
+  const rejectSelected = decision.kind === "no_match"
   // Гейт синтетической рекомендации (перенесено из ReviewRow без изменений):
   // отдельный блок рендерится, только если matched_code не входит в
   // candidates — иначе рекомендация это уже подсвеченный кандидат ниже.
@@ -242,7 +249,16 @@ export function ReviewCard({
         </Command>
 
         {/* 6. Оставить без пары */}
-        <Button variant="outline" onClick={onReject} className="self-start">
+        <Button
+          variant="outline"
+          onClick={onReject}
+          className={
+            "self-start" +
+            (rejectSelected
+              ? " border-primary shadow-[var(--ds-glow-violet)]"
+              : "")
+          }
+        >
           Оставить без пары{" "}
           <kbd className="ml-1 rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
             0
@@ -252,7 +268,9 @@ export function ReviewCard({
         {/* 7. Постоянная легенда клавиш */}
         <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
           <LegendItem
-            keyLabel="1–3"
+            keyLabel={
+              row.candidates.length <= 1 ? "1" : `1–${row.candidates.length}`
+            }
             text="выбрать кандидата"
             muted={row.candidates.length === 0}
           />

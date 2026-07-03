@@ -184,6 +184,21 @@ describe("поток очереди", () => {
   })
 })
 
+describe("сброс состояния карточки между строками", () => {
+  it("поиск не переживает переход к следующей строке", async () => {
+    const onReview = vi.fn().mockResolvedValue(true)
+    render(<Wrap rows={ROWS} onReview={onReview} />)
+    const input = card().getByPlaceholderText(/искать в справочнике/i)
+    await userEvent.type(input, "штукатурка")
+    expect(input).toHaveValue("штукатурка")
+    await userEvent.click(card().getByRole("button", { name: /без пары/i }))
+    await waitFor(() =>
+      expect(card().getByText("Спорная Б")).toBeInTheDocument()
+    )
+    expect(card().getByPlaceholderText(/искать в справочнике/i)).toHaveValue("")
+  })
+})
+
 describe("грид ↔ очередь", () => {
   it("клик по строке грида открывает карточку этой строки (включая confident)", async () => {
     render(<Wrap rows={ROWS} url="/estimates/5?view=grid" />)

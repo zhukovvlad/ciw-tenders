@@ -277,6 +277,7 @@ export function ReviewScreen({
       ) : (
         <>
           <ReviewCard
+            key={active.row_number}
             row={active}
             decision={decisionFor(state, active)}
             canUndo={queue.canUndo}
