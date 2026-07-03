@@ -138,17 +138,36 @@ const TERMINAL_OK = new Set(["ready", "partial_error"])
 export async function pollEstimate(
   id: number,
   onProgress: (status: string, done: number, total: number) => void,
-  intervalMs = 1500
+  intervalMs = 1500,
+  opts?: { signal?: AbortSignal }
 ): Promise<{ fileName: string; rows: MatchRow[] }> {
   return new Promise((resolve, reject) => {
+    const signal = opts?.signal
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onAbort = () => {
+      if (timer !== undefined) clearTimeout(timer)
+      reject(new DOMException("Aborted", "AbortError"))
+    }
+    if (signal) {
+      if (signal.aborted) {
+        onAbort()
+        return
+      }
+      signal.addEventListener("abort", onAbort)
+    }
+    const cleanup = () => signal?.removeEventListener("abort", onAbort)
     const check = async () => {
+      if (signal?.aborted) return // onAbort уже отверг промис
       try {
         const dto = await apiGet<DetailDto>(`/estimates/${id}`)
+        if (signal?.aborted) return // отменили, пока ждали ответ — не резолвим дальше
         if (TERMINAL_OK.has(dto.status)) {
+          cleanup()
           resolve({ fileName: dto.filename, rows: dto.rows.map(rowFromDto) })
           return
         }
         if (dto.status === "blocked") {
+          cleanup()
           reject(new Error("Обработка сметы заблокирована"))
           return
         }
@@ -158,8 +177,9 @@ export async function pollEstimate(
           (r) => (r.status as string) !== "pending"
         ).length
         onProgress(dto.status, done, dto.rows.length)
-        setTimeout(() => void check(), intervalMs)
+        timer = setTimeout(() => void check(), intervalMs)
       } catch (err) {
+        cleanup()
         reject(err)
       }
     }

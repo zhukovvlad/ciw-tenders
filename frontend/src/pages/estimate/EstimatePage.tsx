@@ -1,7 +1,7 @@
 // frontend/src/pages/estimate/EstimatePage.tsx
 // Единственный владелец маппинга статус→экран (спека §3). Кэша ревью нет:
 // источник истины — GET /estimates/:id + ответы PATCH.
-import { useCallback, useEffect, useReducer, useState } from "react"
+import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 import { Link, useLocation, useParams } from "react-router-dom"
 import { toast } from "sonner"
 import type { Progress } from "@/lib/mock/api"
@@ -34,6 +34,12 @@ type Meta =
   | { kind: "completed" }
   | { kind: "error"; message: string }
 
+// pollEstimate реджектится DOMException('AbortError') при отмене через signal —
+// такая отмена не ошибка, её нужно проглатывать молча (не показывать алерт).
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError"
+}
+
 export function EstimatePage() {
   const params = useParams()
   const id = Number(params.id)
@@ -57,11 +63,20 @@ export function EstimatePage() {
   const [state, dispatch] = useReducer(reviewReducer, undefined, () =>
     initReview("", [])
   )
+  // Отменяет предыдущий незавершённый load() при смене :id без ремаунта
+  // (React переиспользует компонент — эффект без этого гонялся бы конкурентно
+  // со старым запросом/поллингом и мог перезаписать состояние актуального id).
+  const loadAbortRef = useRef<AbortController | null>(null)
 
   const load = useCallback(async () => {
+    loadAbortRef.current?.abort()
+    const controller = new AbortController()
+    loadAbortRef.current = controller
+    const { signal } = controller
     setMeta({ kind: "loading" })
     try {
       const detail = await getEstimate(id)
+      if (signal.aborted) return
       setFileName(detail.fileName)
       setIsReference(detail.isReference)
       if (detail.status === "blocked") {
@@ -74,24 +89,30 @@ export function EstimatePage() {
           const { fileName: fn, rows } = await pollEstimate(
             id,
             (status, done, total) => {
+              if (signal.aborted) return
               setProg({
                 phase: status === "running" ? "matching" : "parsing",
                 done,
                 total,
                 etaSeconds: null,
               })
-            }
+            },
+            1500,
+            { signal }
           )
+          if (signal.aborted) return
           dispatch({
             type: "load",
             state: initReview(fn || detail.fileName, rows),
           })
           setMeta({ kind: "open" })
         } catch (pollErr) {
+          if (signal.aborted || isAbortError(pollErr)) return
           // Смета может уйти в blocked ВО ВРЕМЯ поллинга (напр., нет строк СМР):
           // pollEstimate реджектится generic-ошибкой без statusDetail.
           // Перечитываем статус один раз, чтобы показать честный алерт отказа.
           const fresh = await getEstimate(id) // упадёт — поймает внешний catch
+          if (signal.aborted) return
           if (fresh.status === "blocked") {
             setMeta({ kind: "blocked", detail: fresh.statusDetail })
             return
@@ -108,6 +129,7 @@ export function EstimatePage() {
         detail.completedAt !== null ? { kind: "completed" } : { kind: "open" }
       )
     } catch (err) {
+      if (signal.aborted || isAbortError(err)) return
       console.error(err)
       setMeta({
         kind: "error",
@@ -123,6 +145,9 @@ export function EstimatePage() {
     void (async () => {
       if (Number.isInteger(id)) await load()
     })()
+    return () => {
+      loadAbortRef.current?.abort()
+    }
   }, [id, load])
 
   function handleReview(
@@ -198,6 +223,7 @@ export function EstimatePage() {
         state={state}
         estimateId={id}
         isReference={isReference}
+        onReferenceChange={setIsReference}
         onExport={() => void handleExport()}
         onResume={() => toggleCompletion(false)}
       />

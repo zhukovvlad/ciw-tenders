@@ -4,6 +4,7 @@ import {
   deleteEstimate,
   getEstimate,
   listEstimates,
+  pollEstimate,
   rebuildFund,
   rowFromDto,
   setCompletion,
@@ -155,5 +156,43 @@ describe("estimates api list/delete", () => {
     const spy = vi.spyOn(client, "apiSend").mockResolvedValue(undefined)
     await rebuildFund()
     expect(spy).toHaveBeenCalledWith("POST", "/estimates/fund/rebuild")
+  })
+})
+
+describe("pollEstimate отмена через AbortSignal", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("signal уже отменён до вызова → реджект AbortError без запроса", async () => {
+    const spy = vi.spyOn(client, "apiGet")
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      pollEstimate(1, vi.fn(), 1000, { signal: controller.signal })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it("отмена во время ожидания следующего тика останавливает цикл поллинга", async () => {
+    vi.useFakeTimers()
+    const spy = vi.spyOn(client, "apiGet").mockResolvedValue({
+      id: 1,
+      filename: "a.xlsx",
+      status: "running",
+      rows: [],
+    })
+    const controller = new AbortController()
+    const promise = pollEstimate(1, vi.fn(), 1000, {
+      signal: controller.signal,
+    })
+    // первый тик: apiGet резолвится, таймер на следующий опрос выставлен
+    await vi.advanceTimersByTimeAsync(0)
+    expect(spy).toHaveBeenCalledTimes(1)
+    controller.abort()
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+    // сдвигаем время дальше интервала — новых запросов быть не должно
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(spy).toHaveBeenCalledTimes(1)
   })
 })

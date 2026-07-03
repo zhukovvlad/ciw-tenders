@@ -82,6 +82,7 @@ export function EstimateList({ onOpen }: EstimateListProps) {
   const [total, setTotal] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   const triggerReload = useCallback(() => {
     setError(null)
@@ -111,7 +112,8 @@ export function EstimateList({ onOpen }: EstimateListProps) {
   }, [reloadKey])
 
   async function loadMore() {
-    if (items === null) return
+    if (items === null || loadingMore) return
+    setLoadingMore(true)
     try {
       const r = await listEstimates({ limit: PAGE, offset: items.length })
       setItems((prev) => [...(prev ?? []), ...r.items])
@@ -119,6 +121,8 @@ export function EstimateList({ onOpen }: EstimateListProps) {
       toast.error(
         err instanceof ApiError ? err.message : "Не удалось загрузить сметы"
       )
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -245,7 +249,12 @@ export function EstimateList({ onOpen }: EstimateListProps) {
       </Table>
       {items.length < total && (
         <div className="pt-3">
-          <Button variant="outline" size="sm" onClick={() => void loadMore()}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={loadingMore}
+            onClick={() => void loadMore()}
+          >
             Показать ещё
           </Button>
         </div>

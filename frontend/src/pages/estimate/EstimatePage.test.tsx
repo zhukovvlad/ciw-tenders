@@ -1,6 +1,6 @@
 // frontend/src/pages/estimate/EstimatePage.test.tsx
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { EstimatePage } from "@/pages/estimate/EstimatePage"
@@ -103,5 +103,25 @@ describe("EstimatePage", () => {
     )
     renderAt(5)
     expect(await screen.findByRole("alert")).toHaveTextContent("нет строк СМР")
+  })
+
+  it("размонтирование во время поллинга отменяет AbortSignal, переданный в pollEstimate", async () => {
+    vi.mocked(getEstimate).mockResolvedValue({
+      ...READY,
+      status: "pending",
+      rows: [],
+    })
+    let capturedSignal: AbortSignal | undefined
+    vi.mocked(pollEstimate).mockImplementation(
+      (_id, _onProgress, _intervalMs, opts) => {
+        capturedSignal = opts?.signal
+        return new Promise(() => {}) // никогда не резолвится — как незавершённый поллинг
+      }
+    )
+    const { unmount } = renderAt(5)
+    await waitFor(() => expect(pollEstimate).toHaveBeenCalled())
+    expect(capturedSignal?.aborted).toBe(false)
+    unmount()
+    expect(capturedSignal?.aborted).toBe(true)
   })
 })

@@ -75,6 +75,19 @@ describe("DoneScreen", () => {
     expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true")
   })
 
+  it("успешный тумблер зовёт onReferenceChange с ответом бэка", async () => {
+    vi.mocked(setReference).mockResolvedValueOnce({
+      is_reference: true,
+      promoted: 2,
+    })
+    const onReferenceChange = vi.fn()
+    renderDone({ onReferenceChange })
+    await userEvent.click(screen.getByRole("switch"))
+    await vi.waitFor(() => {
+      expect(onReferenceChange).toHaveBeenCalledWith(true)
+    })
+  })
+
   it("promoted=0 при включении → подсказка, почему тумблер отщёлкнулся", async () => {
     vi.mocked(setReference).mockResolvedValueOnce({
       is_reference: false,

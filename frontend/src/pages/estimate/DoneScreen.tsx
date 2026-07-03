@@ -14,6 +14,7 @@ interface DoneScreenProps {
   onResume: () => void
   estimateId: number | null
   isReference: boolean
+  onReferenceChange?: (value: boolean) => void
 }
 
 export function DoneScreen({
@@ -22,6 +23,7 @@ export function DoneScreen({
   onResume,
   estimateId,
   isReference,
+  onReferenceChange,
 }: DoneScreenProps) {
   const [inFund, setInFund] = useState(isReference)
   const toggleSeq = useRef(0)
@@ -44,6 +46,7 @@ export function DoneScreen({
       .then((r) => {
         if (seq !== toggleSeq.current) return
         setInFund(r.is_reference)
+        onReferenceChange?.(r.is_reference)
         if (next && !r.is_reference && r.promoted === 0) {
           // бэк не ставит is_reference при 0 промоученных строк (toggle_reference) —
           // объясняем отщёлкивание, иначе тумблер выглядит сломанным
