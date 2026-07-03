@@ -70,3 +70,16 @@ def test_candidate_matched_and_final_breadcrumbs_from_article_crumbs() -> None:
 def test_row_out_without_maps_defaults_to_empty() -> None:
     out = EstimateRowOut.from_entity(_row())
     assert out.breadcrumb == [] and out.matched_breadcrumb == []
+
+
+def test_candidate_without_id_gets_no_breadcrumb() -> None:
+    # спека §4: «крошка кандидата без id» — id=None не должен уходить в
+    # crumbs.get(None, ...) (случайное совпадение по ключу None), только [].
+    row = _row(
+        id=6, code="1.2", name="Работа", depth=2, source_index=1,
+        status="needs_review",
+        candidates=[MatchCandidate(id=None, code="X", name="Y", score=0.5)],
+    )
+    crumbs = {3: ["03 Фундаменты и основания"]}
+    out = EstimateRowOut.from_entity(row, article_crumbs=crumbs)
+    assert out.candidates[0].breadcrumb == []
