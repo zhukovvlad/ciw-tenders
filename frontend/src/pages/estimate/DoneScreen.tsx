@@ -109,6 +109,9 @@ export function DoneScreen({
         <Button variant="outline" size="sm" onClick={onResume}>
           Возобновить проверку
         </Button>
+        <Button variant="outline" size="sm" asChild>
+          <Link to="?view=grid">Просмотреть строки</Link>
+        </Button>
         <Link to="/estimates" className="text-sm text-[var(--ds-accent-hover)]">
           ＋ Загрузить следующую смету
         </Link>

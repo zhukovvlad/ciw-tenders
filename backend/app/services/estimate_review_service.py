@@ -6,8 +6,13 @@ final_* морозятся в момент решения: кандидат → 
 
 from __future__ import annotations
 
-from app.domain.entities import ReviewStatus, StoredEstimateRow
-from app.domain.errors import EstimateCompletedError, InvalidReviewActionError, RowNotMatchedError
+from app.domain.entities import EstimateRowStatus, ReviewStatus, StoredEstimateRow
+from app.domain.errors import (
+    EstimateCompletedError,
+    InvalidReviewActionError,
+    RowNotMatchedError,
+    RowNotReviewableError,
+)
 from app.domain.ports import ArticleRepository, EstimateRepository
 
 _PENDING = "pending"
@@ -40,6 +45,8 @@ class EstimateReviewService:
             raise LookupError("Строка не найдена")
         if row.status == _PENDING:
             raise RowNotMatchedError("Строка ещё не сматчена")
+        if row.status == str(EstimateRowStatus.EXCLUDED):
+            raise RowNotReviewableError("Строка-контекст (excluded) не решается в ревью")
 
         if action == "confirm":
             self._confirm(row)

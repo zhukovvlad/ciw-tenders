@@ -3,9 +3,15 @@ import { useEffect } from "react"
 interface Options {
   enabled: boolean
   candidateCount: number
+  /** Enter активен ⇔ рекомендация отрисована (правило карточки: клавиша ⇔ элемент). Default true. */
+  canConfirm?: boolean
   onPick: (index: number) => void
   onConfirm: () => void
   onNext: () => void
+  /** 0 — «оставить без пары» */
+  onReject?: () => void
+  /** ← — undo; no-op при пустом стеке решает вызывающий */
+  onUndo?: () => void
 }
 
 function isEditable(target: EventTarget | null): boolean {
@@ -19,30 +25,58 @@ function isEditable(target: EventTarget | null): boolean {
 export function useReviewKeyboard({
   enabled,
   candidateCount,
+  canConfirm,
   onPick,
   onConfirm,
   onNext,
+  onReject,
+  onUndo,
 }: Options): void {
   useEffect(() => {
     if (!enabled) return
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
       if (isEditable(e.target)) return
-      if (e.key === "1" || e.key === "2" || e.key === "3") {
+      // Единая точка глушения хоткеев при модалке (спека §3b): Radix держит
+      // data-state="open" на контенте диалога
+      if (
+        document.querySelector(
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]'
+        )
+      )
+        return
+      if (e.key >= "1" && e.key <= "9") {
         const idx = Number(e.key) - 1
         if (idx < candidateCount) {
           e.preventDefault()
           onPick(idx)
         }
       } else if (e.key === "Enter") {
-        e.preventDefault()
-        onConfirm()
+        if (canConfirm !== false) {
+          e.preventDefault()
+          onConfirm()
+        }
       } else if (e.key.toLowerCase() === "n") {
         e.preventDefault()
         onNext()
+      } else if (e.key === "0") {
+        e.preventDefault()
+        onReject?.()
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault()
+        onUndo?.()
       }
     }
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [enabled, candidateCount, onPick, onConfirm, onNext])
+  }, [
+    enabled,
+    candidateCount,
+    canConfirm,
+    onPick,
+    onConfirm,
+    onNext,
+    onReject,
+    onUndo,
+  ])
 }

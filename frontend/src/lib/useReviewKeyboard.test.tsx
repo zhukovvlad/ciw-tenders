@@ -57,4 +57,88 @@ describe("useReviewKeyboard", () => {
     await userEvent.keyboard("1")
     expect(onPick).not.toHaveBeenCalled()
   })
+
+  it("0 зовёт onReject, ArrowLeft — onUndo", async () => {
+    const onReject = vi.fn(),
+      onUndo = vi.fn()
+    render(
+      <Harness
+        enabled
+        candidateCount={0}
+        onPick={vi.fn()}
+        onConfirm={vi.fn()}
+        onNext={vi.fn()}
+        onReject={onReject}
+        onUndo={onUndo}
+      />
+    )
+    await userEvent.keyboard("0")
+    expect(onReject).toHaveBeenCalled()
+    await userEvent.keyboard("{ArrowLeft}")
+    expect(onUndo).toHaveBeenCalled()
+  })
+
+  it("canConfirm=false: Enter не зовёт onConfirm (error/no_match без рекомендации)", async () => {
+    const onConfirm = vi.fn()
+    render(
+      <Harness
+        enabled
+        candidateCount={0}
+        canConfirm={false}
+        onPick={vi.fn()}
+        onConfirm={onConfirm}
+        onNext={vi.fn()}
+      />
+    )
+    await userEvent.keyboard("{Enter}")
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
+  it("«5» выбирает 5-го кандидата при candidateCount=5 (top_k=5)", async () => {
+    const onPick = vi.fn()
+    render(
+      <Harness
+        enabled
+        candidateCount={5}
+        onPick={onPick}
+        onConfirm={vi.fn()}
+        onNext={vi.fn()}
+      />
+    )
+    await userEvent.keyboard("5")
+    expect(onPick).toHaveBeenCalledWith(4)
+  })
+
+  it("«4» не зовёт onPick при candidateCount=3 (за пределами)", async () => {
+    const onPick = vi.fn()
+    render(
+      <Harness
+        enabled
+        candidateCount={3}
+        onPick={onPick}
+        onConfirm={vi.fn()}
+        onNext={vi.fn()}
+      />
+    )
+    await userEvent.keyboard("4")
+    expect(onPick).not.toHaveBeenCalled()
+  })
+
+  it("глушится, когда открыт диалог (role=alertdialog data-state=open)", async () => {
+    const onNext = vi.fn()
+    render(
+      <>
+        <Harness
+          enabled
+          candidateCount={0}
+          onPick={vi.fn()}
+          onConfirm={vi.fn()}
+          onNext={onNext}
+        />
+        <div role="alertdialog" data-state="open" />
+      </>
+    )
+    await userEvent.keyboard("n")
+    expect(onNext).not.toHaveBeenCalled()
+  })
 })
