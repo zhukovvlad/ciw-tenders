@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import (
+    get_article_service,
     get_current_user,
     get_decision_fund_service,
     get_estimate_export_service,
@@ -42,6 +43,7 @@ from app.domain.errors import (
     StorageError,
 )
 from app.domain.ports import EstimateRepository, TaskQueue
+from app.services.article_service import ArticleService
 from app.services.decision_fund_service import DecisionFundService
 from app.services.estimate_export_service import EstimateExportService
 from app.services.estimate_review_service import EstimateReviewService
@@ -140,11 +142,18 @@ def get_estimate(
     estimate_id: int,
     user: User = Depends(get_current_user),
     service: EstimateService = Depends(get_estimate_service),
+    article_service: ArticleService = Depends(get_article_service),
 ) -> EstimateDetailOut:
     est = service.get(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN)
     if est is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
-    return EstimateDetailOut.from_entity(est)
+    ids = sorted(
+        {r.matched_article_id for r in est.rows if r.matched_article_id}
+        | {r.final_article_id for r in est.rows if r.final_article_id}
+        | {c.id for r in est.rows for c in r.candidates if c.id}
+    )
+    crumbs = article_service.ancestor_names_by_ids(ids) if ids else {}
+    return EstimateDetailOut.from_entity(est, article_crumbs=crumbs)
 
 
 @router.delete("/{estimate_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -164,6 +173,7 @@ def review_row(
     decision: ReviewDecisionIn,
     user: User = Depends(get_current_user),
     service: EstimateReviewService = Depends(get_estimate_review_service),
+    article_service: ArticleService = Depends(get_article_service),
 ) -> EstimateRowOut:
     try:
         row = service.apply(
@@ -178,7 +188,14 @@ def review_row(
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except InvalidReviewActionError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
-    return EstimateRowOut.from_entity(row)
+    # Крошка СТРОКИ не гидратируется здесь: её пересчёт требует всех строк сметы —
+    # PATCH отдаёт крошки СТАТЕЙ (одной строки), breadcrumb остаётся [] (Task 6 мержит prev).
+    ids = sorted(
+        {i for i in (row.matched_article_id, row.final_article_id) if i}
+        | {c.id for c in row.candidates if c.id}
+    )
+    crumbs = article_service.ancestor_names_by_ids(ids) if ids else {}
+    return EstimateRowOut.from_entity(row, article_crumbs=crumbs)
 
 
 @router.patch("/{estimate_id}/completion", response_model=CompletionOut)

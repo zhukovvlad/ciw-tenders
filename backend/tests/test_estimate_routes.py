@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import (
+    get_article_service,
     get_current_user,
     get_decision_fund_service,
     get_estimate_repository,
@@ -16,12 +17,22 @@ from app.api.deps import (
     get_settings,
 )
 from app.core.config import Settings
-from app.domain.entities import Role, User
+from app.domain.entities import (
+    EstimateNode,
+    EstimateRowStatus,
+    MatchCandidate,
+    NewEstimate,
+    NodeMatch,
+    Role,
+    User,
+)
 from app.main import app
+from app.services.article_service import ArticleService
 from app.services.decision_fund_service import DecisionFundService
 from app.services.estimate_parser import EstimateParser
 from app.services.estimate_service import EstimateService
 from tests.fakes import (
+    FakeArticleRepository,
     FakeDecisionFundRepository,
     FakeEstimateRepository,
     FakeObjectStorage,
@@ -65,10 +76,12 @@ def _svc_factory(repo: FakeEstimateRepository, storage: FakeObjectStorage):
 _DEFAULT_USER = _user()
 
 
-def _client(repo, storage, fund=None, user=_DEFAULT_USER) -> TestClient:
+def _client(repo, storage, fund=None, user=_DEFAULT_USER, article_repo=None) -> TestClient:
     app.dependency_overrides[get_current_user] = user
     app.dependency_overrides[get_estimate_service] = _svc_factory(repo, storage)
     app.dependency_overrides[get_estimate_repository] = lambda: repo
+    repo_articles = article_repo or FakeArticleRepository()
+    app.dependency_overrides[get_article_service] = lambda: ArticleService(repo_articles)
     if fund is not None:
         app.dependency_overrides[get_decision_fund_service] = lambda: DecisionFundService(
             repo, fund
@@ -305,3 +318,62 @@ def test_row_status_matched_fund_serializes() -> None:
     resp = client.get(f"/api/estimates/{eid}")
     assert resp.status_code == 200
     assert resp.json()["rows"][0]["status"] == "matched_fund"
+
+
+def _seed_root_and_child(repo: FakeEstimateRepository) -> tuple[int, int, int]:
+    """Смета владельца id=2: родитель «Раздел» (depth=1) + работа «Работа» (1.1, depth=2)
+    с matched_article_id=3 и кандидатом id=3. Возвращает (estimate_id, root_id, child_id)."""
+    root_node = EstimateNode(
+        code="1", name="Раздел", parent_code=None, section_type="СМР",
+        embedding_input="Раздел", source_index=0, depth=1,
+    )
+    child_node = EstimateNode(
+        code="1.1", name="Работа", parent_code="1", section_type="СМР",
+        embedding_input="Раздел. Работа", source_index=1, depth=2,
+    )
+    est = repo.create(
+        NewEstimate(user_id=2, filename="e.xlsx", original_object_key="k"),
+        [root_node, child_node],
+    )
+    root_id, child_id = est.rows[0].id, est.rows[1].id
+    repo.nodes[child_id]["embedding"] = [0.1]
+    repo.save_node_match(
+        child_id,
+        NodeMatch(
+            EstimateRowStatus.NEEDS_REVIEW, matched_id=3, matched_code="03.04",
+            matched_name="Фунд. под оборудование", score=0.7,
+            candidates=[MatchCandidate(3, "03.04", "Фунд. под оборудование", 0.7)],
+        ),
+    )
+    return est.id, root_id, child_id
+
+
+def test_detail_exposes_row_and_candidate_breadcrumbs() -> None:
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    articles = FakeArticleRepository()
+    articles.add_article(id=1, code="03", name="03 Фундаменты и основания")
+    articles.add_article(id=3, code="03.04", name="Фунд. под оборудование", parent_id=1)
+    est_id, _root_id, _child_id = _seed_root_and_child(repo)
+    client = _client(repo, storage, article_repo=articles)
+    body = client.get(f"/api/estimates/{est_id}").json()
+    child = next(r for r in body["rows"] if r["code"] == "1.1")
+    assert child["breadcrumb"] == ["Раздел"]  # имя родительской строки сметы
+    assert child["matched_breadcrumb"] == ["03 Фундаменты и основания"]
+    assert child["candidates"][0]["breadcrumb"] == ["03 Фундаменты и основания"]
+
+
+def test_patch_review_hydrates_final_breadcrumb() -> None:
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    articles = FakeArticleRepository()
+    articles.add_article(id=1, code="03", name="03 Фундаменты и основания")
+    articles.add_article(id=3, code="03.04", name="Фунд. под оборудование", parent_id=1)
+    est_id, _root_id, child_id = _seed_root_and_child(repo)
+    client = _client(repo, storage, article_repo=articles)
+    resp = client.patch(
+        f"/api/estimates/{est_id}/rows/{child_id}/review",
+        json={"action": "pick", "article_id": 3},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["final_breadcrumb"] == ["03 Фундаменты и основания"]
+    assert body["breadcrumb"] == []  # крошка СТРОКИ в PATCH не передаётся — контракт

@@ -45,9 +45,14 @@ def search_articles(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Запрос слишком короткий"
         )
+    hits = service.search(q.strip(), limit=limit)
+    crumbs = service.ancestor_names_by_ids([a.id for a in hits if a.id is not None])
     return [
-        ArticleSearchOut(id=a.id or 0, code=a.article_code, name=a.name)
-        for a in service.search(q.strip(), limit=limit)
+        ArticleSearchOut(
+            id=a.id or 0, code=a.article_code, name=a.name,
+            breadcrumb=crumbs.get(a.id or 0, []),
+        )
+        for a in hits
     ]
 
 

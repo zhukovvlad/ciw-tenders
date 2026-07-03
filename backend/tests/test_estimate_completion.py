@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import (
+    get_article_service,
     get_current_user,
     get_estimate_repository,
     get_estimate_review_service,
@@ -17,6 +18,7 @@ from app.api.schemas import EstimateDetailOut, EstimateSummaryOut
 from app.domain.entities import Estimate, EstimateNode, EstimateSummary, NewEstimate, Role, User
 from app.domain.errors import EstimateCompletedError, EstimateNotCompletableError
 from app.main import app
+from app.services.article_service import ArticleService
 from app.services.estimate_parser import EstimateParser
 from app.services.estimate_review_service import EstimateReviewService
 from app.services.estimate_service import EstimateService
@@ -170,6 +172,9 @@ def _route_client(repo: FakeEstimateRepository) -> TestClient:
         estimates=repo, articles=FakeArticleRepository()
     )
     app.dependency_overrides[get_estimate_repository] = lambda: repo
+    app.dependency_overrides[get_article_service] = lambda: ArticleService(
+        FakeArticleRepository()
+    )
     return TestClient(app)
 
 

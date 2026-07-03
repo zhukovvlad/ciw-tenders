@@ -20,3 +20,14 @@ def test_search_includes_unembedded(client, auth_headers, article_repo):
     article_repo.add_article(id=3, code="2.2", name="Кровля")  # фейк: embedding=None
     resp = client.get("/api/articles/search?q=кров", headers=auth_headers)
     assert [a["code"] for a in resp.json()] == ["2.2"]
+
+
+def test_search_exposes_article_breadcrumb(client, auth_headers, article_repo):
+    article_repo.add_article(id=1, code="03", name="03 Фундаменты и основания")
+    article_repo.add_article(
+        id=3, code="03.04", name="Фунд. под оборудование", parent_id=1
+    )
+    resp = client.get("/api/articles/search?q=фунд", headers=auth_headers)
+    by_id = {a["id"]: a for a in resp.json()}
+    assert by_id[3]["breadcrumb"] == ["03 Фундаменты и основания"]
+    assert by_id[1]["breadcrumb"] == []
