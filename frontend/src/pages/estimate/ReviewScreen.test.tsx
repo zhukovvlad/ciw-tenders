@@ -164,6 +164,24 @@ describe("поток очереди", () => {
     render(<Wrap rows={[row(1, 0, "confident")]} />)
     expect(screen.getByText(/все спорные строки решены/i)).toBeInTheDocument()
   })
+
+  it("терминальный экран: «Вернуться к последнему решению» снова открывает карточку решённой", async () => {
+    const onReview = vi.fn().mockResolvedValue(true)
+    render(
+      <Wrap
+        rows={[row(3, 0, "needs_review", { source_name: "Единственная" })]}
+        onReview={onReview}
+      />
+    )
+    await userEvent.keyboard("{Enter}") // решаем последнюю спорную
+    await waitFor(() =>
+      expect(screen.getByText(/все спорные строки решены/i)).toBeInTheDocument()
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: /вернуться к последнему решению/i })
+    )
+    expect(card().getByText("Единственная")).toBeInTheDocument()
+  })
 })
 
 describe("грид ↔ очередь", () => {

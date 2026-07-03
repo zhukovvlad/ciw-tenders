@@ -82,4 +82,36 @@ describe("QueueDone", () => {
     )
     expect(onShowGrid).toHaveBeenCalled()
   })
+
+  it("canUndo: кнопка «Вернуться к последнему решению» есть и зовёт onUndo", async () => {
+    const onUndo = vi.fn()
+    render(
+      <QueueDone
+        state={initReview("x", ROWS)}
+        onComplete={vi.fn()}
+        onShowGrid={vi.fn()}
+        canUndo
+        onUndo={onUndo}
+      />
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: /вернуться к последнему решению/i })
+    )
+    expect(onUndo).toHaveBeenCalled()
+  })
+
+  it("без canUndo (свежая сессия) кнопки возврата нет", () => {
+    render(
+      <QueueDone
+        state={initReview("x", ROWS)}
+        onComplete={vi.fn()}
+        onShowGrid={vi.fn()}
+        canUndo={false}
+        onUndo={vi.fn()}
+      />
+    )
+    expect(
+      screen.queryByRole("button", { name: /вернуться к последнему решению/i })
+    ).not.toBeInTheDocument()
+  })
 })

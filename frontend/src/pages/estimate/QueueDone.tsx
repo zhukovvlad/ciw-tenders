@@ -6,9 +6,17 @@ interface QueueDoneProps {
   state: ReviewState
   onComplete: () => void
   onShowGrid: () => void
+  canUndo?: boolean // спека §3a: undo доступен для ВСЕХ решений сессии,
+  onUndo?: () => void // включая последнее — с терминального экрана
 }
 
-export function QueueDone({ state, onComplete, onShowGrid }: QueueDoneProps) {
+export function QueueDone({
+  state,
+  onComplete,
+  onShowGrid,
+  canUndo,
+  onUndo,
+}: QueueDoneProps) {
   const { reviewed, total } = progress(state)
 
   const matched = state.rows.filter(
@@ -49,6 +57,12 @@ export function QueueDone({ state, onComplete, onShowGrid }: QueueDoneProps) {
       <Button variant="outline" onClick={onShowGrid} className="w-full">
         Посмотреть таблицу
       </Button>
+
+      {canUndo && onUndo && (
+        <Button variant="ghost" onClick={onUndo} className="mt-4 w-full">
+          ← Вернуться к последнему решению
+        </Button>
+      )}
     </div>
   )
 }

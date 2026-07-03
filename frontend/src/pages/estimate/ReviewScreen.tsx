@@ -271,6 +271,8 @@ export function ReviewScreen({
           state={state}
           onComplete={onComplete}
           onShowGrid={goToGridManually}
+          canUndo={queue.canUndo}
+          onUndo={queue.undo}
         />
       ) : (
         <>
