@@ -255,6 +255,13 @@ describe("reviewState", () => {
     expect(progress(s).reviewed).toBe(1)
   })
 
+  it("statusLabel: excluded → «Контекст», pending → «В обработке»", () => {
+    const ex = { ...MOCK_ROWS[0], status: "excluded" as const }
+    const pd = { ...MOCK_ROWS[0], status: "pending" as const }
+    expect(statusLabel(ex, { kind: "pending" })).toBe("Контекст")
+    expect(statusLabel(pd, { kind: "pending" })).toBe("В обработке")
+  })
+
   it("pick/reject на confident-строке не двигает progress() (спека editable-confident-rows §4)", () => {
     const r = rowNum("confident")
     const total0 = progress(base()).total

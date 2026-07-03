@@ -171,6 +171,10 @@ export function filteredRows(state: ReviewState): MatchRow[] {
 }
 
 export function statusLabel(row: MatchRow, d: Decision): string {
+  // контекстные строки (excluded/pending) не решаются в ревью — их decision
+  // вечно "pending", проверяем статус строки ДО веток по d.kind (спека §2b)
+  if (row.status === "excluded") return "Контекст"
+  if (row.status === "pending") return "В обработке"
   // решение оператора важнее происхождения снимка: override/reject поверх
   // фонд-хита не должны маскироваться меткой «Из фонда» (спека фонда §12.4)
   if (d.kind === "no_match") return "Нет совпадения"

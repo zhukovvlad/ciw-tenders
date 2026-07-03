@@ -7,6 +7,7 @@ import { MemoryRouter } from "react-router-dom"
 import { ReviewScreen } from "@/pages/estimate/ReviewScreen"
 import { initReview, reviewReducer } from "@/lib/reviewState"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
+import type { MatchRow } from "@/lib/types"
 
 function Wrap({ onExport = vi.fn() }: { onExport?: () => void }) {
   const [state, dispatch] = useReducer(reviewReducer, undefined, () =>
@@ -18,6 +19,22 @@ function Wrap({ onExport = vi.fn() }: { onExport?: () => void }) {
         state={state}
         dispatch={dispatch}
         onExport={onExport}
+        onComplete={vi.fn()}
+      />
+    </MemoryRouter>
+  )
+}
+
+function WrapRows({ rows }: { rows: MatchRow[] }) {
+  const [state, dispatch] = useReducer(reviewReducer, undefined, () =>
+    initReview("смета.xlsx", rows)
+  )
+  return (
+    <MemoryRouter>
+      <ReviewScreen
+        state={state}
+        dispatch={dispatch}
+        onExport={vi.fn()}
         onComplete={vi.fn()}
       />
     </MemoryRouter>
@@ -77,5 +94,36 @@ describe("ReviewScreen", () => {
     await userEvent.keyboard("{Enter}")
     // После confirmNoMatch строка переходит в статус "Нет совпадения" (decision.kind === "no_match")
     expect(screen.getAllByText("Нет совпадения").length).toBeGreaterThan(0)
+  })
+
+  it("клавиатура пропускает excluded и фонд-хиты: активна первая спорная", () => {
+    const rows: MatchRow[] = [
+      {
+        ...MOCK_ROWS[0],
+        row_number: 1,
+        source_name: "Орг-заголовок",
+        status: "excluded",
+      },
+      {
+        ...MOCK_ROWS[0],
+        row_number: 2,
+        source_name: "Фонд-хит",
+        status: "matched_fund",
+        matched_code: "01.01",
+        matched_name: "Статья",
+      },
+      {
+        ...MOCK_ROWS[0],
+        row_number: 3,
+        source_name: "Спорная работа",
+        status: "needs_review",
+      },
+    ]
+    render(<WrapRows rows={rows} />)
+    // авто-активная строка очереди раскрыта; это должна быть СПОРНАЯ, а не excluded/фонд
+    const spornaya = screen.getByText("Спорная работа").closest("tr")!
+    expect(spornaya).toHaveAttribute("data-state", "open")
+    const org = screen.getByText("Орг-заголовок").closest("tr")!
+    expect(org).toHaveAttribute("data-state", "closed")
   })
 })
