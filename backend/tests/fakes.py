@@ -435,6 +435,7 @@ class FakeEstimateRepository(EstimateRepository):
                     status=self.statuses.get(e.id, e.status),
                     nodes_count=sum(1 for n in node_dicts if n["status"] != "excluded"),
                     created_at=e.created_at,
+                    completed_at=self.completed.get(e.id),
                     reviewed_count=reviewed,
                     total_reviewable=len(reviewable),
                 )

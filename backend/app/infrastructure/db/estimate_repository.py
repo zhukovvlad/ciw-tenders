@@ -126,25 +126,28 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
     def list_for_owner(
         self, owner_id: int, *, is_admin: bool, limit: int = 50, offset: int = 0
     ) -> tuple[list[EstimateSummary], int]:
-        counts = (
-            select(
-                EstimateRowModel.estimate_id,
-                func.count()
-                .filter(EstimateRowModel.status != "excluded")
-                .label("n"),
-                func.count()
-                .filter(EstimateRowModel.status.in_(self._REVIEWABLE))
-                .label("reviewable"),
-                func.count()
-                .filter(
-                    EstimateRowModel.status.in_(self._REVIEWABLE),
-                    EstimateRowModel.review_status != "unreviewed",
-                )
-                .label("reviewed"),
+        counts_q = select(
+            EstimateRowModel.estimate_id,
+            func.count()
+            .filter(EstimateRowModel.status != "excluded")
+            .label("n"),
+            func.count()
+            .filter(EstimateRowModel.status.in_(self._REVIEWABLE))
+            .label("reviewable"),
+            func.count()
+            .filter(
+                EstimateRowModel.status.in_(self._REVIEWABLE),
+                EstimateRowModel.review_status != "unreviewed",
             )
-            .group_by(EstimateRowModel.estimate_id)
-            .subquery()
+            .label("reviewed"),
         )
+        if not is_admin:
+            # Без скоупа подзапрос агрегирует строки ВСЕХ пользователей (утечка чужих
+            # counts); внешний where ниже фильтрует только сметы, но не сам подзапрос.
+            counts_q = counts_q.join(
+                EstimateModel, EstimateModel.id == EstimateRowModel.estimate_id
+            ).where(EstimateModel.user_id == owner_id)
+        counts = counts_q.group_by(EstimateRowModel.estimate_id).subquery()
         stmt = select(
             EstimateModel,
             func.coalesce(counts.c.n, 0),
