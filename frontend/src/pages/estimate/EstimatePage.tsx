@@ -2,7 +2,7 @@
 // Единственный владелец маппинга статус→экран (спека §3). Кэша ревью нет:
 // источник истины — GET /estimates/:id + ответы PATCH.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
-import { Link, useLocation, useParams } from "react-router-dom"
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import type { Progress } from "@/lib/mock/api"
 import type { StructuralAnomaly } from "@/lib/types"
@@ -44,6 +44,7 @@ export function EstimatePage() {
   const params = useParams()
   const id = Number(params.id)
   const location = useLocation()
+  const [searchParams] = useSearchParams()
   // Транзиентная справка по аномалиям: приходит только через navigate-state
   // при свежей загрузке; при прямом заходе по URL её нет (спека §5, этап 3).
   const notice = (location.state ?? {
@@ -154,16 +155,23 @@ export function EstimatePage() {
     rowNumber: number,
     action: ReviewActionKind,
     articleId?: number
-  ) {
+  ): Promise<boolean> {
     const prev = state.rows.find((r) => r.row_number === rowNumber)
-    void patchRowReview(id, rowNumber, action, articleId, prev)
-      .then((updated) => dispatch({ type: "syncRow", row: updated }))
+    return patchRowReview(id, rowNumber, action, articleId, prev)
+      .then((updated) => {
+        dispatch({ type: "syncRow", row: updated })
+        return true
+      })
       .catch((err: unknown) => {
         console.error(err)
         dispatch({ type: "reopen", row: rowNumber })
+        // Текст нейтральный: «возвращена в начало очереди» была бы ложью для
+        // confident-строки из грида (она не в очереди спорных — commitFailed
+        // порядок для неё не трогает). Имя строки — требование спеки §3a.
         toast.error(
-          err instanceof Error ? err.message : "Не удалось сохранить решение"
+          `Не удалось сохранить решение по строке «${prev?.source_name ?? rowNumber}»`
         )
+        return false
       })
   }
 
@@ -218,7 +226,20 @@ export function EstimatePage() {
         </Link>
       </div>
     )
-  if (meta.kind === "completed")
+  if (meta.kind === "completed") {
+    // Фаза сметы (completed) серверная и главнее режима (спека §3c): переход
+    // в read-only грид — только через явный ?view=grid (кнопка DoneScreen или
+    // прямая ссылка); сама completed-ветка ?view=grid не порождает.
+    if (searchParams.get("view") === "grid")
+      return (
+        <ReviewScreen
+          state={state}
+          dispatch={dispatch}
+          onExport={() => void handleExport()}
+          onComplete={() => {}}
+          readOnly
+        />
+      )
     return (
       <DoneScreen
         state={state}
@@ -229,6 +250,7 @@ export function EstimatePage() {
         onResume={() => toggleCompletion(false)}
       />
     )
+  }
   return (
     <>
       <StructureNotice

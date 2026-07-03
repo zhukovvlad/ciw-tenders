@@ -17,6 +17,15 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {}
 }
 
+// jsdom не реализует ResizeObserver, которого требует cmdk (shadcn Command).
+if (!window.ResizeObserver) {
+  window.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}
+
 // jsdom не реализует window.matchMedia, которое использует ThemeProvider.
 if (!window.matchMedia) {
   window.matchMedia = (query: string) =>

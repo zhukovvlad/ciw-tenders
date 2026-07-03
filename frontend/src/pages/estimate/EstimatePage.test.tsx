@@ -1,10 +1,15 @@
 // frontend/src/pages/estimate/EstimatePage.test.tsx
 import { describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { EstimatePage } from "@/pages/estimate/EstimatePage"
-import { getEstimate, pollEstimate, setCompletion } from "@/lib/api/estimates"
+import {
+  getEstimate,
+  patchRowReview,
+  pollEstimate,
+  setCompletion,
+} from "@/lib/api/estimates"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
 
 vi.mock("@/lib/api/estimates", async () => {
@@ -21,11 +26,22 @@ vi.mock("@/lib/api/estimates", async () => {
   }
 })
 
+vi.mock("@/lib/api/articles", () => ({
+  searchArticles: vi.fn().mockResolvedValue([]),
+}))
+
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), info: vi.fn() } }))
+import { toast } from "sonner"
+
 const ROW_NEEDS_REVIEW = MOCK_ROWS.find((r) => r.status === "needs_review")!
 
 function renderAt(id: number) {
+  return renderAtUrl(`/estimates/${id}`)
+}
+
+function renderAtUrl(url: string) {
   return render(
-    <MemoryRouter initialEntries={[`/estimates/${id}`]}>
+    <MemoryRouter initialEntries={[url]}>
       <Routes>
         <Route path="/estimates/:id" element={<EstimatePage />} />
         <Route path="/estimates" element={<div>list-page</div>} />
@@ -123,5 +139,60 @@ describe("EstimatePage", () => {
     expect(capturedSignal?.aborted).toBe(false)
     unmount()
     expect(capturedSignal?.aborted).toBe(true)
+  })
+
+  it("completed + ?view=grid → read-only грид; без view — DoneScreen", async () => {
+    vi.mocked(getEstimate).mockResolvedValue({
+      ...READY,
+      completedAt: "2026-07-02T12:00:00Z",
+      rows: MOCK_ROWS,
+    })
+    const gridRender = renderAtUrl("/estimates/5?view=grid")
+    expect(await screen.findByRole("table")).toBeInTheDocument()
+    gridRender.unmount()
+
+    vi.mocked(getEstimate).mockResolvedValue({
+      ...READY,
+      completedAt: "2026-07-02T12:00:00Z",
+      rows: MOCK_ROWS,
+    })
+    renderAtUrl("/estimates/5")
+    expect(await screen.findByText(/Скачать обогащённый/)).toBeInTheDocument()
+    const link = screen.getByRole("link", { name: /Просмотреть строки/ })
+    expect(link).toHaveAttribute("href", expect.stringContaining("view=grid"))
+  })
+
+  it("processing + ?view=grid молча игнорируется (ProcessingScreen)", async () => {
+    vi.mocked(getEstimate).mockResolvedValue({
+      ...READY,
+      status: "pending",
+      rows: [],
+    })
+    vi.mocked(pollEstimate).mockImplementation(() => new Promise(() => {}))
+    renderAtUrl("/estimates/5?view=grid")
+    expect(await screen.findByText(/Отбор строк СМР/)).toBeInTheDocument()
+    expect(screen.queryByRole("table")).not.toBeInTheDocument()
+  })
+
+  it("ошибка PATCH: toast с именем строки и reopen", async () => {
+    vi.mocked(getEstimate).mockResolvedValue(READY)
+    vi.mocked(patchRowReview).mockRejectedValue(new Error("boom"))
+    renderAt(5)
+    await screen.findByText(/Выгрузить Excel/)
+    // строка «needs_review» с рекомендацией активна автоматически (очередь) —
+    // Enter коммитит confirmArbiter, PATCH падает
+    await userEvent.keyboard("{Enter}")
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining(ROW_NEEDS_REVIEW.source_name)
+      )
+    )
+    // reopen вернул решение в pending — карточка той же строки осталась
+    // активной (единственная спорная строка), а не терминальный экран
+    expect(
+      within(screen.getByTestId("review-card")).getByText(
+        ROW_NEEDS_REVIEW.source_name
+      )
+    ).toBeInTheDocument()
   })
 })
