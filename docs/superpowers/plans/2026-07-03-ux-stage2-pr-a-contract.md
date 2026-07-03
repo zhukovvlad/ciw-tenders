@@ -521,7 +521,7 @@ git commit -m "feat(articles): порт ancestor_names_by_ids — крошки �
   - `EstimateRowOut.final_breadcrumb: list[str] = []` — крошка статьи РЕШЕНИЯ (по `final_article_id`): оператор мог выбрать статью через поиск, вне кандидатов — без этого поля после F5 крошка решения недоступна нигде (PR-B: карточка решённой строки);
   - `MatchCandidateOut.breadcrumb: list[str] = []`;
   - `ArticleSearchOut.breadcrumb: list[str] = []`;
-  - PATCH `/estimates/{id}/rows/{row}/review` возвращает строку БЕЗ крошек (дефолтные `[]`) — фронт мержит из prev (Task 6). Это договорной Optional-контракт.
+  - PATCH `/estimates/{id}/rows/{row}/review` возвращает строку с ГИДРАТИРОВАННЫМИ крошками статей (`final_breadcrumb`/`matched_breadcrumb`/кандидаты — карта статей собирается по ids одной строки), но БЕЗ `breadcrumb` строки (его пересчёт требует всех строк сметы — единственное поле с Optional-контрактом и merge-ом prev на фронте, Task 6). Причина гидратации: `final_article_id` меняется САМИМ этим PATCH-ем — merge из prev подставил бы крошку прежней статьи под новую (пин-тест в Task 6).
 
 - [ ] **Step 1: Падающие DTO-тесты**
 
@@ -660,7 +660,22 @@ Expected: новые тесты FAIL (`unexpected keyword argument 'article_crum
     return EstimateDetailOut.from_entity(est, article_crumbs=crumbs)
 ```
 
-Роут `review_row` (PATCH) НЕ трогаем — возвращает строку с дефолтными `[]` (контракт см. Interfaces).
+Роут `review_row` (PATCH): добавь ту же зависимость `article_service` и гидратируй крошки статей
+ОДНОЙ строки (breadcrumb строки не передаём — его пересчёт требует всех строк сметы, для PATCH
+это Optional-контракт, фронт мержит prev):
+
+```python
+    ids = sorted(
+        {i for i in (row.matched_article_id, row.final_article_id) if i}
+        | {c.id for c in row.candidates if c.id}
+    )
+    crumbs = article_service.ancestor_names_by_ids(ids) if ids else {}
+    return EstimateRowOut.from_entity(row, article_crumbs=crumbs)
+```
+
+(`row` — переменная результата применения решения в фактическом коде роута, сверь имя по месту.
+Карта статей — один SELECT по 362 строкам на единичное действие оператора; дешевле, чем
+несогласованный merge на фронте.)
 
 `routes/articles.py`, роут `search_articles`:
 
@@ -722,6 +737,18 @@ def test_detail_exposes_row_and_candidate_breadcrumbs() -> None:
 с фактической сигнатурой хелпера (`grep -n "def seed_estimate_with_rows" tests/fakes.py`) и
 формой `Row`; если хелпер не даёт задать candidates/matched — засей через методы фейка, как это
 делают соседние ревью-тесты (grep `candidates` по test_estimate_routes.py / test_estimate_detail_review.py).
+
+Плюс PATCH-тест гидратации (тот же файл, той же связкой `_client(..., article_repo=articles)`):
+
+```python
+def test_patch_review_hydrates_final_breadcrumb() -> None:
+    # засей смету со спорной строкой и кандидатом id=3 (дерево статей как выше);
+    # PATCH .../review {action: "pick", article_id: 3} →
+    # body["final_breadcrumb"] == ["03 Фундаменты и основания"]
+    # body["breadcrumb"] == []  # крошка СТРОКИ в PATCH не передаётся — контракт
+```
+
+(разверни по фактическим хелперам файла — ревью-PATCH там уже тестируется, grep `review`).
 
 Тест поиска — в файл, где уже тестируется `/api/articles/search` (grep `articles/search` по
 tests/; если тестов роута поиска нет — добавь рядом с прочими articles-роут-тестами):
@@ -794,27 +821,35 @@ it("rowFromDto мапит sourceIndex/breadcrumb/matchError и крошки ка
   expect(row.candidates[0].breadcrumb).toEqual(["03 Фундаменты"])
 })
 
-it("rowFromDto: PATCH-ответ без крошек наследует их из prev", () => {
+it("rowFromDto: PATCH-ответ наследует из prev ТОЛЬКО breadcrumb строки", () => {
   const prev = rowFromDto({
     ...BASE_ROW_DTO,
     source_index: 12,
     breadcrumb: ["Конструктив"],
-    matched_breadcrumb: ["03 Фундаменты"],
-    candidates: [
-      { id: 3, code: "03.04", name: "Фунд.", score: 0.7, breadcrumb: ["03 Фундаменты"] },
-    ],
   })
   const afterPatch = rowFromDto(
     { ...BASE_ROW_DTO, review_status: "confirmed",
-      breadcrumb: [], // PATCH-ответ: дефолтные пустые крошки — merge обязан взять prev
-      matched_breadcrumb: [],
-      candidates: [{ id: 3, code: "03.04", name: "Фунд.", score: 0.7 }] },
+      breadcrumb: [] }, // PATCH не пересчитывает крошку СТРОКИ — merge берёт prev
     prev
   )
   expect(afterPatch.breadcrumb).toEqual(["Конструктив"])
   expect(afterPatch.sourceIndex).toBe(12)
-  expect(afterPatch.matchedBreadcrumb).toEqual(["03 Фундаменты"])
-  expect(afterPatch.candidates[0].breadcrumb).toEqual(["03 Фундаменты"])
+})
+
+it("ПИН: переигрывание решения не наследует крошку прежней статьи", () => {
+  // строка была решена на статью A (через поиск), оператор переиграл на B:
+  // PATCH-ответ ГИДРАТИРОВАН бэком (final_breadcrumb статьи B) — prev с крошкой A
+  // не должен просочиться ни при каких merge-ветках
+  const prev = rowFromDto({
+    ...BASE_ROW_DTO,
+    final_breadcrumb: ["08 Отделочные работы"], // предки статьи A
+  })
+  const afterRepick = rowFromDto(
+    { ...BASE_ROW_DTO, review_status: "overridden",
+      final_breadcrumb: ["03 Фундаменты"] }, // гидратация бэка: предки статьи B
+    prev
+  )
+  expect(afterRepick.finalBreadcrumb).toEqual(["03 Фундаменты"])
 })
 ```
 
@@ -866,26 +901,21 @@ export type MatchStatus =
 
 ```ts
 export function rowFromDto(r: RowDto, prev?: MatchRow): MatchRow {
-  const prevCandCrumbs = new Map(
-    (prev?.candidates ?? []).map((c) => [c.article_code, c.breadcrumb])
-  )
   return {
     // ...существующие поля как сейчас...
     sourceIndex: r.source_index ?? prev?.sourceIndex ?? 0,
-    // ВАЖНО: merge через ПРОВЕРКУ ДЛИНЫ, не через ?? — PATCH-ответ несёт
-    // breadcrumb: [] (дефолт DTO), и `??` затёр бы крошку prev пустым массивом
+    // ЕДИНСТВЕННАЯ merge-ветка: крошка СТРОКИ. PATCH её не пересчитывает
+    // (нужны все строки сметы) и несёт [] — проверка длины, не ??, иначе
+    // пустой массив затёр бы prev. Крошки СТАТЕЙ (final/matched/кандидаты)
+    // НЕ мержатся: PATCH гидратирует их на бэке, а final_article_id меняется
+    // самим PATCH-ем — наследование из prev подставило бы крошку прежней
+    // статьи под новую (пин-тест «переигрывание решения...»).
     breadcrumb:
       r.breadcrumb && r.breadcrumb.length > 0
         ? r.breadcrumb
         : (prev?.breadcrumb ?? []),
-    matchedBreadcrumb:
-      r.matched_breadcrumb && r.matched_breadcrumb.length > 0
-        ? r.matched_breadcrumb
-        : (prev?.matchedBreadcrumb ?? []),
-    finalBreadcrumb:
-      r.final_breadcrumb && r.final_breadcrumb.length > 0
-        ? r.final_breadcrumb
-        : (prev?.finalBreadcrumb ?? []),
+    matchedBreadcrumb: r.matched_breadcrumb ?? [],
+    finalBreadcrumb: r.final_breadcrumb ?? [],
     matchError: r.match_error ?? prev?.matchError ?? null,
     candidates: r.candidates.map(
       (c): Candidate => ({
@@ -893,10 +923,7 @@ export function rowFromDto(r: RowDto, prev?: MatchRow): MatchRow {
         article_code: c.code,
         name: c.name,
         score: c.score,
-        breadcrumb:
-          c.breadcrumb && c.breadcrumb.length > 0
-            ? c.breadcrumb
-            : (prevCandCrumbs.get(c.code) ?? []),
+        breadcrumb: c.breadcrumb ?? [],
       })
     ),
   }
@@ -1120,7 +1147,7 @@ git commit -m "docs: devlog PR-A этапа 2 + гашение TECH_DEBT (тип
 | `MatchStatus` полное множество + exhaustive-развилки | 6, 7 |
 | Очередь хоткеев = `requiresDecision` | 7 |
 | Приглушение + лейблы «Контекст»/«В обработке», нераскрываемость | 7 |
-| PATCH-ответ без крошек → merge prev на фронте | 5 (контракт), 6 (merge) |
+| PATCH гидратирует крошки статей; merge prev только для breadcrumb строки; пин «переигрывание не наследует» | 5 (гидратация+тест), 6 (merge+пин) |
 | Ручная сверка breadcrumb на dev-БД; браузерный гейт excluded | 8 |
 | Гашение TECH_DEBT (4)–(5) | 8 |
 | shadcn-first (Badge для лейблов; ui/ не править) | 7 + Global Constraints |
