@@ -115,6 +115,22 @@ describe("rowFromDto: крошки/merge (Task 6)", () => {
     )
     expect(afterRepick.finalBreadcrumb).toEqual(["03 Фундаменты"])
   })
+
+  it("крошки СТАТЕЙ никогда не мержатся из prev: final_breadcrumb без ключа ⇒ []", () => {
+    // Усиление пин-теста выше: там after-DTO несёт непустой final_breadcrumb,
+    // и ошибочный fallback `?? prev?.finalBreadcrumb` тоже прошёл бы. Здесь
+    // ключ отсутствует вовсе — любой merge из prev (?? или проверка длины по
+    // образцу крошки строки) подставил бы устаревшую крошку статьи A.
+    const prev = rowFromDto({
+      ...BASE_ROW_DTO,
+      final_breadcrumb: ["08 Отделочные работы"], // предки статьи A
+    })
+    const afterPatch = rowFromDto(
+      { ...BASE_ROW_DTO, review_status: "confirmed" }, // final_breadcrumb нет
+      prev
+    )
+    expect(afterPatch.finalBreadcrumb).toEqual([])
+  })
 })
 
 describe("estimates api list/delete", () => {
