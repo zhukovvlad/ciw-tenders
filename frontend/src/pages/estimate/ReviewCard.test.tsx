@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ReviewCard, hasRecommendation } from "@/pages/estimate/ReviewCard"
 import { searchArticles } from "@/lib/api/articles"
@@ -112,6 +112,30 @@ describe("ReviewCard: спорная строка", () => {
     expect(p.onManualPick).toHaveBeenCalledWith(
       expect.objectContaining({ id: 9, article_code: "08.01" })
     )
+  })
+})
+
+describe("ReviewCard: подсветка рекомендации арбитра на pending-карточке", () => {
+  // matched_code СОВПАДАЕТ с кандидатом (не синтетический случай) — по спеке
+  // §3b рекомендация это подсвеченный кандидат, а не отдельный блок.
+  const r = row(6, 4, "needs_review", {
+    matched_code: CAND.article_code,
+    matched_name: CAND.name,
+    candidates: [CAND],
+  })
+
+  it("кандидат-рекомендация подсвечен, промаркирован «Рекомендация AI» и несёт Enter-чип без дублирования блока", () => {
+    renderCard(r)
+    const candidateButton = screen
+      .getByText("Фундаменты под оборудование")
+      .closest("button")
+    expect(candidateButton).not.toBeNull()
+    expect(candidateButton?.className).toContain("border-primary")
+    // единственное вхождение — рекомендация не дублируется отдельным блоком
+    expect(screen.getAllByText("Рекомендация AI")).toHaveLength(1)
+    expect(
+      within(candidateButton as HTMLElement).getByText("Enter")
+    ).toBeInTheDocument()
   })
 })
 

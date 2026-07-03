@@ -156,9 +156,14 @@ export function ReviewCard({
 
             {/* 4. Кандидаты */}
             {row.candidates.map((c, i) => {
-              const selected =
-                decision.kind === "confirmed" &&
-                decision.code === c.article_code
+              const selected = c.article_code === chosenCode
+              // Рекомендация арбитра ⇒ подсвеченный кандидат (не отдельный
+              // блок) — синтетический блок выше уже покрывает случай, когда
+              // matched_code не входит в candidates.
+              const isRecommendation =
+                recommended &&
+                !syntheticRecommendation &&
+                c.article_code === row.matched_code
               return (
                 <button
                   key={c.article_code}
@@ -183,6 +188,23 @@ export function ReviewCard({
                   <span className="font-mono text-xs text-muted-foreground">
                     {c.score.toFixed(2)}
                   </span>
+                  {isRecommendation && (
+                    <>
+                      <span className="text-xs text-muted-foreground">
+                        {row.status === "matched_fund" ? (
+                          <>
+                            <Database className="mr-1 inline size-3" />
+                            Из фонда
+                          </>
+                        ) : (
+                          "Рекомендация AI"
+                        )}
+                      </span>
+                      <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
+                        Enter
+                      </kbd>
+                    </>
+                  )}
                 </button>
               )
             })}
@@ -221,7 +243,10 @@ export function ReviewCard({
 
         {/* 6. Оставить без пары */}
         <Button variant="outline" onClick={onReject} className="self-start">
-          Оставить без пары <kbd className="ml-1">0</kbd>
+          Оставить без пары{" "}
+          <kbd className="ml-1 rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
+            0
+          </kbd>
         </Button>
 
         {/* 7. Постоянная легенда клавиш */}

@@ -199,6 +199,6 @@ describe("useReviewQueue: ошибка PATCH", () => {
     act(() => void result.current.committed(20)) // undoStack=[20,20], Set={20}
     act(() => result.current.commitFailed(20)) // undoStack=[20]; Set={}
     act(() => result.current.deselect()) // снять пин, вернуться к потоку
-    expect(result.current.activeRow?.row_number).toBe(20) // сейчас получаем 50
+    expect(result.current.activeRow?.row_number).toBe(20) // упавшее решение снова в работе
   })
 })
