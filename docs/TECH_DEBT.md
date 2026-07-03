@@ -508,6 +508,23 @@ toggle, guard по `toggleSeq`). Тогда же починена гидрата
   `statusLabel()` отдаёт «Контекст»/«В обработке» для excluded/pending ДО веток по решению оператора.
   См. [devlog](devlog/2026-07-03-ux-stage2-pr-a-contract.md).
 
+## 🟢 Крошки статей: карта справочника грузится целиком на каждый запрос
+
+- **Что:** `ancestor_names_by_ids` ([article_repository.py](../backend/app/infrastructure/db/article_repository.py))
+  на каждый вызов выбирает всю таблицу `template_articles` (id/name/parent_id) одним SELECT и
+  строит крошки in-memory ([catalog_tree.py](../backend/app/domain/catalog_tree.py)). Зовётся из
+  `GET /estimates/{id}`, PATCH ревью и `/articles/search` (search-as-you-type).
+- **Почему отложено:** осознанный выбор плана PR-A: справочник — 362 строки, один round-trip к
+  Neon с узкой выборкой дешевле нескольких последовательных запросов по уровням дерева
+  (латентность сети доминирует над объёмом). Отмечено CodeRabbit в PR #21 (предлагал итеративный
+  bounded fetch — на нашей инсталляции он медленнее из-за 2–4 round-trip'ов) и финальным ревью
+  ветки («кандидат на кэш при росте на порядок»).
+- **Как чинить:** при заметном росте справочника (тысячи строк) — НЕ итеративная выборка, а кэш
+  карты `id -> (name, parent_id)` в процессе (TTL или инвалидация на импорте/CRUD статей —
+  события уже проходят через `ArticleService`). Порог: замерить p95 детейла/поиска на реальном
+  объёме прежде, чем строить кэш.
+- **Связано:** PR #21 (тред CodeRabbit), финальное ревью PR-A этапа 2, спека этапа 2 §2.
+
 ## 🟢 Ревью-решения: guard завершения только в сервисе (TOCTOU-окно)
 
 **Что:** `EstimateReviewService.apply()` ([estimate_review_service.py](../backend/app/services/estimate_review_service.py))
