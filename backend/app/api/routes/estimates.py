@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -57,7 +57,7 @@ router = APIRouter(
 _XLSX_SIGNATURE = b"PK\x03\x04"
 
 
-def _collect_article_ids(rows: Iterable[StoredEstimateRow]) -> list[int]:
+def _collect_article_ids(rows: Sequence[StoredEstimateRow]) -> list[int]:
     """id статей, чьи крошки нужны payload'у: рекомендация + финал + кандидаты."""
     return sorted(
         {r.matched_article_id for r in rows if r.matched_article_id}
