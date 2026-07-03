@@ -228,6 +228,7 @@ class StoredEstimateRow:
     matched_code: str | None = None
     matched_name: str | None = None
     score: float | None = None
+    match_error: str | None = None  # текст ошибки матчинга (status="error") — для карточки ревью
     candidates: list[MatchCandidate] = field(default_factory=list)
     review_status: str = "unreviewed"
     final_article_id: int | None = None

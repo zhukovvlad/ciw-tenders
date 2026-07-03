@@ -38,6 +38,101 @@ describe("rowFromDto", () => {
   })
 })
 
+const BASE_ROW_DTO: Parameters<typeof rowFromDto>[0] = {
+  id: 1,
+  code: "1",
+  name: "Row",
+  status: "needs_review",
+  score: 0.5,
+  matched_code: null,
+  matched_name: null,
+  matched_article_id: null,
+  candidates: [],
+  review_status: "unreviewed",
+  final_article_id: null,
+  final_code: null,
+  final_name: null,
+}
+
+describe("rowFromDto: крошки/merge (Task 6)", () => {
+  it("rowFromDto мапит sourceIndex/breadcrumb/matchError и крошки кандидатов", () => {
+    const dto = {
+      ...BASE_ROW_DTO,
+      source_index: 12,
+      breadcrumb: ["Конструктив", "Подземная часть"],
+      matched_breadcrumb: ["03 Фундаменты"],
+      match_error: null,
+      candidates: [
+        {
+          id: 3,
+          code: "03.04",
+          name: "Фунд.",
+          score: 0.7,
+          breadcrumb: ["03 Фундаменты"],
+        },
+      ],
+    }
+    const row = rowFromDto(dto)
+    expect(row.sourceIndex).toBe(12)
+    expect(row.breadcrumb).toEqual(["Конструктив", "Подземная часть"])
+    expect(row.matchedBreadcrumb).toEqual(["03 Фундаменты"])
+    expect(row.candidates[0].breadcrumb).toEqual(["03 Фундаменты"])
+  })
+
+  it("rowFromDto: PATCH-ответ наследует из prev ТОЛЬКО breadcrumb строки", () => {
+    const prev = rowFromDto({
+      ...BASE_ROW_DTO,
+      source_index: 12,
+      breadcrumb: ["Конструктив"],
+    })
+    const afterPatch = rowFromDto(
+      {
+        ...BASE_ROW_DTO,
+        review_status: "confirmed",
+        breadcrumb: [], // PATCH не пересчитывает крошку СТРОКИ — merge берёт prev
+      },
+      prev
+    )
+    expect(afterPatch.breadcrumb).toEqual(["Конструктив"])
+    expect(afterPatch.sourceIndex).toBe(12)
+  })
+
+  it("ПИН: переигрывание решения не наследует крошку прежней статьи", () => {
+    // строка была решена на статью A (через поиск), оператор переиграл на B:
+    // PATCH-ответ ГИДРАТИРОВАН бэком (final_breadcrumb статьи B) — prev с крошкой A
+    // не должен просочиться ни при каких merge-ветках
+    const prev = rowFromDto({
+      ...BASE_ROW_DTO,
+      final_breadcrumb: ["08 Отделочные работы"], // предки статьи A
+    })
+    const afterRepick = rowFromDto(
+      {
+        ...BASE_ROW_DTO,
+        review_status: "overridden",
+        final_breadcrumb: ["03 Фундаменты"], // гидратация бэка: предки статьи B
+      },
+      prev
+    )
+    expect(afterRepick.finalBreadcrumb).toEqual(["03 Фундаменты"])
+  })
+
+  it("крошки СТАТЕЙ никогда не мержатся из prev: final_breadcrumb без ключа ⇒ []", () => {
+    // Усиление пин-теста выше: там after-DTO несёт непустой final_breadcrumb,
+    // и ошибочный fallback `?? prev?.finalBreadcrumb` тоже прошёл бы. Здесь
+    // ключ отсутствует вовсе — любой merge из prev (?? или проверка длины по
+    // образцу крошки строки) подставил бы устаревшую крошку статьи A.
+    const prev = rowFromDto({
+      ...BASE_ROW_DTO,
+      final_breadcrumb: ["08 Отделочные работы"], // предки статьи A
+    })
+    const afterPatch = rowFromDto(
+      { ...BASE_ROW_DTO, review_status: "confirmed" }, // final_breadcrumb нет
+      prev
+    )
+    expect(afterPatch.finalBreadcrumb).toEqual([])
+  })
+})
+
 describe("estimates api list/delete", () => {
   it("listEstimates маппит snake_case DTO в camelCase", async () => {
     vi.spyOn(client, "apiGet").mockResolvedValue({

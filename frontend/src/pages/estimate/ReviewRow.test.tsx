@@ -171,6 +171,56 @@ describe("ReviewRow", () => {
   })
 })
 
+describe("ReviewRow: контекстные строки (excluded/pending)", () => {
+  it("excluded-строка приглушена, не раскрывается и помечена «Контекст»", async () => {
+    const onToggle = vi.fn()
+    const row = { ...confidentRow, status: "excluded" as const }
+    render(
+      tableWrap(
+        <ReviewRow
+          row={row}
+          decision={{ kind: "pending" }}
+          expanded={false}
+          onToggle={onToggle}
+          onPickCandidate={vi.fn()}
+          onManualPick={vi.fn()}
+          onConfirmNoMatch={vi.fn()}
+          onConfirmRecommendation={vi.fn()}
+        />
+      )
+    )
+    const tr = screen.getByText(row.source_name).closest("tr")!
+    expect(tr.className).toContain("opacity-60")
+    expect(screen.getByText("Контекст")).toBeInTheDocument()
+    await userEvent.click(tr)
+    expect(onToggle).not.toHaveBeenCalled()
+  })
+
+  it("pending-строка приглушена, не раскрывается и помечена «В обработке»", async () => {
+    const onToggle = vi.fn()
+    const row = { ...confidentRow, status: "pending" as const }
+    render(
+      tableWrap(
+        <ReviewRow
+          row={row}
+          decision={{ kind: "pending" }}
+          expanded={false}
+          onToggle={onToggle}
+          onPickCandidate={vi.fn()}
+          onManualPick={vi.fn()}
+          onConfirmNoMatch={vi.fn()}
+          onConfirmRecommendation={vi.fn()}
+        />
+      )
+    )
+    const tr = screen.getByText(row.source_name).closest("tr")!
+    expect(tr.className).toContain("opacity-60")
+    expect(screen.getByText("В обработке")).toBeInTheDocument()
+    await userEvent.click(tr)
+    expect(onToggle).not.toHaveBeenCalled()
+  })
+})
+
 const fundRowNoCands = { ...fundRow, candidates: [] }
 
 describe("ReviewRow: правка уверенных позиций", () => {

@@ -69,6 +69,7 @@ def client(estimate_repo):
     """
     from app.api.deps import (
         _do_sweep,
+        get_article_service,
         get_current_user,
         get_estimate_repository,
         get_estimate_review_service,
@@ -77,6 +78,7 @@ def client(estimate_repo):
         get_task_queue,
     )
     from app.main import app
+    from app.services.article_service import ArticleService
     from app.services.estimate_parser import EstimateParser
     from app.services.estimate_review_service import EstimateReviewService
     from app.services.estimate_service import EstimateService
@@ -92,9 +94,13 @@ def client(estimate_repo):
     def _review_svc() -> EstimateReviewService:
         return EstimateReviewService(estimates=estimate_repo, articles=default_article_repo)
 
+    def _article_svc() -> ArticleService:
+        return ArticleService(repository=default_article_repo)
+
     app.dependency_overrides[get_current_user] = _make_user(uid=1)
     app.dependency_overrides[get_estimate_service] = _svc
     app.dependency_overrides[get_estimate_review_service] = _review_svc
+    app.dependency_overrides[get_article_service] = _article_svc
     app.dependency_overrides[get_estimate_repository] = lambda: estimate_repo
     app.dependency_overrides[get_task_queue] = lambda: queue
     app.dependency_overrides[get_stale_sweeper] = lambda: (

@@ -8,6 +8,7 @@ import {
   decisionFor,
   filteredRows,
   progress,
+  requiresDecision,
 } from "@/lib/reviewState"
 import { Button } from "@/components/ui/button"
 import {
@@ -66,12 +67,10 @@ export function ReviewScreen({
     number | null | "auto"
   >("auto")
 
-  // Очередь навигации = спорные строки ИЗ ВИДИМОГО (отфильтрованного) набора,
-  // чтобы «следующая» не уезжала на строку, скрытую активным фильтром.
-  const queue = useMemo(
-    () => rows.filter((r) => r.status !== "confident"),
-    [rows]
-  )
+  // Очередь навигации = СПОРНЫЕ строки из видимого набора (requiresDecision —
+  // позитивное зеркало бэкового _REVIEWABLE): excluded/pending/фонд-хиты
+  // клавиатура обходит (спека этапа 2 §2b)
+  const queue = useMemo(() => rows.filter(requiresDecision), [rows])
 
   // Производное: если "auto" — первая нерешённая; иначе — явное значение
   const activeRow = useMemo<number | null>(() => {

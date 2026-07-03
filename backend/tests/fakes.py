@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timezone
 
+from app.domain import catalog_tree
 from app.domain.decision_fund import AppliedFundHit, FundEntry, FundHit
 from app.domain.entities import (
     ArticleCandidate,
@@ -110,6 +111,10 @@ class FakeRepository(ArticleRepository):
         pending = sum(1 for a in self._store if a.embedding is None)
         return total, pending
 
+    def ancestor_names_by_ids(self, article_ids: Sequence[int]) -> dict[int, list[str]]:
+        nodes = {a.id: (a.name, a.parent_id) for a in self._store if a.id is not None}
+        return catalog_tree.ancestor_names_by_ids(nodes, article_ids)
+
 
 class FakeArticleRepository(ArticleRepository):
     """In-memory ArticleRepository для тестов SP3 (ревью)."""
@@ -117,10 +122,13 @@ class FakeArticleRepository(ArticleRepository):
     def __init__(self) -> None:
         self.rows: dict[str, TemplateArticle] = {}  # code -> TemplateArticle
 
-    def add_article(self, *, id: int, code: str, name: str) -> None:
+    def add_article(
+        self, *, id: int, code: str, name: str, parent_id: int | None = None
+    ) -> None:
         """Хелпер: кладёт TemplateArticle с фиксированным id (для тестов pick из каталога)."""
         self.rows[code] = TemplateArticle(
             id=id,
+            parent_id=parent_id,
             article_code=code,
             name=name,
             embedding_input=f"{code} {name}",
@@ -175,6 +183,14 @@ class FakeArticleRepository(ArticleRepository):
         total = len(self.rows)
         pending = sum(1 for a in self.rows.values() if a.embedding is None)
         return total, pending
+
+    def ancestor_names_by_ids(self, article_ids: Sequence[int]) -> dict[int, list[str]]:
+        nodes = {
+            a.id: (a.name, a.parent_id)
+            for a in self.rows.values()
+            if a.id is not None
+        }
+        return catalog_tree.ancestor_names_by_ids(nodes, article_ids)
 
 
 class FakeLLMMatcher(LLMMatcher):
@@ -465,6 +481,7 @@ class FakeEstimateRepository(EstimateRepository):
             status=n["status"], has_embedding=n["embedding"] is not None,
             matched_article_id=n["matched_article_id"], matched_code=n["matched_code"],
             matched_name=n["matched_name"], score=n["score"],
+            match_error=n.get("match_error"),
             candidates=[
                 MatchCandidate(id=c.get("id"), code=c["code"], name=c["name"], score=c["score"])
                 for c in n["candidates"]

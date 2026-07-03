@@ -69,6 +69,7 @@ describe("reviewState", () => {
         article_code: "СМР-99-999",
         name: "Ручная",
         score: 0,
+        breadcrumb: [],
       },
     })
     const d = decisionFor(s, MOCK_ROWS.find((x) => x.row_number === r)!)
@@ -134,19 +135,16 @@ describe("reviewState", () => {
   // Пин-тест на дефект финального ревью: requiresDecision был инверсией
   // (не confident/matched_fund), из-за чего excluded (орг-заголовки) и pending
   // ошибочно попадали в «требует решения» и в знаменатель progress().total.
-  // Тип MatchStatus (lib/types.ts) не включает "excluded"/"pending", хотя бэк
-  // присылает их в rows — см. docs/TECH_DEBT.md, «Этап 1 UX-роадмапа: полировка
-  // из ревью», п. (4). Кастуем статус точечно здесь, тип не расширяем.
   it("requiresDecision: excluded и pending — вне ревью, не входят в progress().total", () => {
     const excludedRow: MatchRow = {
       ...fundRow(),
       row_number: 9201,
-      status: "excluded" as unknown as MatchRow["status"],
+      status: "excluded",
     }
     const pendingStatusRow: MatchRow = {
       ...fundRow(),
       row_number: 9202,
-      status: "pending" as unknown as MatchRow["status"],
+      status: "pending",
     }
     expect(requiresDecision(excludedRow)).toBe(false)
     expect(requiresDecision(pendingStatusRow)).toBe(false)
@@ -257,6 +255,13 @@ describe("reviewState", () => {
     expect(progress(s).reviewed).toBe(1)
   })
 
+  it("statusLabel: excluded → «Контекст», pending → «В обработке»", () => {
+    const ex = { ...MOCK_ROWS[0], status: "excluded" as const }
+    const pd = { ...MOCK_ROWS[0], status: "pending" as const }
+    expect(statusLabel(ex, { kind: "pending" })).toBe("Контекст")
+    expect(statusLabel(pd, { kind: "pending" })).toBe("В обработке")
+  })
+
   it("pick/reject на confident-строке не двигает progress() (спека editable-confident-rows §4)", () => {
     const r = rowNum("confident")
     const total0 = progress(base()).total
@@ -268,6 +273,7 @@ describe("reviewState", () => {
         article_code: "СМР-99-999",
         name: "Ручная",
         score: 0,
+        breadcrumb: [],
       },
     })
     expect(progress(picked)).toEqual({ reviewed: 0, total: total0 })

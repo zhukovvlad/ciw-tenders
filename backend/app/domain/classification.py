@@ -129,6 +129,18 @@ def resolve_ancestor_indices(depths: Sequence[int]) -> list[list[int]]:
     return result
 
 
+def full_breadcrumbs(items: Sequence[tuple[int, str]]) -> list[list[str]]:
+    """items — (depth, name) узлов В ПОРЯДКЕ документа (source_index).
+
+    Для каждого узла — имена предков root→parent ПОЛНОЙ цепочкой: без org-фильтра,
+    без нормализации, без схлопывания. Это отображение для оператора (крошка зеркалит
+    документ, каким он виден в Excel), а НЕ вход эмбеддера — вход строит
+    build_embedding_input (org-free), не смешивать (спека этапа 2, §1).
+    """
+    chains = resolve_ancestor_indices([depth for depth, _ in items])
+    return [[items[j][1] for j in chain] for chain in chains]
+
+
 def leaf_flags(depths: Sequence[int]) -> list[bool]:
     """Лист ⟺ следующий узел НЕ глубже текущего (никто не открывается под ним).
 

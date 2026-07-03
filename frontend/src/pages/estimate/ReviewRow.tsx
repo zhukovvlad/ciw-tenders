@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 import { ChevronDown, Database, Search } from "lucide-react"
-import type { Candidate, Decision, MatchRow } from "@/lib/types"
+import type { Candidate, Decision, MatchRow, MatchStatus } from "@/lib/types"
 import { requiresDecision, statusLabel } from "@/lib/reviewState"
 import { searchArticles } from "@/lib/api/articles"
+import { Badge } from "@/components/ui/badge"
 
 const SEARCH_DEBOUNCE_MS = 250
 
@@ -18,10 +19,15 @@ interface ReviewRowProps {
   onConfirmRecommendation: () => void
 }
 
-const statusTone: Record<string, string> = {
+// Exhaustive-контракт (спека §2b): все семь MatchStatus обязаны иметь тон —
+// добавление статуса в MatchStatus без ключа здесь роняет компиляцию.
+const statusTone: Record<MatchStatus, string> = {
+  pending: "text-muted-foreground",
+  excluded: "text-muted-foreground",
   confident: "text-[var(--success)]",
   needs_review: "text-[var(--warning)]",
   no_match: "text-destructive",
+  error: "text-destructive",
   matched_fund: "text-[var(--ds-accent-hover)]",
 }
 
@@ -38,9 +44,11 @@ export function ReviewRow({
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<Candidate[]>([])
   const flagged = requiresDecision(row) // warning-рамка: только реально спорные
-  // любая строка раскрываема и правима (спека editable-confident-rows §1);
+  const contextRow = row.status === "excluded" || row.status === "pending"
+  // раскрываемо всё, КРОМЕ контекстных строк (спека этапа 2 §2b): excluded/
+  // pending — не решения оператора, а орг-заголовки/незавершённый матчинг;
   // warning-рамка при этом остаётся только у требующих решения
-  const expandable = true
+  const expandable = !contextRow
   const label = statusLabel(row, decision)
   const chosenCode =
     decision.kind === "confirmed" ? decision.code : row.matched_code
@@ -70,10 +78,10 @@ export function ReviewRow({
     <>
       <tr
         className={
-          expandable
+          (expandable
             ? "cursor-pointer" +
               (flagged ? " border-l-2 border-l-[var(--warning)]" : "")
-            : ""
+            : "") + (contextRow ? " opacity-60" : "")
         }
         onClick={expandable ? onToggle : undefined}
         data-state={expanded ? "open" : "closed"}
@@ -83,7 +91,9 @@ export function ReviewRow({
         </td>
         <td className="px-4 py-2 text-[var(--ds-text-2)]">{row.source_name}</td>
         <td className="px-4 py-2">
-          {decision.kind === "no_match" || row.status === "no_match" ? (
+          {contextRow ? (
+            <span className="text-muted-foreground">—</span>
+          ) : decision.kind === "no_match" || row.status === "no_match" ? (
             <span className="text-muted-foreground">— без пары —</span>
           ) : (
             <span>
@@ -98,13 +108,23 @@ export function ReviewRow({
           )}
         </td>
         <td className="px-4 py-2 text-right font-mono text-xs text-muted-foreground">
-          {row.status !== "no_match" && row.status !== "matched_fund"
+          {row.status !== "no_match" &&
+          row.status !== "matched_fund" &&
+          !contextRow
             ? row.score.toFixed(2)
             : ""}
         </td>
-        <td className={"px-4 py-2 text-sm " + (statusTone[row.status] ?? "")}>
-          {label === "Из фонда" && <Database className="mr-1 inline size-3" />}
-          {label}
+        <td className={"px-4 py-2 text-sm " + statusTone[row.status]}>
+          {contextRow ? (
+            <Badge variant="outline">{label}</Badge>
+          ) : (
+            <>
+              {label === "Из фонда" && (
+                <Database className="mr-1 inline size-3" />
+              )}
+              {label}
+            </>
+          )}
         </td>
       </tr>
 

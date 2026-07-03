@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.domain.classification import full_breadcrumbs
 from app.domain.entities import (
     Estimate,
     EstimateSummary,
@@ -80,6 +82,7 @@ class ArticleSearchOut(BaseModel):
     id: int
     code: str
     name: str
+    breadcrumb: list[str] = []
 
 
 class DeleteAllResponse(BaseModel):
@@ -160,6 +163,7 @@ class MatchCandidateOut(BaseModel):
     code: str
     name: str
     score: float
+    breadcrumb: list[str] = []
 
 
 class EstimateRowOut(BaseModel):
@@ -170,30 +174,53 @@ class EstimateRowOut(BaseModel):
     section_type: str | None
     depth: int
     status: str
+    source_index: int = 0
     matched_article_id: int | None = None
     matched_code: str | None = None
     matched_name: str | None = None
     score: float | None = None
+    match_error: str | None = None
     candidates: list[MatchCandidateOut] = []
     review_status: str = "unreviewed"
     final_article_id: int | None = None
     final_code: str | None = None
     final_name: str | None = None
     reviewed_at: datetime | None = None
+    breadcrumb: list[str] = []
+    matched_breadcrumb: list[str] = []
+    final_breadcrumb: list[str] = []
 
     @classmethod
-    def from_entity(cls, r: StoredEstimateRow) -> EstimateRowOut:
+    def from_entity(
+        cls,
+        r: StoredEstimateRow,
+        *,
+        breadcrumb: list[str] | None = None,
+        article_crumbs: Mapping[int, list[str]] | None = None,
+    ) -> EstimateRowOut:
+        crumbs = article_crumbs or {}
         return cls(
             id=r.id, code=r.code, name=r.name, parent_code=r.parent_code,
             section_type=r.section_type, depth=r.depth, status=r.status,
-            matched_article_id=r.matched_article_id, matched_code=r.matched_code,
-            matched_name=r.matched_name, score=r.score,
+            source_index=r.source_index, matched_article_id=r.matched_article_id,
+            matched_code=r.matched_code, matched_name=r.matched_name, score=r.score,
+            match_error=r.match_error,
             candidates=[
-                MatchCandidateOut(id=c.id, code=c.code, name=c.name, score=c.score)
+                MatchCandidateOut(
+                    id=c.id, code=c.code, name=c.name, score=c.score,
+                    breadcrumb=crumbs.get(c.id, []) if c.id else [],
+                )
                 for c in r.candidates
             ],
             review_status=r.review_status, final_article_id=r.final_article_id,
             final_code=r.final_code, final_name=r.final_name, reviewed_at=r.reviewed_at,
+            breadcrumb=breadcrumb or [],
+            matched_breadcrumb=(
+                crumbs.get(r.matched_article_id, []) if r.matched_article_id else []
+            ),
+            final_breadcrumb=(
+                crumbs.get(r.final_article_id, []) if r.final_article_id else []
+            ),
         )
 
 
@@ -225,11 +252,22 @@ class EstimateDetailOut(BaseModel):
     rows: list[EstimateRowOut]
 
     @classmethod
-    def from_entity(cls, e: Estimate) -> EstimateDetailOut:
+    def from_entity(
+        cls, e: Estimate, *, article_crumbs: Mapping[int, list[str]] | None = None
+    ) -> EstimateDetailOut:
+        ordered = sorted(e.rows, key=lambda r: r.source_index)
+        chains = full_breadcrumbs([(r.depth, r.name) for r in ordered])
+        crumb_by_id = {r.id: c for r, c in zip(ordered, chains, strict=True)}
+        rows = [
+            EstimateRowOut.from_entity(
+                r, breadcrumb=crumb_by_id[r.id], article_crumbs=article_crumbs
+            )
+            for r in e.rows
+        ]
         return cls(
             id=e.id, filename=e.filename, status=e.status, status_detail=e.status_detail,
             created_at=e.created_at, is_reference=e.is_reference, completed_at=e.completed_at,
-            rows=[EstimateRowOut.from_entity(r) for r in e.rows],
+            rows=rows,
         )
 
 

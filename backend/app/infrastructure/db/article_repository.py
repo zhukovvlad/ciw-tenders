@@ -7,10 +7,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from sqlalchemy import Integer, cast, delete, func, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
 
+from app.domain.catalog_tree import ancestor_names_by_ids
 from app.domain.entities import ArticleCandidate, TemplateArticle
 from app.domain.ports import ArticleRepository
 from app.infrastructure.db.models import TemplateArticleModel
@@ -112,3 +115,16 @@ class SqlAlchemyArticleRepository(ArticleRepository):
             )
         ) or 0
         return int(total), int(pending)
+
+    def ancestor_names_by_ids(self, article_ids: Sequence[int]) -> dict[int, list[str]]:
+        if not article_ids:
+            return {}
+        rows = self._session.execute(
+            select(
+                TemplateArticleModel.id,
+                TemplateArticleModel.name,
+                TemplateArticleModel.parent_id,
+            )
+        ).all()
+        nodes = {r.id: (r.name, r.parent_id) for r in rows}
+        return ancestor_names_by_ids(nodes, article_ids)

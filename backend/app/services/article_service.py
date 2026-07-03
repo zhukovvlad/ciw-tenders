@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 from app.domain.entities import TemplateArticle
 from app.domain.errors import DuplicateError, TemplateValidationError
@@ -55,3 +56,6 @@ class ArticleService:
 
     def delete_all(self) -> int:
         return self._repository.delete_all()
+
+    def ancestor_names_by_ids(self, article_ids: Sequence[int]) -> dict[int, list[str]]:
+        return self._repository.ancestor_names_by_ids(article_ids)

@@ -62,6 +62,7 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             matched_code=m.matched_code,
             matched_name=m.matched_name,
             score=m.score,
+            match_error=m.match_error,
             candidates=[
                 MatchCandidate(id=c.get("id"), code=c["code"], name=c["name"], score=c["score"])
                 for c in (m.candidates or [])
