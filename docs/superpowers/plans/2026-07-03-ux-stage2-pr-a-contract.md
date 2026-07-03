@@ -225,6 +225,14 @@ from app.domain.entities import StoredEstimateRow
 # excluded=False) — всегда лист и предком не бывает. Если org-классификация
 # влияла на крошку, не оставив следа в статусе, страж упадёт — это полезная
 # находка о конвейере крошки, не поломка стража.
+#
+# Excluded-строки В инварианте сознательно (проверено на пайплайне и живых
+# данных, 2026-07-03): save_node_classifications пишет embedding_input
+# БЕЗУСЛОВНО всем строкам прохода, включая excluded (estimate_repository.py,
+# .values(embedding_input=r.embedding_input)); в dev-БД у org-заголовков сметы
+# 16 лежит org-free крошка БЕЗ собственного имени (self_class=ORG), например
+# у узла «2 Этап БЦ» — «Возведение несущих конструкций здания». Вне инварианта
+# только pending (сырой парсерный join до классификации).
 
 
 def _row(
@@ -467,7 +475,7 @@ def ancestor_names_by_ids(
         return self._repository.ancestor_names_by_ids(article_ids)
 ```
 
-`tests/fakes.py`, `FakeArticleRepository`:
+`tests/fakes.py`, `FakeArticleRepository` (хранилище фейка — `self.rows: dict[str, TemplateArticle]`, fakes.py:118 — проверено):
 - хелперу `add_article` добавь параметр `parent_id: int | None = None` и проброс в `TemplateArticle(...)`;
 - добавь метод:
 
@@ -510,6 +518,7 @@ git commit -m "feat(articles): порт ancestor_names_by_ids — крошки �
 - Produces (контракт для фронта, Task 6):
   - `EstimateRowOut.breadcrumb: list[str] = []` — полная цепочка предков строки;
   - `EstimateRowOut.matched_breadcrumb: list[str] = []` — крошка статьи рекомендации (по `matched_article_id`);
+  - `EstimateRowOut.final_breadcrumb: list[str] = []` — крошка статьи РЕШЕНИЯ (по `final_article_id`): оператор мог выбрать статью через поиск, вне кандидатов — без этого поля после F5 крошка решения недоступна нигде (PR-B: карточка решённой строки);
   - `MatchCandidateOut.breadcrumb: list[str] = []`;
   - `ArticleSearchOut.breadcrumb: list[str] = []`;
   - PATCH `/estimates/{id}/rows/{row}/review` возвращает строку БЕЗ крошек (дефолтные `[]`) — фронт мержит из prev (Task 6). Это договорной Optional-контракт.
@@ -547,19 +556,21 @@ def test_detail_rows_get_full_breadcrumb() -> None:
     assert by_id[1].breadcrumb == []
 
 
-def test_candidate_and_matched_breadcrumbs_from_article_crumbs() -> None:
+def test_candidate_matched_and_final_breadcrumbs_from_article_crumbs() -> None:
     row = _row(
         id=5, code="1.1", name="Работа", depth=2, source_index=1,
         status="needs_review", matched_article_id=3,
+        final_article_id=9,  # выбор оператора ЧЕРЕЗ ПОИСК — статьи нет в кандидатах
         candidates=[MatchCandidate(id=3, code="03.04", name="Фунд. под обор.", score=0.7)],
     )
     root = _row(id=4, code="1", name="Раздел", depth=1, source_index=0,
                 status="confident")
-    crumbs = {3: ["03 Фундаменты и основания"]}
+    crumbs = {3: ["03 Фундаменты и основания"], 9: ["08 Отделочные работы"]}
     out = EstimateDetailOut.from_entity(_estimate([root, row]), article_crumbs=crumbs)
     target = next(r for r in out.rows if r.id == 5)
     assert target.matched_breadcrumb == ["03 Фундаменты и основания"]
     assert target.candidates[0].breadcrumb == ["03 Фундаменты и основания"]
+    assert target.final_breadcrumb == ["08 Отделочные работы"]
 
 
 def test_row_out_without_maps_defaults_to_empty() -> None:
@@ -579,7 +590,7 @@ Expected: новые тесты FAIL (`unexpected keyword argument 'article_crum
 `schemas.py`:
 
 - `MatchCandidateOut` — добавь `breadcrumb: list[str] = []`.
-- `EstimateRowOut` — добавь `breadcrumb: list[str] = []` и `matched_breadcrumb: list[str] = []`; расширь `from_entity`:
+- `EstimateRowOut` — добавь `breadcrumb: list[str] = []`, `matched_breadcrumb: list[str] = []` и `final_breadcrumb: list[str] = []`; расширь `from_entity`:
 
 ```python
     @classmethod
@@ -596,6 +607,9 @@ Expected: новые тесты FAIL (`unexpected keyword argument 'article_crum
             breadcrumb=breadcrumb or [],
             matched_breadcrumb=(
                 crumbs.get(r.matched_article_id, []) if r.matched_article_id else []
+            ),
+            final_breadcrumb=(
+                crumbs.get(r.final_article_id, []) if r.final_article_id else []
             ),
             candidates=[
                 MatchCandidateOut(
@@ -639,6 +653,7 @@ Expected: новые тесты FAIL (`unexpected keyword argument 'article_crum
 ```python
     ids = sorted(
         {r.matched_article_id for r in est.rows if r.matched_article_id}
+        | {r.final_article_id for r in est.rows if r.final_article_id}
         | {c.id for r in est.rows for c in r.candidates if c.id}
     )
     crumbs = article_service.ancestor_names_by_ids(ids) if ids else {}
@@ -750,10 +765,10 @@ git commit -m "feat(estimates): breadcrumb строки/рекомендации
 - Consumes: контракт Task 5 (`breadcrumb`/`matched_breadcrumb`/`match_error`/`source_index` в RowDto; `breadcrumb` в кандидатах и результатах поиска; PATCH-ответ крошек НЕ несёт).
 - Produces:
   - `MatchStatus = "pending" | "excluded" | "confident" | "needs_review" | "no_match" | "error" | "matched_fund"`;
-  - `MatchRow` += `sourceIndex: number`, `breadcrumb: string[]`, `matchedBreadcrumb: string[]`, `matchError: string | null`;
+  - `MatchRow` += `sourceIndex: number`, `breadcrumb: string[]`, `matchedBreadcrumb: string[]`, `finalBreadcrumb: string[]`, `matchError: string | null`;
   - `Candidate` += `breadcrumb: string[]`;
   - `rowFromDto(r: RowDto, prev?: MatchRow): MatchRow` — merge-семантика;
-  - `patchRowReview(estimateId, rowNumber, body, prev?: MatchRow)` — прокидывает prev.
+  - `patchRowReview(estimateId: number, rowId: number, action: "confirm" | "pick" | "reject", articleId?: number, prev?: MatchRow)` — фактическая сигнатура (estimates.ts:190) + новый хвостовой prev.
   - Task 7 и PR-B строятся на этих типах.
 
 - [ ] **Step 1: Падающие тесты api-слоя**
@@ -833,7 +848,9 @@ export type MatchStatus =
   matchError: string | null // текст ошибки для status="error"
 ```
 
-и после `matched_article_id`: `matchedBreadcrumb: string[]`. В `Candidate` — `breadcrumb: string[]`.
+после `matched_article_id`: `matchedBreadcrumb: string[]`; после `final_article_id`:
+`finalBreadcrumb: string[] // крошка статьи решения (выбор из поиска ≠ кандидаты)`.
+В `Candidate` — `breadcrumb: string[]`.
 
 `estimates.ts`: в `RowDto` добавь опциональные (защитно, как соседние):
 
@@ -841,6 +858,7 @@ export type MatchStatus =
   source_index?: number
   breadcrumb?: string[]
   matched_breadcrumb?: string[]
+  final_breadcrumb?: string[]
   match_error?: string | null
 ```
 
@@ -864,6 +882,10 @@ export function rowFromDto(r: RowDto, prev?: MatchRow): MatchRow {
       r.matched_breadcrumb && r.matched_breadcrumb.length > 0
         ? r.matched_breadcrumb
         : (prev?.matchedBreadcrumb ?? []),
+    finalBreadcrumb:
+      r.final_breadcrumb && r.final_breadcrumb.length > 0
+        ? r.final_breadcrumb
+        : (prev?.finalBreadcrumb ?? []),
     matchError: r.match_error ?? prev?.matchError ?? null,
     candidates: r.candidates.map(
       (c): Candidate => ({
@@ -885,7 +907,7 @@ export function rowFromDto(r: RowDto, prev?: MatchRow): MatchRow {
 
 `articles.ts` `searchArticles`: тип ответа `{ id: number; code: string; name: string; breadcrumb?: string[] }[]`, маппинг `breadcrumb: h.breadcrumb ?? []`.
 
-`lib/mock/fixtures.ts` и все литералы `MatchRow`/`Candidate` в тестах: компилятор потребует новые обязательные поля — добавь механически (`sourceIndex: <порядковый>`, `breadcrumb: []`, `matchedBreadcrumb: []`, `matchError: null`, `breadcrumb: []` у кандидатов). Прогони `npm run typecheck` и чини по списку ошибок.
+`lib/mock/fixtures.ts` и все литералы `MatchRow`/`Candidate` в тестах: компилятор потребует новые обязательные поля — добавь механически (`sourceIndex: <порядковый>`, `breadcrumb: []`, `matchedBreadcrumb: []`, `finalBreadcrumb: []`, `matchError: null`, `breadcrumb: []` у кандидатов). Прогони `npm run typecheck` и чини по списку ошибок.
 
 `reviewState.test.ts`: пин-тест excluded/pending из PR #20 использует `"excluded" as unknown as MatchRow["status"]` с комментарием-ссылкой на TECH_DEBT — теперь литералы легальны: убери casts и комментарий про TECH_DEBT (пункт гасится этим PR).
 
@@ -1094,6 +1116,7 @@ git commit -m "docs: devlog PR-A этапа 2 + гашение TECH_DEBT (тип
 | `breadcrumb` строки — полная цепочка, позиционный пересчёт | 2, 5 |
 | Страж-проекция (переиспользование `build_embedding_input`, прокси excluded⇔ORG, предохранитель) | 3 |
 | Крошки кандидатов/рекомендации/поиска из дерева `parent_id`, fallback без `id` | 4, 5 |
+| Крошка финального решения (`final_breadcrumb` — выбор через поиск вне кандидатов) | 5, 6 |
 | `MatchStatus` полное множество + exhaustive-развилки | 6, 7 |
 | Очередь хоткеев = `requiresDecision` | 7 |
 | Приглушение + лейблы «Контекст»/«В обработке», нераскрываемость | 7 |
