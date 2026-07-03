@@ -191,4 +191,14 @@ describe("useReviewQueue: ошибка PATCH", () => {
     expect(result.current.activeRow?.row_number).toBe(50) // осталась 50
     expect(result.current.queue.map((r) => r.row_number)).toEqual([20, 50, 10])
   })
+
+  it("двойной коммит одной строки: провал повторного PATCH возвращает её в pending", () => {
+    const { result } = setup()
+    act(() => void result.current.committed(20))
+    act(() => result.current.openFromGrid(20))
+    act(() => void result.current.committed(20)) // undoStack=[20,20], Set={20}
+    act(() => result.current.commitFailed(20)) // undoStack=[20]; Set={}
+    act(() => result.current.deselect()) // снять пин, вернуться к потоку
+    expect(result.current.activeRow?.row_number).toBe(20) // сейчас получаем 50
+  })
 })

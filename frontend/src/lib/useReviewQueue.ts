@@ -1,7 +1,7 @@
 // Сессионный (in-memory) слой навигации очереди ревью — спека этапа 2 §3a.
 // reviewState НЕ трогает: решения остаются зеркалом сервера; здесь живёт только
 // порядок/активная/undo текущей сессии (F5 всё сбрасывает — это by design).
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import type { MatchRow, ReviewState } from "@/lib/types"
 import { decisionFor, requiresDecision } from "@/lib/reviewState"
 
@@ -43,6 +43,12 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
   const [order, setOrder] = useState<number[]>(initialOrder)
   const [undoStack, setUndoStack] = useState<number[]>([])
   const [selection, setSelection] = useState<Selection | null>(null)
+  // Решённые В ЭТОЙ СЕССИИ (оптимистично, до/независимо от ответа PATCH):
+  // decisionFor обновится только после dispatch снаружи — хук не ждёт этого.
+  // Именно МНОЖЕСТВО, не undoStack: стек — мультисет (повторный коммит той же
+  // строки из грида кладёт её дважды), и после commitFailed, снявшего одно
+  // вхождение, строка осталась бы «решённой» по стеку — потерянное решение.
+  const sessionDecided = useRef<Set<number>>(new Set())
 
   // Пересборка порядка ТОЛЬКО при смене набора спорных (загрузка новой сметы);
   // ключ — отсортированные row_number, чтобы syncRow-обновления не сбивали сессию.
@@ -61,6 +67,10 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     setOrder(initialOrder())
     setUndoStack([])
     setSelection(null)
+    // Сброс сессии — мутировать ref во время рендера здесь безопасно: ветка
+    // выполняется однократно на смену набора и не участвует в выводе JSX.
+    // eslint-disable-next-line react-hooks/refs
+    sessionDecided.current = new Set()
   }
 
   const byNum = useMemo(
@@ -76,28 +86,29 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     [order, byNum]
   )
 
-  // Решённые В ЭТОЙ СЕССИИ (оптимистично, до/независимо от ответа PATCH):
-  // decisionFor обновится только после dispatch снаружи — хук не ждёт этого.
-  // undoStack уже ведёт этот набор один-в-один (committed добавляет, undo/
-  // commitFailed убирают), отдельный Set был бы дублирующим источником истины.
+  // Чтение sessionDecided во время рендера сознательно: набор меняется только
+  // синхронно с setState (committed/undo/commitFailed всегда двигают undoStack),
+  // так что за мутацией ref-а всегда следует ре-рендер — устаревшего вывода
+  // не бывает. Полноценный useState здесь дал бы лишний рендер на каждый коммит.
   const isPending = (r: MatchRow) =>
     decisionFor(state, r).kind === "pending" &&
-    !undoStack.includes(r.row_number)
+    !sessionDecided.current.has(r.row_number)
 
+  // eslint-disable-next-line react-hooks/refs -- см. комментарий у sessionDecided/isPending
   const autoActive = queue.find(isPending) ?? null
   const activeRow = selection ? (byNum.get(selection.row) ?? null) : autoActive
   const origin: CardOrigin = selection?.origin ?? { kind: "flow" }
 
   // Свежая активная для АСИНХРОННЫХ вызовов (commitFailed из .then PATCH-а):
   // замыкание там — из рендера до committed(), где активной была сама упавшая
-  // строка; читать её из замыкания нельзя (пин-тест «STALE CLOSURE»). Ref —
-  // тот же объект во всех рендерах, но пишем в него ТОЛЬКО из эффекта (после
-  // коммита рендера), а не во время самого рендера — этого требует
-  // eslint react-hooks/refs.
+  // строка; читать её из замыкания нельзя (пин-тест «STALE CLOSURE»).
+  // Запись — ИМЕННО во время рендера, не в useEffect: пассивный эффект
+  // флашится отдельной задачей и микротаск .then упавшего PATCH-а может успеть
+  // раньше — ref в этот момент ещё показывал бы саму упавшую строку, пиннинг
+  // не сработал бы и оператора выдернуло бы назад (запрещено спекой §3a).
   const activeRowRef = useRef(activeRow)
-  useEffect(() => {
-    activeRowRef.current = activeRow
-  })
+  // eslint-disable-next-line react-hooks/refs
+  activeRowRef.current = activeRow
 
   const exitFor = (o: CardOrigin): CommitExit =>
     o.kind === "grid"
@@ -132,12 +143,14 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     if (undoStack.length === 0) return
     const top = undoStack[undoStack.length - 1]
     const returnTo = activeRow?.row_number ?? null
-    setUndoStack((s) => s.slice(0, -1)) // строка снова «в работе» (isPending)
+    setUndoStack((s) => s.slice(0, -1))
+    sessionDecided.current.delete(top) // строка снова «в работе»
     setSelection({ row: top, origin: { kind: "undo", returnTo } })
   }
 
   const committed = (rowNumber: number): CommitExit => {
-    setUndoStack((s) => [...s, rowNumber]) // строка «решена в сессии» (isPending)
+    setUndoStack((s) => [...s, rowNumber])
+    sessionDecided.current.add(rowNumber)
     const exit = exitFor(origin)
     if (exit.kind === "row")
       setSelection({ row: exit.rowNumber, origin: { kind: "flow" } })
@@ -149,7 +162,8 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     setUndoStack((s) => {
       const i = s.lastIndexOf(rowNumber)
       return i === -1 ? s : [...s.slice(0, i), ...s.slice(i + 1)]
-    }) // строка снова «в работе» (isPending) — вышла из undoStack
+    })
+    sessionDecided.current.delete(rowNumber)
     setOrder((o) =>
       o.includes(rowNumber)
         ? [rowNumber, ...o.filter((x) => x !== rowNumber)]
