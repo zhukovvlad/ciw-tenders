@@ -5,6 +5,7 @@ import type { MatchRow, ReviewState } from "@/lib/types"
 import { decisionFor, statusLabel } from "@/lib/reviewState"
 import { cn } from "@/lib/utils"
 import { dsHairline } from "@/components/common/ds-table"
+import { ArrowLeft } from "lucide-react"
 
 const WINDOW = 2
 
@@ -59,9 +60,17 @@ export function ContextStrip({
                 {r.section_code}
               </span>
               <span className="truncate">{r.source_name}</span>
-              <span className="ml-auto shrink-0 text-muted-foreground">
-                → {rightSide(state, r)}
-              </span>
+              {r.row_number === activeRowNumber ? (
+                // статус активной дублировал бы решаемое прямо сейчас (спека 3.5 §2)
+                <ArrowLeft
+                  aria-label="вы здесь"
+                  className="ml-auto size-3 shrink-0 text-primary"
+                />
+              ) : (
+                <span className="ml-auto shrink-0 text-muted-foreground">
+                  → {rightSide(state, r)}
+                </span>
+              )}
             </div>
           </div>
         )
