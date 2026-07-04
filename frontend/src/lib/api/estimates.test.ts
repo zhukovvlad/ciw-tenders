@@ -254,6 +254,50 @@ describe("estimates api list/delete", () => {
   })
 })
 
+describe("getEstimate: аномалии структуры (этап 3)", () => {
+  it("мапит anomalies и outline_overrides", async () => {
+    vi.spyOn(client, "apiGet").mockResolvedValue({
+      id: 5,
+      filename: "a.xlsx",
+      status: "ready",
+      rows: [],
+      anomalies: [
+        {
+          kind: "duplicate_code",
+          source_index: 2,
+          code: "1.1",
+          name: "B",
+          detail: "код встречается 2 раза",
+        },
+      ],
+      outline_overrides: 3,
+    })
+    const detail = await getEstimate(5)
+    expect(detail.anomalies).toEqual([
+      {
+        kind: "duplicate_code",
+        sourceIndex: 2,
+        code: "1.1",
+        name: "B",
+        detail: "код встречается 2 раза",
+      },
+    ])
+    expect(detail.outlineOverrides).toBe(3)
+  })
+
+  it("легаси-ответ без полей аномалий → пустые дефолты", async () => {
+    vi.spyOn(client, "apiGet").mockResolvedValue({
+      id: 5,
+      filename: "a.xlsx",
+      status: "ready",
+      rows: [],
+    })
+    const detail = await getEstimate(5)
+    expect(detail.anomalies).toEqual([])
+    expect(detail.outlineOverrides).toBe(0)
+  })
+})
+
 describe("pollEstimate отмена через AbortSignal", () => {
   afterEach(() => {
     vi.useRealTimers()

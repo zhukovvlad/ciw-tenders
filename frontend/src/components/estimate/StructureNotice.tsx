@@ -16,9 +16,9 @@ import {
 import type { StructuralAnomaly } from "@/lib/types"
 import { pluralizeRu } from "@/lib/plural"
 
-// Блок «Структура сметы» — транзиентная справка по результату загрузки.
-// Показывается на фазе review над ReviewScreen, не персистируется в session:
-// при перезагрузке страницы данные теряются (осознанное ограничение Task 7).
+// Блок «Структура сметы» — справка по результату парсинга. Аномалии
+// персистятся на бэке (estimates.structure_anomalies) и приходят в
+// GET /estimates/{id} — переживают F5 и прямую ссылку (этап 3 UX).
 
 export interface StructureNoticeProps {
   anomalies: StructuralAnomaly[]

@@ -2,7 +2,7 @@
 // Единственный владелец маппинга статус→экран (спека §3). Кэша ревью нет:
 // источник истины — GET /estimates/:id + ответы PATCH.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
-import { Link, useLocation, useParams, useSearchParams } from "react-router-dom"
+import { Link, useParams, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import type { Progress } from "@/lib/mock/api"
 import type { StructuralAnomaly } from "@/lib/types"
@@ -44,14 +44,11 @@ function isAbortError(err: unknown): boolean {
 export function EstimatePage() {
   const params = useParams()
   const id = Number(params.id)
-  const location = useLocation()
   const [searchParams] = useSearchParams()
-  // Транзиентная справка по аномалиям: приходит только через navigate-state
-  // при свежей загрузке; при прямом заходе по URL её нет (спека §5, этап 3).
-  const notice = (location.state ?? {
+  const [notice, setNotice] = useState<NoticeState>({
     anomalies: [],
     outlineOverrides: 0,
-  }) as NoticeState
+  })
 
   const [meta, setMeta] = useState<Meta>({ kind: "loading" })
   const [fileName, setFileName] = useState("")
@@ -81,6 +78,13 @@ export function EstimatePage() {
       if (signal.aborted) return
       setFileName(detail.fileName)
       setIsReference(detail.isReference)
+      // аномалии структуры персистятся на бэке и приходят в первичном GET
+      // (парсинг синхронен в POST — они в БД до навигации, спека этапа 3 §7);
+      // state переживает переход processing→open без ре-фетча
+      setNotice({
+        anomalies: detail.anomalies,
+        outlineOverrides: detail.outlineOverrides,
+      })
       if (detail.status === "blocked") {
         setMeta({ kind: "blocked", detail: detail.statusDetail })
         return

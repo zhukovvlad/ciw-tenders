@@ -22,7 +22,7 @@ function LocationProbe() {
 }
 
 describe("EstimatesPage", () => {
-  it("после загрузки файла уходит на /estimates/:id с аномалиями в state", async () => {
+  it("после загрузки файла уходит на /estimates/:id (без navigate-state)", async () => {
     vi.mocked(uploadEstimate).mockResolvedValue({
       id: 42,
       anomalies: [],
