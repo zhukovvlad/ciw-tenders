@@ -420,6 +420,8 @@ class FakeEstimateRepository(EstimateRepository):
             status="pending",
             created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),  # noqa: UP017
             rows=rows,
+            anomalies=list(new.anomalies),
+            outline_overrides=new.outline_overrides,
         )
         self.estimates[eid] = est
         self.statuses[eid] = "pending"
@@ -470,6 +472,8 @@ class FakeEstimateRepository(EstimateRepository):
             status_detail=self.details.get(est.id),
             is_reference=estimate_id in self.reference_ids,
             completed_at=self.completed.get(estimate_id),
+            anomalies=est.anomalies,
+            outline_overrides=est.outline_overrides,
         )
 
     @staticmethod
