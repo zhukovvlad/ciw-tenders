@@ -36,18 +36,19 @@ describe("LoginScreen", () => {
     expect(screen.getByLabelText(/пароль/i)).toBeInTheDocument()
   })
 
-  it("на 401 показывает «Неверный логин или пароль» через toast.error", async () => {
+  it("на 401 показывает инлайн-ошибку «Неверный логин или пароль», toast НЕ вызывается", async () => {
     vi.spyOn(authApi, "login").mockRejectedValue(new ApiError(401, "bad"))
     renderLogin()
     await userEvent.type(screen.getByLabelText(/логин/i), "a@mr.kz")
     await userEvent.type(screen.getByLabelText(/пароль/i), "x")
     await userEvent.click(screen.getByRole("button", { name: /Войти/ }))
-    await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith("Неверный логин или пароль")
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Неверный логин или пароль"
     )
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
-  it("на другую ошибку показывает «Не удалось войти»", async () => {
+  it("на другую ошибку — инлайн «Не удалось войти», toast НЕ вызывается", async () => {
     vi.spyOn(authApi, "login").mockRejectedValue(
       new ApiError(500, "server error")
     )
@@ -55,10 +56,30 @@ describe("LoginScreen", () => {
     await userEvent.type(screen.getByLabelText(/логин/i), "a@mr.kz")
     await userEvent.type(screen.getByLabelText(/пароль/i), "x")
     await userEvent.click(screen.getByRole("button", { name: /Войти/ }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /Не удалось войти/
+    )
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it("повторный сабмит с верными данными убирает старую root-ошибку", async () => {
+    vi.spyOn(authApi, "login")
+      .mockRejectedValueOnce(new ApiError(401, "bad"))
+      .mockResolvedValueOnce("tok")
+    vi.spyOn(authApi, "me").mockResolvedValue({
+      id: 1,
+      email: "a@mr.kz",
+      role: "user",
+      is_active: true,
+    })
+    renderLogin()
+    await userEvent.type(screen.getByLabelText(/логин/i), "a@mr.kz")
+    await userEvent.type(screen.getByLabelText(/пароль/i), "x")
+    await userEvent.click(screen.getByRole("button", { name: /Войти/ }))
+    await screen.findByRole("alert")
+    await userEvent.click(screen.getByRole("button", { name: /Войти/ }))
     await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith(
-        expect.stringContaining("Не удалось войти")
-      )
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
     )
   })
 

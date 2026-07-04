@@ -11,6 +11,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import {
+  DsTable,
+  DsTableBody,
+  DsTableCell,
+  DsTableHead,
+  DsTableHeader,
+  DsTableRow,
+} from "@/components/common/ds-table"
 import { Input } from "@/components/ui/input"
 import type { Article } from "@/lib/types"
 
@@ -45,30 +53,27 @@ export function ArticleTable({
         onChange={(e) => setQuery(e.target.value)}
         className="mb-3 max-w-sm"
       />
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="bg-[var(--ds-surface-sunken)] text-left text-xs tracking-wide text-muted-foreground uppercase">
-            <th className="px-4 py-2.5 font-normal">Код</th>
-            <th className="px-4 py-2.5 font-normal">Наименование</th>
-            {isAdmin && <th className="w-10" />}
-          </tr>
-        </thead>
-        <tbody>
+      <DsTable>
+        <DsTableHeader>
+          <DsTableRow>
+            <DsTableHead>Код</DsTableHead>
+            <DsTableHead>Наименование</DsTableHead>
+            {isAdmin && <DsTableHead className="w-10" />}
+          </DsTableRow>
+        </DsTableHeader>
+        <DsTableBody>
           {filtered.map((a) => {
             const depth = a.article_code.split(".").length - 1
             return (
-              <tr key={a.id} className="border-t border-[var(--ds-hairline)]">
-                <td className="px-4 py-2 font-mono text-xs">
+              <DsTableRow key={a.id}>
+                <DsTableCell className="font-mono text-xs">
                   {a.article_code}
-                </td>
-                <td
-                  className="px-4 py-2"
-                  style={{ paddingLeft: `${1 + depth * 1.25}rem` }}
-                >
+                </DsTableCell>
+                <DsTableCell style={{ paddingLeft: `${1 + depth * 1.25}rem` }}>
                   {a.name}
-                </td>
+                </DsTableCell>
                 {isAdmin && (
-                  <td className="px-4 py-2">
+                  <DsTableCell>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <button type="button" aria-label="Удалить">
@@ -91,13 +96,13 @@ export function ArticleTable({
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
-                  </td>
+                  </DsTableCell>
                 )}
-              </tr>
+              </DsTableRow>
             )
           })}
-        </tbody>
-      </table>
+        </DsTableBody>
+      </DsTable>
     </div>
   )
 }

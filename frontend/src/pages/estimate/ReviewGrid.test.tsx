@@ -90,3 +90,32 @@ describe("ReviewGrid: клики", () => {
     expect(onOpenRow).not.toHaveBeenCalled()
   })
 })
+
+describe("hover по кликабельности (этап 3)", () => {
+  it("с onOpenRow: hover и cursor у решаемой строки, у excluded — нет", () => {
+    renderGrid([
+      row(1, 0, "needs_review", { source_name: "Кликабельная работа" }),
+      row(2, 1, "excluded", { source_name: "Орг-заголовок" }),
+    ])
+    const clickable = screen
+      .getByText("Кликабельная работа")
+      .closest('[role="row"]')!
+    const excluded = screen.getByText("Орг-заголовок").closest('[role="row"]')!
+    expect(clickable.className).toContain("hover:bg-muted/50")
+    expect(clickable.className).toContain("cursor-pointer")
+    expect(excluded.className).not.toContain("hover:bg-muted/50")
+    expect(excluded.className).not.toContain("cursor-pointer")
+  })
+
+  it("read-only (без onOpenRow): hover нет ни у кого", () => {
+    renderGrid(
+      [row(1, 0, "needs_review", { source_name: "Кликабельная работа" })],
+      { onOpenRow: undefined }
+    )
+    const readOnlyRow = screen
+      .getByText("Кликабельная работа")
+      .closest('[role="row"]')!
+    expect(readOnlyRow.className).not.toContain("hover:bg-muted/50")
+    expect(readOnlyRow.className).not.toContain("cursor-pointer")
+  })
+})

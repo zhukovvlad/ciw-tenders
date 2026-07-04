@@ -12,16 +12,17 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { Alert, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+  DsTable,
+  DsTableBody,
+  DsTableCell,
+  DsTableHead,
+  DsTableHeader,
+  DsTableRow,
+} from "@/components/common/ds-table"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ApiError } from "@/lib/api/client"
 import {
@@ -140,9 +141,9 @@ export function EstimateList({ onOpen }: EstimateListProps) {
 
   if (error) {
     return (
-      <p className="text-sm text-destructive" role="alert">
-        {error}
-      </p>
+      <Alert variant="destructive" role="alert">
+        <AlertTitle>{error}</AlertTitle>
+      </Alert>
     )
   }
 
@@ -166,28 +167,35 @@ export function EstimateList({ onOpen }: EstimateListProps) {
 
   return (
     <>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Файл</TableHead>
-            <TableHead>Статус</TableHead>
-            <TableHead>Проверка</TableHead>
-            <TableHead className="text-right">Узлов</TableHead>
-            <TableHead>Дата</TableHead>
-            <TableHead className="w-10" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+      <DsTable>
+        <DsTableHeader>
+          <DsTableRow>
+            <DsTableHead>Файл</DsTableHead>
+            <DsTableHead>Статус</DsTableHead>
+            <DsTableHead>Проверка</DsTableHead>
+            <DsTableHead className="text-right">Узлов</DsTableHead>
+            <DsTableHead>Дата</DsTableHead>
+            <DsTableHead className="w-10" />
+          </DsTableRow>
+        </DsTableHeader>
+        <DsTableBody>
           {items.map((item) => {
             const meta = metaFor(item.status)
             return (
-              <TableRow key={item.id}>
-                <TableCell>
+              <DsTableRow
+                key={item.id}
+                interactive={meta.clickable}
+                onClick={meta.clickable ? () => onOpen(item) : undefined}
+              >
+                <DsTableCell>
                   {meta.clickable ? (
                     <button
                       type="button"
-                      className="text-left font-medium hover:underline"
-                      onClick={() => onOpen(item)}
+                      className="font-medium hover:underline"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onOpen(item)
+                      }}
                     >
                       {item.filename}
                     </button>
@@ -196,11 +204,11 @@ export function EstimateList({ onOpen }: EstimateListProps) {
                       {item.filename}
                     </span>
                   )}
-                </TableCell>
-                <TableCell>
+                </DsTableCell>
+                <DsTableCell>
                   <Badge variant={meta.variant}>{meta.label}</Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground tabular-nums">
+                </DsTableCell>
+                <DsTableCell className="text-muted-foreground tabular-nums">
                   {item.completedAt !== null ? (
                     <Badge>Завершена</Badge>
                   ) : item.totalReviewable > 0 ? (
@@ -208,20 +216,21 @@ export function EstimateList({ onOpen }: EstimateListProps) {
                   ) : (
                     "—"
                   )}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
+                </DsTableCell>
+                <DsTableCell className="text-right tabular-nums">
                   {item.nodesCount}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
+                </DsTableCell>
+                <DsTableCell className="text-muted-foreground">
                   {formatDate(item.createdAt)}
-                </TableCell>
-                <TableCell>
+                </DsTableCell>
+                <DsTableCell>
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <button
                         type="button"
                         aria-label={`Удалить ${item.filename}`}
                         className="rounded-sm p-1 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+                        onClick={(event) => event.stopPropagation()}
                       >
                         <Trash2 className="size-4 text-destructive" />
                       </button>
@@ -241,12 +250,12 @@ export function EstimateList({ onOpen }: EstimateListProps) {
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
-                </TableCell>
-              </TableRow>
+                </DsTableCell>
+              </DsTableRow>
             )
           })}
-        </TableBody>
-      </Table>
+        </DsTableBody>
+      </DsTable>
       {items.length < total && (
         <div className="pt-3">
           <Button

@@ -13,8 +13,8 @@ export function EstimatesPage() {
   async function handleFile(file: File) {
     setUploadingName(file.name)
     try {
-      const { id, anomalies, outlineOverrides } = await uploadEstimate(file)
-      navigate(`/estimates/${id}`, { state: { anomalies, outlineOverrides } })
+      const { id } = await uploadEstimate(file)
+      navigate(`/estimates/${id}`)
     } catch (err) {
       console.error(err)
       toast.error(

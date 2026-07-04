@@ -44,6 +44,27 @@ interface DetailDto {
   completed_at?: string | null
   is_reference?: boolean
   rows: RowDto[]
+  // опциональны защитно: старый бэк (до персиста аномалий, этап 3) их не присылал
+  anomalies?: AnomalyDto[]
+  outline_overrides?: number
+}
+
+interface AnomalyDto {
+  kind: string
+  source_index: number
+  code: string
+  name: string
+  detail: string
+}
+
+function anomalyFromDto(a: AnomalyDto): StructuralAnomaly {
+  return {
+    kind: a.kind,
+    sourceIndex: a.source_index,
+    code: a.code,
+    name: a.name,
+    detail: a.detail,
+  }
 }
 
 interface CreateDto {
@@ -51,13 +72,7 @@ interface CreateDto {
   status: string
   // Опциональны: старый бэк (до фичи структурных аномалий) их не присылает —
   // ниже читаются защитно (`?? []` / `?? 0`).
-  anomalies?: {
-    kind: string
-    source_index: number
-    code: string
-    name: string
-    detail: string
-  }[]
+  anomalies?: AnomalyDto[]
   outline_overrides?: number
 }
 
@@ -117,6 +132,8 @@ export interface EstimateDetail {
   completedAt: string | null // ISO
   isReference: boolean
   rows: MatchRow[]
+  anomalies: StructuralAnomaly[]
+  outlineOverrides: number
 }
 
 export async function getEstimate(id: number): Promise<EstimateDetail> {
@@ -129,6 +146,8 @@ export async function getEstimate(id: number): Promise<EstimateDetail> {
     completedAt: dto.completed_at ?? null,
     isReference: dto.is_reference ?? false,
     rows: dto.rows.map((r) => rowFromDto(r)),
+    anomalies: (dto.anomalies ?? []).map(anomalyFromDto),
+    outlineOverrides: dto.outline_overrides ?? 0,
   }
 }
 
@@ -148,13 +167,7 @@ export async function uploadEstimate(file: File): Promise<UploadResult> {
   const dto = await apiUpload<CreateDto>("/estimates", file)
   return {
     id: dto.id,
-    anomalies: (dto.anomalies ?? []).map((a) => ({
-      kind: a.kind,
-      sourceIndex: a.source_index,
-      code: a.code,
-      name: a.name,
-      detail: a.detail,
-    })),
+    anomalies: (dto.anomalies ?? []).map(anomalyFromDto),
     outlineOverrides: dto.outline_overrides ?? 0,
   }
 }

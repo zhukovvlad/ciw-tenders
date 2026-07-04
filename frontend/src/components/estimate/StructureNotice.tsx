@@ -6,18 +6,19 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+  DsTable,
+  DsTableBody,
+  DsTableCell,
+  DsTableHead,
+  DsTableHeader,
+  DsTableRow,
+} from "@/components/common/ds-table"
 import type { StructuralAnomaly } from "@/lib/types"
+import { pluralizeRu } from "@/lib/plural"
 
-// Блок «Структура сметы» — транзиентная справка по результату загрузки.
-// Показывается на фазе review над ReviewScreen, не персистируется в session:
-// при перезагрузке страницы данные теряются (осознанное ограничение Task 7).
+// Блок «Структура сметы» — справка по результату парсинга. Аномалии
+// персистятся на бэке (estimates.structure_anomalies) и приходят в
+// GET /estimates/{id} — переживают F5 и прямую ссылку (этап 3 UX).
 
 export interface StructureNoticeProps {
   anomalies: StructuralAnomaly[]
@@ -35,15 +36,6 @@ function kindLabel(kind: string): string {
   return KIND_LABELS[kind] ?? kind
 }
 
-function pluralizeZamechanie(n: number): string {
-  const mod10 = n % 10
-  const mod100 = n % 100
-  if (mod10 === 1 && mod100 !== 11) return `${n} замечание`
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20))
-    return `${n} замечания`
-  return `${n} замечаний`
-}
-
 export function StructureNotice({
   anomalies,
   outlineOverrides,
@@ -55,7 +47,7 @@ export function StructureNotice({
   // Когда построчных аномалий нет (только агрегат outline) — не показываем «0 замечаний».
   const title =
     anomalies.length > 0
-      ? `Структура сметы: ${pluralizeZamechanie(anomalies.length)}`
+      ? `Структура сметы: ${anomalies.length} ${pluralizeRu(anomalies.length, ["замечание", "замечания", "замечаний"])}`
       : "Структура сметы"
 
   return (
@@ -76,35 +68,39 @@ export function StructureNotice({
 
       <CollapsibleContent className="mt-1 rounded-md border bg-background">
         {anomalies.length > 0 && (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Тип</TableHead>
-                <TableHead>Код</TableHead>
-                <TableHead>Наименование</TableHead>
-                <TableHead>Детали</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <DsTable>
+            <DsTableHeader>
+              <DsTableRow>
+                <DsTableHead>Тип</DsTableHead>
+                <DsTableHead>Код</DsTableHead>
+                <DsTableHead>Наименование</DsTableHead>
+                <DsTableHead>Детали</DsTableHead>
+              </DsTableRow>
+            </DsTableHeader>
+            <DsTableBody>
               {anomalies.map((a) => (
-                <TableRow key={`${a.sourceIndex}-${a.kind}`}>
-                  <TableCell className="text-xs whitespace-nowrap">
+                <DsTableRow key={`${a.sourceIndex}-${a.kind}`}>
+                  <DsTableCell className="text-xs whitespace-nowrap">
                     {kindLabel(a.kind)}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{a.code}</TableCell>
-                  <TableCell className="text-xs">{a.name}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  </DsTableCell>
+                  <DsTableCell className="font-mono text-xs">
+                    {a.code}
+                  </DsTableCell>
+                  <DsTableCell className="text-xs">{a.name}</DsTableCell>
+                  <DsTableCell className="text-xs text-muted-foreground">
                     {a.detail}
-                  </TableCell>
-                </TableRow>
+                  </DsTableCell>
+                </DsTableRow>
               ))}
-            </TableBody>
-          </Table>
+            </DsTableBody>
+          </DsTable>
         )}
 
         {outlineOverrides > 0 && (
           <p className="px-3 py-2 text-xs text-muted-foreground">
-            В {outlineOverrides} строк(ах) вложенность взята из группировки
+            В {outlineOverrides}{" "}
+            {pluralizeRu(outlineOverrides, ["строке", "строках", "строках"])}{" "}
+            вложенность взята из группировки
           </p>
         )}
       </CollapsibleContent>

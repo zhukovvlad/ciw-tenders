@@ -1,7 +1,6 @@
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -32,15 +31,17 @@ export function LoginScreen() {
   })
 
   async function onSubmit(values: FormValues) {
+    // автоочистка root-ошибок в RHF менялась между версиями — сбрасываем явно
+    form.clearErrors("root")
     try {
       await login(values.email, values.password)
     } catch (err) {
       const is401 = err instanceof ApiError && err.status === 401
-      toast.error(
-        is401
+      form.setError("root", {
+        message: is401
           ? "Неверный логин или пароль"
-          : "Не удалось войти, попробуйте позже"
-      )
+          : "Не удалось войти, попробуйте позже",
+      })
     }
   }
 
@@ -92,6 +93,11 @@ export function LoginScreen() {
               <Button type="submit" disabled={form.formState.isSubmitting}>
                 Войти
               </Button>
+              {form.formState.errors.root?.message && (
+                <p className="text-sm text-destructive" role="alert">
+                  {form.formState.errors.root.message}
+                </p>
+              )}
             </form>
           </Form>
         </CardContent>

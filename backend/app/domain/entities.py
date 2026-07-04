@@ -208,6 +208,8 @@ class NewEstimate:
     user_id: int
     filename: str
     original_object_key: str
+    anomalies: list[StructuralAnomaly] = field(default_factory=list)
+    outline_overrides: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,6 +252,9 @@ class Estimate:
     status_detail: str | None = None
     is_reference: bool = False  # эталонная (источник фонда) — UI гидратирует тумблер
     completed_at: datetime | None = None  # оператор закрыл ревью (этап 1 UX); None = открыта
+    # аномалии парсинга (этап 3 UX)
+    anomalies: list[StructuralAnomaly] = field(default_factory=list)
+    outline_overrides: int = 0  # агрегат outline_code_mismatch (см. StructuralAnomaly)
 
 
 @dataclass(frozen=True, slots=True)

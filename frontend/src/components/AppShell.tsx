@@ -1,5 +1,5 @@
 // frontend/src/components/AppShell.tsx
-import { ChevronDown, FileSpreadsheet, Library } from "lucide-react"
+import { ChevronDown, CircleUser, FileSpreadsheet, Library } from "lucide-react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -21,7 +21,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     : "estimate"
   return (
     <div className="min-h-svh bg-background">
-      <header className="flex items-center gap-5 border-b border-[var(--ds-hairline)] bg-[var(--ds-surface-sunken)] px-6 py-3">
+      <header className="flex items-center gap-3 border-b border-[var(--ds-hairline)] bg-[var(--ds-surface-sunken)] px-3 py-3 md:gap-5 md:px-6">
         <Link to="/estimates" className="font-display text-base">
           MR <span className="text-[var(--ds-accent-hover)]">·</span> Сметы
         </Link>
@@ -44,8 +44,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </Tabs>
         {user && (
           <DropdownMenu>
-            <DropdownMenuTrigger className="ml-auto flex items-center gap-1 rounded-sm text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">
-              {user.email}
+            <DropdownMenuTrigger
+              aria-label={user.email}
+              className="ml-auto flex items-center gap-1 rounded-sm text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              <CircleUser className="size-4 md:hidden" />
+              <span className="hidden md:inline">{user.email}</span>
               <ChevronDown className="size-3.5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
