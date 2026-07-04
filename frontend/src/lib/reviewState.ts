@@ -14,6 +14,19 @@ export function requiresDecision(row: MatchRow): boolean {
   return REVIEWABLE.includes(row.status)
 }
 
+// ЗЕРКАЛО бэкового предиката промоушена в фонд (_PROMOTABLE_REVIEW +
+// анти-накрутка, decision_fund_service.py): фонд пополняют confirmed/
+// overridden-решения оператора, КРОМЕ подтверждённых фонд-хитов (фонд не
+// рекрутируется из самого себя). При изменении правил фонда синхронизировать
+// оба места — как пару REVIEWABLE ↔ _REVIEWABLE выше.
+export function promotableCount(rows: MatchRow[]): number {
+  return rows.filter(
+    (r) =>
+      (r.review_status === "confirmed" || r.review_status === "overridden") &&
+      !(r.status === "matched_fund" && r.review_status === "confirmed")
+  ).length
+}
+
 export function initReview(fileName: string, rows: MatchRow[]): ReviewState {
   const decisions: Record<number, Decision> = {}
   for (const r of rows) {

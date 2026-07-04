@@ -3,7 +3,7 @@ import { Link } from "react-router-dom"
 import { Download } from "lucide-react"
 import { toast } from "sonner"
 import type { ReviewState } from "@/lib/types"
-import { decisionFor } from "@/lib/reviewState"
+import { decisionFor, promotableCount } from "@/lib/reviewState"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { setReference } from "@/lib/api/estimates"
@@ -34,6 +34,11 @@ export function DoneScreen({
   const noPair = state.rows.filter(
     (r) => decisionFor(state, r).kind === "no_match"
   ).length
+  const promotable = promotableCount(state.rows)
+  // 0 промоутабельных блокирует ТОЛЬКО включение — уже эталонная смета
+  // (inFund=true) обязана оставаться снимаемой всегда (unreference — законная
+  // операция независимо от текущего состава решений, см. reverse-флоу фонда)
+  const blockedByEmpty = promotable === 0 && !inFund
 
   function handleToggleFund(next: boolean) {
     if (estimateId === null) {
@@ -100,11 +105,17 @@ export function DoneScreen({
         </span>
         <Switch
           checked={inFund}
-          disabled={estimateId === null}
+          disabled={estimateId === null || blockedByEmpty}
           onCheckedChange={handleToggleFund}
           aria-label="Эталонная смета — добавить в фонд решений"
         />
       </div>
+      {blockedByEmpty && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Фонд пополняют решения, принятые оператором при проверке — подтвердите
+          или выберите статьи и вернитесь сюда.
+        </p>
+      )}
       <div className="mt-4 flex flex-col items-center gap-2">
         <Button variant="outline" size="sm" onClick={onResume}>
           Возобновить проверку

@@ -8,6 +8,7 @@ import {
   filteredRows,
   requiresDecision,
   statusLabel,
+  promotableCount,
 } from "@/lib/reviewState"
 import { MOCK_ROWS } from "@/lib/mock/fixtures"
 import type { MatchRow } from "@/lib/types"
@@ -282,5 +283,60 @@ describe("reviewState", () => {
       row: r,
     })
     expect(progress(rejected)).toEqual({ reviewed: 0, total: total0 })
+  })
+})
+
+const BASE: MatchRow = {
+  row_number: 1,
+  section_code: "1",
+  source_name: "Работа",
+  sourceIndex: 0,
+  breadcrumb: [],
+  matchError: null,
+  status: "confident",
+  score: 0.95,
+  matched_code: "01.01",
+  matched_name: "Статья",
+  matched_article_id: 7,
+  matchedBreadcrumb: [],
+  candidates: [],
+  review_status: "unreviewed",
+  final_article_id: null,
+  finalBreadcrumb: [],
+  final_code: null,
+  final_name: null,
+}
+
+describe("promotableCount — зеркало серверного предиката фонда", () => {
+  it("unreviewed confident НЕ промоутабелен (авто-уверенность ≠ решение оператора)", () => {
+    expect(promotableCount([BASE])).toBe(0)
+  })
+  it("confirmed промоутабелен", () => {
+    expect(
+      promotableCount([
+        { ...BASE, status: "needs_review", review_status: "confirmed" },
+      ])
+    ).toBe(1)
+  })
+  it("overridden промоутабелен", () => {
+    expect(
+      promotableCount([
+        { ...BASE, status: "needs_review", review_status: "overridden" },
+      ])
+    ).toBe(1)
+  })
+  it("подтверждённый фонд-хит НЕ промоутабелен (анти-накрутка)", () => {
+    expect(
+      promotableCount([
+        { ...BASE, status: "matched_fund", review_status: "confirmed" },
+      ])
+    ).toBe(0)
+  })
+  it("overridden фонд-хит промоутабелен (механика конфликтов фонда)", () => {
+    expect(
+      promotableCount([
+        { ...BASE, status: "matched_fund", review_status: "overridden" },
+      ])
+    ).toBe(1)
   })
 })

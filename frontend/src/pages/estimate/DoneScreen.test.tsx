@@ -13,11 +13,23 @@ vi.mock("@/lib/api/estimates", () => ({
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), info: vi.fn() } }))
 import { toast } from "sonner"
 
+// хотя бы одна строка с решением оператора — иначе тумблер фонда disabled
+// (promotableCount === 0) и тесты кликов по нему бессмысленны
+const ROWS_WITH_DECISION = MOCK_ROWS.map((r, i) =>
+  i === 0
+    ? {
+        ...r,
+        status: "needs_review" as const,
+        review_status: "confirmed" as const,
+      }
+    : r
+)
+
 function renderDone(props: Partial<React.ComponentProps<typeof DoneScreen>>) {
   return render(
     <MemoryRouter>
       <DoneScreen
-        state={initReview("смета.xlsx", MOCK_ROWS)}
+        state={initReview("смета.xlsx", ROWS_WITH_DECISION)}
         onExport={vi.fn()}
         onResume={vi.fn()}
         estimateId={1}
@@ -132,5 +144,45 @@ describe("DoneScreen", () => {
       await first
     })
     expect(toggle).toHaveAttribute("aria-checked", "false")
+  })
+
+  it("тумблер disabled с пояснением, когда нет решений оператора", () => {
+    renderDone({ state: initReview("смета.xlsx", MOCK_ROWS) }) // все unreviewed
+    expect(screen.getByRole("switch")).toBeDisabled()
+    expect(
+      screen.getByText(/Фонд пополняют решения, принятые оператором/)
+    ).toBeInTheDocument()
+  })
+
+  it("подтверждённые фонд-хиты не активируют тумблер (анти-накрутка)", () => {
+    const rows = MOCK_ROWS.map((r, i) =>
+      i === 0
+        ? {
+            ...r,
+            status: "matched_fund" as const,
+            review_status: "confirmed" as const,
+          }
+        : r
+    )
+    renderDone({ state: initReview("смета.xlsx", rows) })
+    expect(screen.getByRole("switch")).toBeDisabled()
+  })
+
+  it("при наличии решения оператора тумблер активен и пояснение скрыто", () => {
+    renderDone({})
+    expect(screen.getByRole("switch")).toBeEnabled()
+    expect(screen.queryByText(/Фонд пополняют решения/)).not.toBeInTheDocument()
+  })
+
+  it("эталонная смета с 0 промоутабельных: тумблер активен для выключения", () => {
+    // оператор возобновил проверку и переиграл всё в rejected — promotable=0,
+    // но смета УЖЕ в фонде (isReference=true): unreference обязана остаться
+    // доступной, disabled блокирует только ВКЛЮЧЕНИЕ, не выключение
+    renderDone({
+      state: initReview("смета.xlsx", MOCK_ROWS), // все unreviewed → promotable=0
+      isReference: true,
+    })
+    expect(screen.getByRole("switch")).toBeEnabled()
+    expect(screen.queryByText(/Фонд пополняют решения/)).not.toBeInTheDocument()
   })
 })
