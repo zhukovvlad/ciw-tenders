@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { Alert, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -140,9 +141,9 @@ export function EstimateList({ onOpen }: EstimateListProps) {
 
   if (error) {
     return (
-      <p className="text-sm text-destructive" role="alert">
-        {error}
-      </p>
+      <Alert variant="destructive" role="alert">
+        <AlertTitle>{error}</AlertTitle>
+      </Alert>
     )
   }
 

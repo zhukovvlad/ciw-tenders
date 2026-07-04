@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import type { Progress } from "@/lib/mock/api"
 import type { StructuralAnomaly } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Skeleton } from "@/components/ui/skeleton"
 import { StructureNotice } from "@/components/estimate/StructureNotice"
 import { initReview, reviewReducer } from "@/lib/reviewState"
 import type { ReviewActionKind } from "@/pages/estimate/ReviewScreen"
@@ -207,7 +208,13 @@ export function EstimatePage() {
 
   if (!Number.isInteger(id)) return <NotFound />
   if (meta.kind === "loading")
-    return <p className="p-8 text-sm text-muted-foreground">Загрузка…</p>
+    return (
+      <div className="space-y-2 p-8" aria-label="Загрузка">
+        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-9 w-full" />
+      </div>
+    )
   if (meta.kind === "processing")
     return <ProcessingScreen fileName={fileName} progress={prog} />
   if (meta.kind === "blocked" || meta.kind === "error")
