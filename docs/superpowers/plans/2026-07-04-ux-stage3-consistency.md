@@ -38,12 +38,17 @@
 
 - [ ] **Step 1: Написать падающие тесты**
 
+Тест на аномалии в `GET` обязан использовать **тот же xlsx и тот же ожидаемый `kind`**, что и соседний `test_upload_response_carries_anomalies_and_outline_overrides` (строки 231–240 того же файла) — именно этот тест уже кодирует, при какой конфигурации строк парсер считает дубль кода аномалией (в домене дубли кодов сами по себе легальны — это знание живёт в парсере, не выдумывать новую конфигурацию). Переиспользовать буквально: тот же вызов `_xlsx_rows([("1", "A", "СМР"), ("1.1", "B", None), ("1.1", "C", None)])` и тот же ассерт `any(a["kind"] == "duplicate_code" for a in ...)`.
+
 В `backend/tests/test_estimate_routes.py` после `test_upload_response_carries_anomalies_and_outline_overrides` добавить:
 
 ```python
 def test_get_estimate_returns_persisted_anomalies() -> None:
     repo, storage = FakeEstimateRepository(), FakeObjectStorage()
     client = _client(repo, storage)
+    # та же фикстура и тот же ожидаемый kind, что в
+    # test_upload_response_carries_anomalies_and_outline_overrides выше —
+    # это знание принадлежит парсеру, не дублировать своей конфигурацией
     content = _xlsx_rows([("1", "A", "СМР"), ("1.1", "B", None), ("1.1", "C", None)])
     resp = client.post("/api/estimates", files={"file": ("e.xlsx", content, _XLSX)})
     assert resp.status_code == 201
@@ -55,8 +60,12 @@ def test_get_estimate_returns_persisted_anomalies() -> None:
     assert isinstance(body["outline_overrides"], int)
 
 
-def test_get_estimate_legacy_without_anomalies_returns_empty() -> None:
-    # смета, созданная до колонок аномалий (fake сеет Estimate без них) → API отдаёт дефолты
+def test_get_estimate_defaults_anomalies_to_empty_without_upload() -> None:
+    # сущность без аномалий (сеется напрямую через фейк-репозиторий, минуя
+    # ingest) → API отдаёт пустые дефолты. НЕ проверяет NULL-ветку чтения
+    # JSONB на реальной БД (m.structure_anomalies or [] в estimate_repository) —
+    # та ветка тривиальна (or []) и глазами проверяется на живой dev-БД
+    # открытием сметы, созданной до миграции 0009 (Task 13, живой гейт).
     repo, storage = FakeEstimateRepository(), FakeObjectStorage()
     client = _client(repo, storage)
     eid = _seed_reviewed(repo)
@@ -69,7 +78,7 @@ def test_get_estimate_legacy_without_anomalies_returns_empty() -> None:
 - [ ] **Step 2: Убедиться, что тесты падают**
 
 Run: `cd backend; uv run pytest tests/test_estimate_routes.py -q`
-Expected: FAIL — `KeyError: 'anomalies'` (поля нет в ответе GET).
+Expected: FAIL — `KeyError: 'anomalies'` (поля нет в ответе GET). Если вместо этого первый тест падает на пустом `body["anomalies"]` — значит фикстура скопирована с отклонением от соседнего upload-теста; сверить дословно.
 
 - [ ] **Step 3: Домен — расширить `NewEstimate` и `Estimate`**
 
@@ -218,7 +227,7 @@ def downgrade() -> None:
 
 - [ ] **Step 9: Прогнать тесты**
 
-Run: `cd backend; uv run pytest tests/test_estimate_routes.py -q` → PASS (оба новых + все старые).
+Run: `cd backend; uv run pytest tests/test_estimate_routes.py -q` → PASS (`test_get_estimate_returns_persisted_anomalies`, `test_get_estimate_defaults_anomalies_to_empty_without_upload` + все старые).
 Run: `cd backend; uv run pytest -q` → PASS (ничего не сломано).
 Run: `cd backend; uv run ruff check .` → чисто.
 
@@ -581,7 +590,7 @@ git commit -m "feat(ux): ds-table — единый источник таблич
 
 - [ ] **Step 1: Падающий тест — hover следует кликабельности строки**
 
-В `EstimateList.test.tsx` добавить:
+Проверено: фикстура `ITEMS` в `EstimateList.test.tsx` (строки 19–34) уже содержит `ready.xlsx` (clickable) и `blocked.xlsx` (не clickable) — переиспользуется как есть. Добавить:
 
 ```tsx
   it("hover следует кликабельности: blocked-строка без cursor-pointer", async () => {
@@ -1068,6 +1077,20 @@ const ROWS_WITH_DECISION = MOCK_ROWS.map((r, i) =>
       screen.queryByText(/Фонд пополняют решения/)
     ).not.toBeInTheDocument()
   })
+
+  it("эталонная смета с 0 промоутабельных: тумблер активен для выключения", () => {
+    // оператор возобновил проверку и переиграл всё в rejected — promotable=0,
+    // но смета УЖЕ в фонде (isReference=true): unreference обязана остаться
+    // доступной, disabled блокирует только ВКЛЮЧЕНИЕ, не выключение
+    renderDone({
+      state: initReview("смета.xlsx", MOCK_ROWS), // все unreviewed → promotable=0
+      isReference: true,
+    })
+    expect(screen.getByRole("switch")).toBeEnabled()
+    expect(
+      screen.queryByText(/Фонд пополняют решения/)
+    ).not.toBeInTheDocument()
+  })
 ```
 
 Run: `cd frontend; npx vitest run src/pages/estimate/DoneScreen.test.tsx` → новые FAIL.
@@ -1078,6 +1101,10 @@ Run: `cd frontend; npx vitest run src/pages/estimate/DoneScreen.test.tsx` → н
 
 ```tsx
   const promotable = promotableCount(state.rows)
+  // 0 промоутабельных блокирует ТОЛЬКО включение — уже эталонная смета
+  // (inFund=true) обязана оставаться снимаемой всегда (unreference — законная
+  // операция независимо от текущего состава решений, см. reverse-флоу фонда)
+  const blockedByEmpty = promotable === 0 && !inFund
 ```
 
 Блок тумблера (строки 97–107):
@@ -1089,12 +1116,12 @@ Run: `cd frontend; npx vitest run src/pages/estimate/DoneScreen.test.tsx` → н
         </span>
         <Switch
           checked={inFund}
-          disabled={estimateId === null || promotable === 0}
+          disabled={estimateId === null || blockedByEmpty}
           onCheckedChange={handleToggleFund}
           aria-label="Эталонная смета — добавить в фонд решений"
         />
       </div>
-      {promotable === 0 && (
+      {blockedByEmpty && (
         <p className="mt-2 text-xs text-muted-foreground">
           Фонд пополняют решения, принятые оператором при проверке —
           подтвердите или выберите статьи и вернитесь сюда.
@@ -1227,6 +1254,19 @@ git commit -m "feat(ux): логин — инлайн root-ошибка вмес�
 
 ### Task 10: Ножки 3–4 — Alert в EstimateList, Skeleton в EstimatePage
 
+**Инвентаризация ножки 4 (спека §4: «места инвентаризирует план»)** — экраны
+загрузки данных в приложении и их текущее состояние:
+
+| Поверхность | Сейчас | Действие |
+|---|---|---|
+| `EstimateList` (список смет) | `Skeleton` уже есть | не трогать |
+| `ArticlesPage` (справочник) | `Skeleton` уже есть (`status === "loading"`, строки 100–106) | не трогать |
+| `EstimatePage` (`meta.kind === "loading"`) | голый `<p>Загрузка…</p>` | Step 2 ниже |
+| `LoginScreen` | не грузит данные асинхронно до сабмита — не применимо | — |
+| `AuthGate` (`Загрузка…` — проверка токена при старте SPA) | текстовая заглушка на весь экран, не «область контента с уже видимой структурой» — целиковый préloader SPA, вне табличных/карточных ножки 4 | вне скоупа этапа, не трогать |
+
+Единственный пробел — `EstimatePage`.
+
 **Files:**
 - Modify: `frontend/src/components/estimate/EstimateList.tsx` (ошибка загрузки)
 - Modify: `frontend/src/pages/estimate/EstimatePage.tsx` (экран «Загрузка…»)
@@ -1263,6 +1303,8 @@ git commit -m "feat(ux): логин — инлайн root-ошибка вмес�
 ```
 
 - [ ] **Step 3: Тесты зелёные**
+
+Проверено: текущий `EstimatePage.test.tsx` не матчит текст «Загрузка…» ни в одном тесте — замена на `Skeleton` никого не ломает. Если при исполнении окажется, что такой ассерт всё же появился (например, добавлен в Task 12), заменить на проверку `aria-label="Загрузка"`.
 
 Run: `cd frontend; npx vitest run src/components/estimate/EstimateList.test.tsx src/pages/estimate/EstimatePage.test.tsx` → PASS.
 
