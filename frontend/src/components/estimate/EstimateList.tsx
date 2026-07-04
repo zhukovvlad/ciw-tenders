@@ -182,16 +182,17 @@ export function EstimateList({ onOpen }: EstimateListProps) {
           {items.map((item) => {
             const meta = metaFor(item.status)
             return (
-              <DsTableRow key={item.id} interactive={meta.clickable}>
+              <DsTableRow
+                key={item.id}
+                interactive={meta.clickable}
+                className={meta.clickable ? "group" : undefined}
+                onClick={meta.clickable ? () => onOpen(item) : undefined}
+              >
                 <DsTableCell>
                   {meta.clickable ? (
-                    <button
-                      type="button"
-                      className="text-left font-medium hover:underline"
-                      onClick={() => onOpen(item)}
-                    >
+                    <span className="font-medium group-hover:underline">
                       {item.filename}
-                    </button>
+                    </span>
                   ) : (
                     <span className="font-medium text-muted-foreground">
                       {item.filename}
@@ -223,6 +224,7 @@ export function EstimateList({ onOpen }: EstimateListProps) {
                         type="button"
                         aria-label={`Удалить ${item.filename}`}
                         className="rounded-sm p-1 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+                        onClick={(event) => event.stopPropagation()}
                       >
                         <Trash2 className="size-4 text-destructive" />
                       </button>

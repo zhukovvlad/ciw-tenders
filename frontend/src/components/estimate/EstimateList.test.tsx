@@ -144,6 +144,47 @@ describe("EstimateList", () => {
     expect(screen.getByText("Завершена")).toBeInTheDocument()
   })
 
+  it("клик по любой ячейке строки (не только по имени файла) зовёт onOpen", async () => {
+    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue({
+      items: ITEMS,
+      total: ITEMS.length,
+    })
+    const onOpen = vi.fn()
+    render(<EstimateList onOpen={onOpen} />)
+    const row = (await screen.findByText("ready.xlsx")).closest("tr")!
+    // "10" — ячейка "Узлов" готовой сметы, не имя файла и не кнопка удаления
+    await userEvent.click(within(row).getByText("10"))
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(onOpen).toHaveBeenCalledWith(ITEMS[0])
+  })
+
+  it("клик по кнопке удаления не зовёт onOpen (не всплывает на строку)", async () => {
+    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue({
+      items: ITEMS,
+      total: ITEMS.length,
+    })
+    const onOpen = vi.fn()
+    render(<EstimateList onOpen={onOpen} />)
+    await screen.findByText("ready.xlsx")
+    await userEvent.click(
+      screen.getByRole("button", { name: /удалить ready\.xlsx/i })
+    )
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument()
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it("клик по ячейке blocked-строки (не по имени файла) не зовёт onOpen", async () => {
+    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue({
+      items: ITEMS,
+      total: ITEMS.length,
+    })
+    const onOpen = vi.fn()
+    render(<EstimateList onOpen={onOpen} />)
+    const row = (await screen.findByText("blocked.xlsx")).closest("tr")!
+    await userEvent.click(within(row).getByText("Отклонено"))
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
   it("hover следует кликабельности: blocked-строка без cursor-pointer", async () => {
     vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue({
       items: ITEMS,
