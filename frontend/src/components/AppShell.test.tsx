@@ -79,4 +79,11 @@ describe("AppShell", () => {
     expect(email.className).toContain("hidden")
     expect(email.className).toContain("md:inline")
   })
+
+  it("триггер меню пользователя имеет aria-label с email (accessible name ниже md)", () => {
+    mockAuth()
+    renderShell("/estimates")
+    const trigger = screen.getByRole("button", { name: /a@mr\.kz/i })
+    expect(trigger).toHaveAttribute("aria-label", "a@mr.kz")
+  })
 })
