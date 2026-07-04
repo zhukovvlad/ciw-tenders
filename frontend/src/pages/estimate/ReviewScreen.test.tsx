@@ -241,3 +241,13 @@ describe("read-only (завершённая смета)", () => {
     ).toBeInTheDocument()
   })
 })
+
+describe("зона решения", () => {
+  it("зона решения ограничена по ширине и центрирована", () => {
+    render(<Wrap rows={ROWS} />)
+    const zone = screen.getByTestId("decision-zone")
+    expect(zone.className).toContain("max-w-")
+    expect(zone.className).toContain("mx-auto")
+    expect(zone).toContainElement(screen.getByTestId("review-card"))
+  })
+})
