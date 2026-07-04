@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { Database } from "lucide-react"
 import type { Candidate, Decision, MatchRow } from "@/lib/types"
 import { searchArticles } from "@/lib/api/articles"
@@ -26,6 +26,7 @@ interface ReviewCardProps {
   onManualPick: (c: Candidate) => void // выбор из поиска
   onReject: () => void // 0 — оставить без пары
   searchDebounceMs?: number // default 250; тесты передают 0
+  contextStrip?: ReactNode // полоса окружения (спека 3.5 §3 п.2): карточка не знает о ревью-стейте
 }
 
 /** Enter активен ⇔ блок рекомендации отрисован (правило: клавиша ⇔ элемент) */
@@ -50,6 +51,7 @@ export function ReviewCard({
   onManualPick,
   onReject,
   searchDebounceMs = DEFAULT_SEARCH_DEBOUNCE_MS,
+  contextStrip,
 }: ReviewCardProps) {
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<Candidate[]>([])
@@ -111,6 +113,9 @@ export function ReviewCard({
           </span>{" "}
           <span>{row.source_name}</span>
         </div>
+
+        {/* 2b. Окружение (спека 3.5): крошка → строка → окружение → кандидаты */}
+        {contextStrip}
 
         {row.status === "error" ? (
           <Alert variant="destructive">

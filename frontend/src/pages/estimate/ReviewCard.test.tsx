@@ -204,6 +204,29 @@ describe("ReviewCard: легенда клавиш кандидатов по чи
   })
 })
 
+describe("ReviewCard: слот contextStrip", () => {
+  const r = row(11, 8, "needs_review", { candidates: [CAND] })
+
+  it("слот contextStrip рендерится между строкой работы и кандидатами", () => {
+    renderCard(r, { contextStrip: <div data-testid="strip-slot" /> })
+    const slot = screen.getByTestId("strip-slot")
+    const work = screen.getByText("Строка 11")
+    const candidate = screen.getByText("Фундаменты под оборудование")
+    // работа ПЕРЕД слотом, слот ПЕРЕД кандидатом (DOM-порядок)
+    expect(
+      work.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      slot.compareDocumentPosition(candidate) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it("без пропа contextStrip карточка рендерится как раньше", () => {
+    renderCard(r)
+    expect(screen.getByTestId("review-card")).toBeInTheDocument()
+  })
+})
+
 describe("ReviewCard: error-строка", () => {
   const err = row(7, 3, "error", {
     matched_code: null,

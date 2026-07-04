@@ -281,53 +281,53 @@ export function ReviewScreen({
           onUndo={queue.undo}
         />
       ) : (
-        <>
-          <ReviewCard
-            key={active.row_number}
-            row={active}
-            decision={decisionFor(state, active)}
-            canUndo={queue.canUndo}
-            onConfirmRecommendation={() =>
-              commit(
-                active,
-                { type: "confirmArbiter", row: active.row_number },
-                "confirm"
-              )
-            }
-            onPickCandidate={(c) =>
-              commit(
-                active,
-                {
-                  type: "pickCandidate",
-                  row: active.row_number,
-                  code: c.article_code,
-                },
-                "pick",
-                c.id ?? undefined
-              )
-            }
-            onManualPick={(c) =>
-              commit(
-                active,
-                {
-                  type: "manualPick",
-                  row: active.row_number,
-                  candidate: c,
-                },
-                "pick",
-                c.id ?? undefined
-              )
-            }
-            onReject={() =>
-              commit(
-                active,
-                { type: "confirmNoMatch", row: active.row_number },
-                "reject"
-              )
-            }
-          />
-          <ContextStrip state={state} activeRowNumber={active.row_number} />
-        </>
+        <ReviewCard
+          key={active.row_number}
+          row={active}
+          decision={decisionFor(state, active)}
+          canUndo={queue.canUndo}
+          contextStrip={
+            <ContextStrip state={state} activeRowNumber={active.row_number} />
+          }
+          onConfirmRecommendation={() =>
+            commit(
+              active,
+              { type: "confirmArbiter", row: active.row_number },
+              "confirm"
+            )
+          }
+          onPickCandidate={(c) =>
+            commit(
+              active,
+              {
+                type: "pickCandidate",
+                row: active.row_number,
+                code: c.article_code,
+              },
+              "pick",
+              c.id ?? undefined
+            )
+          }
+          onManualPick={(c) =>
+            commit(
+              active,
+              {
+                type: "manualPick",
+                row: active.row_number,
+                candidate: c,
+              },
+              "pick",
+              c.id ?? undefined
+            )
+          }
+          onReject={() =>
+            commit(
+              active,
+              { type: "confirmNoMatch", row: active.row_number },
+              "reject"
+            )
+          }
+        />
       )}
     </div>
   )

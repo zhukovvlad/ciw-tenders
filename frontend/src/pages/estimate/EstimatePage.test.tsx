@@ -198,12 +198,14 @@ describe("EstimatePage", () => {
       )
     )
     // reopen вернул решение в pending — карточка той же строки осталась
-    // активной (единственная спорная строка), а не терминальный экран
-    expect(
-      within(screen.getByTestId("review-card")).getByText(
-        ROW_NEEDS_REVIEW.source_name
-      )
-    ).toBeInTheDocument()
+    // активной (единственная спорная строка), а не терминальный экран.
+    // Полоса контекста (Task 1, спека 3.5) смонтирована внутри карточки и
+    // дублирует source_name активной строки — строки полосы несут data-row
+    // (см. ContextStrip.tsx), по нему отличаем текст работы карточки.
+    const workText = within(screen.getByTestId("review-card"))
+      .getAllByText(ROW_NEEDS_REVIEW.source_name)
+      .find((el) => !el.closest("[data-row]"))
+    expect(workText).toBeInTheDocument()
   })
 
   it("аномалии из GET показываются на экране ревью (прямой заход/F5)", async () => {

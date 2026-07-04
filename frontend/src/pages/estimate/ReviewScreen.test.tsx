@@ -13,6 +13,21 @@ import type { MatchRow, MatchStatus } from "@/lib/types"
 // имени строки ловит не карточку, а полосу (ложноположительный тест)
 const card = () => within(screen.getByTestId("review-card"))
 
+// Task 1 (спека 3.5): полоса контекста теперь смонтирована ВНУТРИ карточки
+// (слот contextStrip), а не соседом — своё окно ±2 включает активную строку,
+// поэтому её source_name дублируется внутри card(). Строки полосы несут
+// data-row (см. ContextStrip.tsx) — по нему отличаем текст работы карточки
+// от совпадения внутри полосы.
+function workText(name: string): HTMLElement {
+  const match = card()
+    .getAllByText(name)
+    .find((el) => !el.closest("[data-row]"))
+  if (!match) {
+    throw new Error(`текст работы карточки "${name}" не найден`)
+  }
+  return match
+}
+
 vi.mock("@/lib/api/articles", () => ({
   searchArticles: vi.fn().mockResolvedValue([]),
 }))
@@ -107,7 +122,7 @@ const ROWS: MatchRow[] = [
 describe("режимы", () => {
   it("дефолт — очередь: карточка первой спорной", () => {
     render(<Wrap rows={ROWS} />)
-    expect(card().getByText("Спорная А")).toBeInTheDocument()
+    expect(workText("Спорная А")).toBeInTheDocument()
     // это карточка, а не таблица: у грида роль table
     expect(screen.queryByRole("table")).not.toBeInTheDocument()
   })
@@ -129,9 +144,7 @@ describe("поток очереди", () => {
     render(<Wrap rows={ROWS} onReview={onReview} />)
     await userEvent.keyboard("{Enter}")
     expect(onReview).toHaveBeenCalledWith(3, "confirm", undefined)
-    await waitFor(() =>
-      expect(card().getByText("Спорная Б")).toBeInTheDocument()
-    )
+    await waitFor(() => expect(workText("Спорная Б")).toBeInTheDocument())
   })
 
   it("0 — без пары; ← возвращает к решённой", async () => {
@@ -140,7 +153,7 @@ describe("поток очереди", () => {
     await userEvent.keyboard("0")
     expect(onReview).toHaveBeenCalledWith(3, "reject", undefined)
     await userEvent.keyboard("{ArrowLeft}")
-    expect(card().getByText("Спорная А")).toBeInTheDocument()
+    expect(workText("Спорная А")).toBeInTheDocument()
   })
 
   it("ошибка PATCH: строка в голову очереди — СЛЕДУЮЩЕЙ, активную не выдёргивает", async () => {
@@ -152,12 +165,10 @@ describe("поток очереди", () => {
     await userEvent.keyboard("{Enter}") // Спорная А → упало (async), активной стала Б
     // даже ПОСЛЕ отработки фейла активная остаётся Б (пин; страж stale closure)
     await waitFor(() => expect(onReview).toHaveBeenCalledTimes(1))
-    expect(card().getByText("Спорная Б")).toBeInTheDocument()
+    expect(workText("Спорная Б")).toBeInTheDocument()
     await userEvent.keyboard("{Enter}") // решаем Б
     // Спорная А вернулась в голову — теперь активна она
-    await waitFor(() =>
-      expect(card().getByText("Спорная А")).toBeInTheDocument()
-    )
+    await waitFor(() => expect(workText("Спорная А")).toBeInTheDocument())
   })
 
   it("пустая очередь — терминальный экран", () => {
@@ -180,7 +191,7 @@ describe("поток очереди", () => {
     await userEvent.click(
       screen.getByRole("button", { name: /вернуться к последнему решению/i })
     )
-    expect(card().getByText("Единственная")).toBeInTheDocument()
+    expect(workText("Единственная")).toBeInTheDocument()
   })
 })
 
@@ -192,9 +203,7 @@ describe("сброс состояния карточки между строка
     await userEvent.type(input, "штукатурка")
     expect(input).toHaveValue("штукатурка")
     await userEvent.click(card().getByRole("button", { name: /без пары/i }))
-    await waitFor(() =>
-      expect(card().getByText("Спорная Б")).toBeInTheDocument()
-    )
+    await waitFor(() => expect(workText("Спорная Б")).toBeInTheDocument())
     expect(card().getByPlaceholderText(/искать в справочнике/i)).toHaveValue("")
   })
 })
@@ -204,9 +213,9 @@ describe("грид ↔ очередь", () => {
     render(<Wrap rows={ROWS} url="/estimates/5?view=grid" />)
     await userEvent.click(screen.getByText("Уверенная"))
     expect(screen.queryByRole("table")).not.toBeInTheDocument()
-    // карточка ИМЕННО уверенной строки (перерешение) — скоуп обязателен,
-    // «Уверенная» есть и в полосе контекста
-    expect(card().getByText("Уверенная")).toBeInTheDocument()
+    // карточка ИМЕННО уверенной строки (перерешение) — «Уверенная» есть и в
+    // полосе контекста, поэтому различаем по data-row (см. workText)
+    expect(workText("Уверенная")).toBeInTheDocument()
   })
 
   it("возврат в очередь табом после клика из грида — поток, а не старая карточка", async () => {
@@ -215,7 +224,7 @@ describe("грид ↔ очередь", () => {
     await userEvent.click(screen.getByRole("tab", { name: /таблица/i })) // ушли в грид табом
     await userEvent.click(screen.getByRole("tab", { name: /очередь/i })) // вернулись
     // явный выбор сброшен (deselect при уходе в грид) — активна первая спорная
-    expect(card().getByText("Спорная А")).toBeInTheDocument()
+    expect(workText("Спорная А")).toBeInTheDocument()
   })
 })
 

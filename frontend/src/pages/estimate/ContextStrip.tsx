@@ -32,7 +32,7 @@ export function ContextStrip({
   if (i === -1) return null
   const win = ordered.slice(Math.max(0, i - WINDOW), i + WINDOW + 1)
   return (
-    <div className={cn("mt-3 rounded-md border text-xs", dsHairline)}>
+    <div className={cn("rounded-md border text-xs", dsHairline)}>
       {win.map((r, j) => {
         const boundary = j > 0 && topSection(win[j - 1]) !== topSection(r)
         const muted = r.status === "excluded" || r.status === "pending"
