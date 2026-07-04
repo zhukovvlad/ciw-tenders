@@ -185,14 +185,20 @@ export function EstimateList({ onOpen }: EstimateListProps) {
               <DsTableRow
                 key={item.id}
                 interactive={meta.clickable}
-                className={meta.clickable ? "group" : undefined}
                 onClick={meta.clickable ? () => onOpen(item) : undefined}
               >
                 <DsTableCell>
                   {meta.clickable ? (
-                    <span className="font-medium group-hover:underline">
+                    <button
+                      type="button"
+                      className="font-medium hover:underline"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onOpen(item)
+                      }}
+                    >
                       {item.filename}
-                    </span>
+                    </button>
                   ) : (
                     <span className="font-medium text-muted-foreground">
                       {item.filename}

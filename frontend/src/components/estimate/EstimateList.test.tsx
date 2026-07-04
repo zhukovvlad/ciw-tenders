@@ -73,7 +73,7 @@ describe("EstimateList", () => {
     expect(screen.getByText("Отклонено")).toBeInTheDocument()
   })
 
-  it("клик по готовой смете зовёт onOpen с item", async () => {
+  it("клик по готовой смете зовёт onOpen с item (без двойного вызова)", async () => {
     vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue({
       items: ITEMS,
       total: ITEMS.length,
@@ -81,6 +81,22 @@ describe("EstimateList", () => {
     const onOpen = vi.fn()
     render(<EstimateList onOpen={onOpen} />)
     await userEvent.click(await screen.findByText("ready.xlsx"))
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(onOpen).toHaveBeenCalledWith(ITEMS[0])
+  })
+
+  it("имя файла — фокусируемая кнопка: Tab+Enter зовёт onOpen (клавиатурная доступность)", async () => {
+    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue({
+      items: ITEMS,
+      total: ITEMS.length,
+    })
+    const onOpen = vi.fn()
+    render(<EstimateList onOpen={onOpen} />)
+    const button = await screen.findByRole("button", { name: "ready.xlsx" })
+    button.focus()
+    expect(button).toHaveFocus()
+    await userEvent.keyboard("{Enter}")
+    expect(onOpen).toHaveBeenCalledTimes(1)
     expect(onOpen).toHaveBeenCalledWith(ITEMS[0])
   })
 
