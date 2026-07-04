@@ -48,7 +48,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-label={user.email}
               className="ml-auto flex items-center gap-1 rounded-sm text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
             >
-              <CircleUser className="size-4 md:hidden" />
+              <CircleUser aria-hidden="true" className="size-4 md:hidden" />
               <span className="hidden md:inline">{user.email}</span>
               <ChevronDown className="size-3.5" />
             </DropdownMenuTrigger>
