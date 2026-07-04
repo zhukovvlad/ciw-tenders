@@ -6,13 +6,13 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+  DsTable,
+  DsTableBody,
+  DsTableCell,
+  DsTableHead,
+  DsTableHeader,
+  DsTableRow,
+} from "@/components/common/ds-table"
 import type { StructuralAnomaly } from "@/lib/types"
 import { pluralizeRu } from "@/lib/plural"
 
@@ -68,30 +68,32 @@ export function StructureNotice({
 
       <CollapsibleContent className="mt-1 rounded-md border bg-background">
         {anomalies.length > 0 && (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Тип</TableHead>
-                <TableHead>Код</TableHead>
-                <TableHead>Наименование</TableHead>
-                <TableHead>Детали</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <DsTable>
+            <DsTableHeader>
+              <DsTableRow>
+                <DsTableHead>Тип</DsTableHead>
+                <DsTableHead>Код</DsTableHead>
+                <DsTableHead>Наименование</DsTableHead>
+                <DsTableHead>Детали</DsTableHead>
+              </DsTableRow>
+            </DsTableHeader>
+            <DsTableBody>
               {anomalies.map((a) => (
-                <TableRow key={`${a.sourceIndex}-${a.kind}`}>
-                  <TableCell className="text-xs whitespace-nowrap">
+                <DsTableRow key={`${a.sourceIndex}-${a.kind}`}>
+                  <DsTableCell className="text-xs whitespace-nowrap">
                     {kindLabel(a.kind)}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{a.code}</TableCell>
-                  <TableCell className="text-xs">{a.name}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  </DsTableCell>
+                  <DsTableCell className="font-mono text-xs">
+                    {a.code}
+                  </DsTableCell>
+                  <DsTableCell className="text-xs">{a.name}</DsTableCell>
+                  <DsTableCell className="text-xs text-muted-foreground">
                     {a.detail}
-                  </TableCell>
-                </TableRow>
+                  </DsTableCell>
+                </DsTableRow>
               ))}
-            </TableBody>
-          </Table>
+            </DsTableBody>
+          </DsTable>
         )}
 
         {outlineOverrides > 0 && (

@@ -144,6 +144,19 @@ describe("EstimateList", () => {
     expect(screen.getByText("Завершена")).toBeInTheDocument()
   })
 
+  it("hover следует кликабельности: blocked-строка без cursor-pointer", async () => {
+    vi.spyOn(estimatesApi, "listEstimates").mockResolvedValue({
+      items: ITEMS,
+      total: ITEMS.length,
+    })
+    render(<EstimateList onOpen={vi.fn()} />)
+    const readyRow = (await screen.findByText("ready.xlsx")).closest("tr")!
+    const blockedRow = screen.getByText("blocked.xlsx").closest("tr")!
+    expect(readyRow.className).toContain("cursor-pointer")
+    expect(blockedRow.className).not.toContain("cursor-pointer")
+    expect(blockedRow.className).toContain("hover:bg-transparent")
+  })
+
   it("«Показать ещё» дозагружает следующую страницу", async () => {
     vi.spyOn(estimatesApi, "listEstimates")
       .mockResolvedValueOnce({ items: [{ ...ITEM, id: 1 }], total: 2 })
