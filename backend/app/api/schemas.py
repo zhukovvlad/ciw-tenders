@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import asdict
 from datetime import datetime
 from typing import Literal
 
@@ -250,6 +251,8 @@ class EstimateDetailOut(BaseModel):
     is_reference: bool = False
     completed_at: datetime | None = None
     rows: list[EstimateRowOut]
+    anomalies: list[StructuralAnomalyOut] = []
+    outline_overrides: int = 0
 
     @classmethod
     def from_entity(
@@ -268,6 +271,8 @@ class EstimateDetailOut(BaseModel):
             id=e.id, filename=e.filename, status=e.status, status_detail=e.status_detail,
             created_at=e.created_at, is_reference=e.is_reference, completed_at=e.completed_at,
             rows=rows,
+            anomalies=[StructuralAnomalyOut(**asdict(a)) for a in e.anomalies],
+            outline_overrides=e.outline_overrides,
         )
 
 

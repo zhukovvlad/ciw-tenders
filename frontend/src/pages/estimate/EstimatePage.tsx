@@ -2,11 +2,12 @@
 // Единственный владелец маппинга статус→экран (спека §3). Кэша ревью нет:
 // источник истины — GET /estimates/:id + ответы PATCH.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
-import { Link, useLocation, useParams, useSearchParams } from "react-router-dom"
+import { Link, useParams, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import type { Progress } from "@/lib/mock/api"
 import type { StructuralAnomaly } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Skeleton } from "@/components/ui/skeleton"
 import { StructureNotice } from "@/components/estimate/StructureNotice"
 import { initReview, reviewReducer } from "@/lib/reviewState"
 import type { ReviewActionKind } from "@/pages/estimate/ReviewScreen"
@@ -43,14 +44,11 @@ function isAbortError(err: unknown): boolean {
 export function EstimatePage() {
   const params = useParams()
   const id = Number(params.id)
-  const location = useLocation()
   const [searchParams] = useSearchParams()
-  // Транзиентная справка по аномалиям: приходит только через navigate-state
-  // при свежей загрузке; при прямом заходе по URL её нет (спека §5, этап 3).
-  const notice = (location.state ?? {
+  const [notice, setNotice] = useState<NoticeState>({
     anomalies: [],
     outlineOverrides: 0,
-  }) as NoticeState
+  })
 
   const [meta, setMeta] = useState<Meta>({ kind: "loading" })
   const [fileName, setFileName] = useState("")
@@ -80,6 +78,13 @@ export function EstimatePage() {
       if (signal.aborted) return
       setFileName(detail.fileName)
       setIsReference(detail.isReference)
+      // аномалии структуры персистятся на бэке и приходят в первичном GET
+      // (парсинг синхронен в POST — они в БД до навигации, спека этапа 3 §7);
+      // state переживает переход processing→open без ре-фетча
+      setNotice({
+        anomalies: detail.anomalies,
+        outlineOverrides: detail.outlineOverrides,
+      })
       if (detail.status === "blocked") {
         setMeta({ kind: "blocked", detail: detail.statusDetail })
         return
@@ -207,7 +212,13 @@ export function EstimatePage() {
 
   if (!Number.isInteger(id)) return <NotFound />
   if (meta.kind === "loading")
-    return <p className="p-8 text-sm text-muted-foreground">Загрузка…</p>
+    return (
+      <div className="space-y-2 p-8" aria-label="Загрузка">
+        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-9 w-full" />
+      </div>
+    )
   if (meta.kind === "processing")
     return <ProcessingScreen fileName={fileName} progress={prog} />
   if (meta.kind === "blocked" || meta.kind === "error")

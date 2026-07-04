@@ -13,6 +13,7 @@ import { Dropzone } from "@/components/Dropzone"
 import { ApiError } from "@/lib/api/client"
 import { importTemplate } from "@/lib/api/articles"
 import type { ImportReport } from "@/lib/types"
+import { pluralizeRu } from "@/lib/plural"
 
 export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
   const [file, setFile] = useState<File | null>(null)
@@ -119,7 +120,7 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
                 <span>
                   {conflict && !preview.force_required
                     ? "Состояние справочника изменилось с момента превью — для применения нужен принудительный режим."
-                    : `Импорт удалит ${preview.deleted} строк (снос корня или большой доли). Это необратимо.`}
+                    : `Импорт удалит ${preview.deleted} ${pluralizeRu(preview.deleted, ["строку", "строки", "строк"])} (снос корня или большой доли). Это необратимо.`}
                 </span>
                 <div className="mt-1 flex items-center gap-2 text-xs">
                   <Checkbox

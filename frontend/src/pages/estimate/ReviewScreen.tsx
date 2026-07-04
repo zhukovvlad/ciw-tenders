@@ -23,6 +23,7 @@ import { ReviewGrid } from "@/pages/estimate/ReviewGrid"
 import { QueueDone } from "@/pages/estimate/QueueDone"
 import { useReviewQueue } from "@/lib/useReviewQueue"
 import { useReviewKeyboard } from "@/lib/useReviewKeyboard"
+import { pluralizeRu } from "@/lib/plural"
 
 export type ReviewActionKind = "confirm" | "pick" | "reject"
 
@@ -234,8 +235,13 @@ export function ReviewScreen({
                       Остались нерешённые строки
                     </AlertDialogTitle>
                     <AlertDialogDescription>
-                      Осталось {pending} спорных строк без решения. Завершить
-                      проверку всё равно? Возобновить можно в любой момент.
+                      Без решения — {pending}{" "}
+                      {pluralizeRu(pending, [
+                        "спорная строка",
+                        "спорные строки",
+                        "спорных строк",
+                      ])}
+                      . Завершить всё равно? Возобновить можно в любой момент.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>

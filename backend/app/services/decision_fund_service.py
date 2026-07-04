@@ -13,6 +13,9 @@ from app.domain.ports import DecisionFundRepository, EstimateRepository
 
 logger = logging.getLogger(__name__)
 
+# ЗЕРКАЛО на фронте: promotableCount() в frontend/src/lib/reviewState.ts
+# (включая анти-накрутку matched_fund+confirmed ниже) — при изменении правил
+# синхронизировать оба места.
 _PROMOTABLE_REVIEW = {"confirmed", "overridden"}
 
 

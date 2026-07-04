@@ -58,6 +58,16 @@ const READY = {
   completedAt: null,
   isReference: false,
   rows: [ROW_NEEDS_REVIEW],
+  anomalies: [],
+  outlineOverrides: 0,
+}
+
+const DUP_ANOMALY = {
+  kind: "duplicate_code",
+  sourceIndex: 2,
+  code: "1.1",
+  name: "B",
+  detail: "код встречается 2 раза",
 }
 
 describe("EstimatePage", () => {
@@ -194,5 +204,35 @@ describe("EstimatePage", () => {
         ROW_NEEDS_REVIEW.source_name
       )
     ).toBeInTheDocument()
+  })
+
+  it("аномалии из GET показываются на экране ревью (прямой заход/F5)", async () => {
+    vi.mocked(getEstimate).mockResolvedValue({
+      ...READY,
+      anomalies: [DUP_ANOMALY],
+    })
+    renderAt(5)
+    expect(
+      await screen.findByText(/структура сметы.*1 замечание/i)
+    ).toBeInTheDocument()
+  })
+
+  it("upload → processing → ready: notice виден после полла (спека §7)", async () => {
+    // парсинг синхронен в POST — аномалии уже в первичном GET при status=pending
+    vi.mocked(getEstimate).mockResolvedValue({
+      ...READY,
+      status: "pending",
+      rows: [],
+      anomalies: [DUP_ANOMALY],
+    })
+    vi.mocked(pollEstimate).mockResolvedValue({
+      fileName: "a.xlsx",
+      rows: [ROW_NEEDS_REVIEW],
+    })
+    renderAt(5)
+    expect(
+      await screen.findByText(/структура сметы.*1 замечание/i)
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Выгрузить Excel/)).toBeInTheDocument()
   })
 })

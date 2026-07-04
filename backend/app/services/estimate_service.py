@@ -40,7 +40,13 @@ class EstimateService:
         key = f"estimates/{uuid.uuid4().hex}/{filename}"
         self._storage.put(key, content, _XLSX_CONTENT_TYPE)  # падение → проброс, БД не тронута
         estimate = self._repository.create(
-            NewEstimate(user_id=owner_id, filename=filename, original_object_key=key),
+            NewEstimate(
+                user_id=owner_id,
+                filename=filename,
+                original_object_key=key,
+                anomalies=parsed.anomalies,
+                outline_overrides=parsed.outline_overrides,
+            ),
             parsed.nodes,
         )
         try:

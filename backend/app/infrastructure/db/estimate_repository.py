@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import asdict
 from datetime import UTC, datetime
 
 from sqlalchemy import and_, bindparam, case, delete, func, or_, select, text, update
@@ -25,6 +26,7 @@ from app.domain.entities import (
     PendingNode,
     PromotableRow,
     StoredEstimateRow,
+    StructuralAnomaly,
 )
 from app.domain.errors import EstimateNotCompletableError
 from app.domain.ports import EstimateRepository
@@ -86,6 +88,17 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             status_detail=m.status_detail,
             is_reference=m.is_reference,
             completed_at=m.completed_at,
+            anomalies=[
+                StructuralAnomaly(
+                    kind=a.get("kind", ""),
+                    source_index=a.get("source_index", 0),
+                    code=a.get("code", ""),
+                    name=a.get("name", ""),
+                    detail=a.get("detail", ""),
+                )
+                for a in (m.structure_anomalies or [])
+            ],
+            outline_overrides=m.outline_overrides,
         )
 
     def create(self, new: NewEstimate, nodes: list[EstimateNode]) -> Estimate:
@@ -95,6 +108,8 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
                 filename=new.filename,
                 original_object_key=new.original_object_key,
                 status="pending",
+                structure_anomalies=[asdict(a) for a in new.anomalies],
+                outline_overrides=new.outline_overrides,
             )
             self._session.add(est)
             self._session.flush()  # получить est.id

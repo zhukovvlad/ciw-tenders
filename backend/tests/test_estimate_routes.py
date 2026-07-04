@@ -240,6 +240,38 @@ def test_upload_response_carries_anomalies_and_outline_overrides() -> None:
     assert "outline_overrides" in body
 
 
+def test_get_estimate_returns_persisted_anomalies() -> None:
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    client = _client(repo, storage)
+    # та же фикстура и тот же ожидаемый kind, что в
+    # test_upload_response_carries_anomalies_and_outline_overrides выше —
+    # это знание принадлежит парсеру, не дублировать своей конфигурацией
+    content = _xlsx_rows([("1", "A", "СМР"), ("1.1", "B", None), ("1.1", "C", None)])
+    resp = client.post("/api/estimates", files={"file": ("e.xlsx", content, _XLSX)})
+    assert resp.status_code == 201
+    eid = resp.json()["id"]
+    detail = client.get(f"/api/estimates/{eid}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert any(a["kind"] == "duplicate_code" for a in body["anomalies"])
+    assert isinstance(body["outline_overrides"], int)
+
+
+def test_get_estimate_defaults_anomalies_to_empty_without_upload() -> None:
+    # сущность без аномалий (сеется напрямую через фейк-репозиторий, минуя
+    # ingest) → API отдаёт пустые дефолты. НЕ проверяет NULL-ветку чтения
+    # JSONB на реальной БД (m.structure_anomalies or [] в estimate_repository) —
+    # та ветка тривиальна (or []) и глазами проверяется на живой dev-БД
+    # открытием сметы, созданной до миграции 0009 (Task 13, живой гейт).
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    client = _client(repo, storage)
+    eid = _seed_reviewed(repo)
+    detail = client.get(f"/api/estimates/{eid}")
+    assert detail.status_code == 200
+    assert detail.json()["anomalies"] == []
+    assert detail.json()["outline_overrides"] == 0
+
+
 def test_toggle_reference_promotes_and_sets_flag() -> None:
     repo, storage = FakeEstimateRepository(), FakeObjectStorage()
     fund = FakeDecisionFundRepository()

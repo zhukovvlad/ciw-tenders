@@ -10,6 +10,12 @@ import {
   statusLabel,
 } from "@/lib/reviewState"
 import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
+import {
+  dsHairline,
+  dsHeadCellClass,
+  dsHeadRowClass,
+} from "@/components/common/ds-table"
 
 const ROW_H = 64
 const GRID_COLS = "grid-cols-[100px_1fr_1fr_80px_160px]"
@@ -125,112 +131,128 @@ export function ReviewGrid({
         className="relative h-[calc(100vh-184px)] overflow-auto"
         role="table"
       >
-        <div
-          role="row"
-          className={
-            "sticky top-0 z-10 grid items-center bg-[var(--ds-surface-sunken)] px-4 py-2.5 text-left text-xs tracking-wide text-muted-foreground uppercase " +
-            GRID_COLS
-          }
-        >
-          <div role="columnheader">№ раздела</div>
-          <div role="columnheader">Работа из сметы</div>
-          <div role="columnheader">Статья справочника СМР</div>
-          <div role="columnheader" className="text-right">
-            Score
+        <div className="min-w-[720px]">
+          <div
+            role="row"
+            className={cn(
+              "sticky top-0 z-10 grid items-center text-left",
+              dsHeadRowClass,
+              dsHeadCellClass,
+              GRID_COLS
+            )}
+          >
+            <div role="columnheader">№ раздела</div>
+            <div role="columnheader">Работа из сметы</div>
+            <div role="columnheader">Статья справочника СМР</div>
+            <div role="columnheader" className="text-right">
+              Score
+            </div>
+            <div role="columnheader">Статус</div>
           </div>
-          <div role="columnheader">Статус</div>
-        </div>
-        <div
-          style={{ height: virtualizer.getTotalSize(), position: "relative" }}
-        >
-          {virtualizer.getVirtualItems().map((vi) => {
-            const r = rows[vi.index]
-            const decision = decisionFor(state, r)
-            const contextRow = r.status === "excluded" || r.status === "pending"
-            const clickable =
-              onOpenRow !== undefined &&
-              r.status !== "excluded" &&
-              r.status !== "pending"
-            // warning-рамка слева: только реально спорные строки (как в
-            // старом ReviewRow) — requiresDecision уже исключает
-            // excluded/pending, поэтому не пересекается с contextRow
-            const flagged = requiresDecision(r)
-            const label = statusLabel(r, decision)
-            const chosenCode =
-              decision.kind === "confirmed" ? decision.code : r.matched_code
+          <div
+            style={{
+              height: virtualizer.getTotalSize(),
+              position: "relative",
+            }}
+          >
+            {virtualizer.getVirtualItems().map((vi) => {
+              const r = rows[vi.index]
+              const decision = decisionFor(state, r)
+              const contextRow =
+                r.status === "excluded" || r.status === "pending"
+              const clickable =
+                onOpenRow !== undefined &&
+                r.status !== "excluded" &&
+                r.status !== "pending"
+              // warning-рамка слева: только реально спорные строки (как в
+              // старом ReviewRow) — requiresDecision уже исключает
+              // excluded/pending, поэтому не пересекается с contextRow
+              const flagged = requiresDecision(r)
+              const label = statusLabel(r, decision)
+              const chosenCode =
+                decision.kind === "confirmed" ? decision.code : r.matched_code
 
-            return (
-              <div
-                key={r.row_number}
-                role="row"
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  height: ROW_H,
-                  transform: `translateY(${vi.start}px)`,
-                }}
-                onClick={clickable ? () => onOpenRow(r.row_number) : undefined}
-                className={
-                  "grid items-center border-b border-[var(--ds-hairline)] px-4 text-sm " +
-                  GRID_COLS +
-                  (clickable ? " cursor-pointer" : "") +
-                  (flagged ? " border-l-2 border-l-[var(--warning)]" : "") +
-                  (contextRow ? " opacity-60" : "")
-                }
-              >
-                <div role="cell" className="font-mono text-muted-foreground">
-                  {r.section_code}
-                </div>
+              return (
                 <div
-                  role="cell"
-                  className="line-clamp-2 text-[var(--ds-text-2)]"
-                >
-                  {r.source_name}
-                </div>
-                <div role="cell">
-                  {contextRow ? (
-                    <span className="text-muted-foreground">—</span>
-                  ) : decision.kind === "no_match" ||
-                    r.status === "no_match" ? (
-                    <span className="text-muted-foreground">— без пары —</span>
-                  ) : (
-                    <span>
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {chosenCode}
-                      </span>{" "}
-                      {decision.kind === "confirmed"
-                        ? decision.name
-                        : r.matched_name}
-                    </span>
+                  key={r.row_number}
+                  role="row"
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: ROW_H,
+                    transform: `translateY(${vi.start}px)`,
+                  }}
+                  onClick={
+                    clickable ? () => onOpenRow(r.row_number) : undefined
+                  }
+                  className={cn(
+                    "grid items-center border-b px-4 text-sm",
+                    dsHairline,
+                    GRID_COLS,
+                    clickable && "cursor-pointer hover:bg-muted/50",
+                    flagged && "border-l-2 border-l-[var(--warning)]",
+                    contextRow && "opacity-60"
                   )}
-                </div>
-                <div
-                  role="cell"
-                  className="text-right font-mono text-xs text-muted-foreground"
                 >
-                  {r.status !== "no_match" &&
-                  r.status !== "matched_fund" &&
-                  !contextRow
-                    ? r.score.toFixed(2)
-                    : ""}
+                  <div role="cell" className="font-mono text-muted-foreground">
+                    {r.section_code}
+                  </div>
+                  <div
+                    role="cell"
+                    className="line-clamp-2 text-[var(--ds-text-2)]"
+                  >
+                    {r.source_name}
+                  </div>
+                  <div role="cell">
+                    {contextRow ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : decision.kind === "no_match" ||
+                      r.status === "no_match" ? (
+                      <span className="text-muted-foreground">
+                        — без пары —
+                      </span>
+                    ) : (
+                      <span>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {chosenCode}
+                        </span>{" "}
+                        {decision.kind === "confirmed"
+                          ? decision.name
+                          : r.matched_name}
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    role="cell"
+                    className="text-right font-mono text-xs text-muted-foreground"
+                  >
+                    {r.status !== "no_match" &&
+                    r.status !== "matched_fund" &&
+                    !contextRow
+                      ? r.score.toFixed(2)
+                      : ""}
+                  </div>
+                  <div
+                    role="cell"
+                    className={"text-sm " + statusTone[r.status]}
+                  >
+                    {contextRow ? (
+                      <Badge variant="outline">{label}</Badge>
+                    ) : (
+                      <>
+                        {label === "Из фонда" && (
+                          <Database className="mr-1 inline size-3" />
+                        )}
+                        {label}
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div role="cell" className={"text-sm " + statusTone[r.status]}>
-                  {contextRow ? (
-                    <Badge variant="outline">{label}</Badge>
-                  ) : (
-                    <>
-                      {label === "Из фонда" && (
-                        <Database className="mr-1 inline size-3" />
-                      )}
-                      {label}
-                    </>
-                  )}
-                </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
       </div>
     </div>
