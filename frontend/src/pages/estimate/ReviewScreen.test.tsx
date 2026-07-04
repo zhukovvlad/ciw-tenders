@@ -251,3 +251,29 @@ describe("зона решения", () => {
     expect(zone).toContainElement(screen.getByTestId("review-card"))
   })
 })
+
+describe("кнопка «Завершить»", () => {
+  it("«Завершить» приглушена при нерешённых, primary при pending === 0", () => {
+    // Экран с 2 нерешёнными спорными строками (ROWS)
+    render(<Wrap rows={ROWS} />)
+    // Ищем кнопку триггер (не "Завершить всё равно"); используем exact match
+    const btns = screen.getAllByRole("button", { name: "Завершить" })
+    // При pending > 0 есть AlertDialog триггер — это первая кнопка "Завершить"
+    const btn = btns[0]
+    // При pending > 0 кнопка должна быть outline, не содержать bg-primary
+    expect(btn.className).not.toContain("bg-primary")
+  })
+
+  it("«Завершить» primary, когда спорных не осталось", () => {
+    // Фикстура: все строки confident/решённые → pending === 0
+    const allResolvedRows = [
+      row(1, 0, "excluded", { source_name: "Орг-заголовок" }),
+      row(2, 1, "confident", { source_name: "Уверенная 1" }),
+      row(3, 2, "confident", { source_name: "Уверенная 2" }),
+    ]
+    render(<Wrap rows={allResolvedRows} />)
+    const btn = screen.getByRole("button", { name: "Завершить" })
+    // При pending === 0 кнопка должна быть primary (единственная такая)
+    expect(btn.className).toContain("bg-primary")
+  })
+})

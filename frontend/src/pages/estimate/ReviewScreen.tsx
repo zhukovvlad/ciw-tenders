@@ -224,7 +224,9 @@ export function ReviewScreen({
             ) : (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button size="sm">
+                  {/* Демоушен (спека 3.5 §2): primary «загорается» при pending === 0 —
+                      кнопка не приглашает, пока по нажатию ругается диалогом */}
+                  <Button size="sm" variant="outline">
                     <Check className="size-4" />
                     Завершить
                   </Button>
