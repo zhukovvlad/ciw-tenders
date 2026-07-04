@@ -142,8 +142,12 @@ export function ReviewCard({
                 <span className="font-mono text-xs text-muted-foreground">
                   {row.matched_code}
                 </span>
-                <span className="flex-1">
-                  <CrumbTrail levels={row.matchedBreadcrumb} />
+                <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                  <span>{row.matched_name}</span>
+                  <CrumbTrail
+                    levels={row.matchedBreadcrumb}
+                    className="truncate"
+                  />
                 </span>
                 {row.status !== "matched_fund" && (
                   <span className="font-mono text-xs text-muted-foreground">
@@ -195,8 +199,10 @@ export function ReviewCard({
                   <span className="font-mono text-xs text-muted-foreground">
                     {c.article_code}
                   </span>
-                  <span className="flex-1">{c.name}</span>
-                  <CrumbTrail levels={c.breadcrumb} />
+                  <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                    <span>{c.name}</span>
+                    <CrumbTrail levels={c.breadcrumb} className="truncate" />
+                  </span>
                   <span className="font-mono text-xs text-muted-foreground">
                     {c.score.toFixed(2)}
                   </span>

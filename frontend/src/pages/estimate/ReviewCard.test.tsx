@@ -204,6 +204,34 @@ describe("ReviewCard: легенда клавиш кандидатов по чи
   })
 })
 
+describe("ReviewCard: строка кандидата — имя+крошка вместе, score у края", () => {
+  // Task 3 (спека 3.5 §3 п.3): имя кандидата и его крошка — в одном
+  // flex-контейнере (крошка примыкает к имени), score — последний элемент
+  // строки, у правого края.
+  const candWithCrumb: Candidate = {
+    id: 12,
+    article_code: "07.02",
+    name: "Пусконаладочные работы ИТП",
+    score: 0.89,
+    breadcrumb: ["ВИС", "Индивидуальный тепловой пункт"],
+  }
+  const r = row(12, 9, "needs_review", { candidates: [candWithCrumb] })
+
+  it("крошка кандидата примыкает к имени, score — у правого края", () => {
+    renderCard(r)
+    const name = screen.getByText("Пусконаладочные работы ИТП")
+    const crumb = screen.getByTitle("ВИС › Индивидуальный тепловой пункт")
+    // имя и крошка — в одном flex-контейнере, а не просто оба прямые дети
+    // кнопки (иначе проверка равенства parentElement была бы тривиальной)
+    expect(name.parentElement).toBe(crumb.parentElement)
+    const button = name.closest("button")!
+    expect(name.parentElement).not.toBe(button)
+    // score — последний элемент строки кандидата (matched_code по умолчанию
+    // "01.01" не совпадает с "07.02" — рекомендационный чип не подмешивается)
+    expect(button.lastElementChild?.textContent).toBe("0.89")
+  })
+})
+
 describe("ReviewCard: слот contextStrip", () => {
   const r = row(11, 8, "needs_review", { candidates: [CAND] })
 
