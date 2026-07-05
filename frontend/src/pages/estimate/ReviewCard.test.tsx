@@ -77,6 +77,8 @@ describe("ReviewCard: спорная строка", () => {
     expect(screen.getByText("Строка 5")).toBeInTheDocument()
     expect(screen.getByText("Рекомендация AI")).toBeInTheDocument()
     expect(screen.getAllByText(/03 Фундаменты/).length).toBeGreaterThan(0)
+    // синтетическая рекомендация несёт имя статьи (r.matched_name), не только код/крошку
+    expect(screen.getByText(r.matched_name!)).toBeInTheDocument()
   })
 
   it("клик по кандидату зовёт onPickCandidate с кандидатом", async () => {

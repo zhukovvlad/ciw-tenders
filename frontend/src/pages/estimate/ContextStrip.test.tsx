@@ -198,6 +198,24 @@ describe("ContextStrip", () => {
     expect(screen.getAllByTestId("section-boundary")).toHaveLength(2)
   })
 
+  it("«путь укоротился» до корня — разделитель без подписи (пустой label)", () => {
+    const rows = [
+      row(1, 0, "confident", {
+        source_name: "Глубокий узел",
+        breadcrumb: ["А", "Б"],
+      }),
+      row(2, 1, "confident", { source_name: "Корневой узел", breadcrumb: [] }),
+      row(3, 2, "confident", {
+        source_name: "Соседний корневой",
+        breadcrumb: [],
+      }),
+    ]
+    render(<ContextStrip state={initReview("x", rows)} activeRowNumber={2} />)
+    const boundary = screen.getByTestId("section-boundary")
+    expect(boundary).toBeInTheDocument()
+    expect(boundary.textContent).toBe("")
+  })
+
   it("страж: семантика границы не зависит от MatchStatus", () => {
     // одна геометрия, два разных статуса заголовка → одинаковый результат
     const a = render(
