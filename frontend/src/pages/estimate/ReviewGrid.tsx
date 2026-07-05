@@ -49,8 +49,9 @@ const statusTone: Record<MatchStatus, string> = {
 
 // Счётчики чипов decision-aware (см. isPendingReview/isNoMatch): решённая строка
 // покидает группу, «Проверить»/«Без пары» показывают реальный остаток работы.
+// Чипа «уверенных» в гриде нет — счётчик confident не считаем (вернуть вместе с
+// чипом, если понадобится: см. TECH_DEBT «счётчик N уверенных»).
 const counts = (state: ReviewState) => ({
-  confident: state.rows.filter((r) => r.status === "confident").length,
   review: state.rows.filter((r) => isPendingReview(r, decisionFor(state, r)))
     .length,
   no_match: state.rows.filter((r) => isNoMatch(r, decisionFor(state, r)))
