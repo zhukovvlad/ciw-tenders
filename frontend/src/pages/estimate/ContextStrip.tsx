@@ -82,13 +82,13 @@ export function ContextStrip({
               data-row
               data-opener={openers[g] || undefined}
               data-active={r.row_number === activeRowNumber || undefined}
-              className={
-                "flex items-center gap-2 px-3 py-1.5 " +
-                (r.row_number === activeRowNumber
-                  ? "bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]"
-                  : "") +
-                (muted ? " opacity-60" : "")
-              }
+              className={cn(
+                "flex items-center gap-2 px-3 py-1.5",
+                r.row_number === activeRowNumber &&
+                  "bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]",
+                muted && "opacity-60",
+                openers[g] && "font-medium"
+              )}
             >
               <span className="font-mono text-muted-foreground">
                 {r.section_code}

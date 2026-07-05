@@ -221,4 +221,47 @@ describe("ContextStrip", () => {
     ).length
     expect(countWork).toBe(countExcluded)
   })
+
+  it("парный тест самообъявления: разделитель подавлен ∧ открывашка стилизована", () => {
+    render(
+      <ContextStrip
+        state={initReview("x", headerRows("excluded"))}
+        activeRowNumber={1}
+      />
+    )
+    expect(screen.queryByTestId("section-boundary")).not.toBeInTheDocument()
+    const header = screen.getByText("Подраздел Б").closest("[data-row]")!
+    expect(header.className).toContain("font-medium")
+    // приглушение excluded сохраняется — оси разные (спека §2)
+    expect(header.className).toContain("opacity-60")
+  })
+
+  it("открывашка на краю окна (разделитель отрезан слайсом) всё равно стилизована", () => {
+    const rows = [
+      row(1, 0, "needs_review", {
+        source_name: "Работа А1",
+        breadcrumb: ["Топ", "Подраздел А"],
+      }),
+      row(2, 1, "excluded", {
+        source_name: "Подраздел Б",
+        breadcrumb: ["Топ"],
+      }),
+      row(3, 2, "needs_review", {
+        source_name: "Работа Б1",
+        breadcrumb: ["Топ", "Подраздел Б"],
+      }),
+      row(4, 3, "needs_review", {
+        source_name: "Работа Б2",
+        breadcrumb: ["Топ", "Подраздел Б"],
+      }),
+      row(5, 4, "needs_review", {
+        source_name: "Работа Б3",
+        breadcrumb: ["Топ", "Подраздел Б"],
+      }),
+    ]
+    // активная 4 → окно [2..5]: заголовок — первая строка окна, j === 0
+    render(<ContextStrip state={initReview("x", rows)} activeRowNumber={4} />)
+    const header = screen.getByText("Подраздел Б").closest("[data-row]")!
+    expect(header.className).toContain("font-medium")
+  })
 })
