@@ -146,7 +146,7 @@ export function ReviewCard({
                   <span>{row.matched_name}</span>
                   <CrumbTrail
                     levels={row.matchedBreadcrumb}
-                    className="truncate"
+                    className="min-w-0 truncate"
                   />
                 </span>
                 {row.status !== "matched_fund" && (
@@ -201,7 +201,10 @@ export function ReviewCard({
                   </span>
                   <span className="flex min-w-0 flex-1 items-baseline gap-2">
                     <span>{c.name}</span>
-                    <CrumbTrail levels={c.breadcrumb} className="truncate" />
+                    <CrumbTrail
+                      levels={c.breadcrumb}
+                      className="min-w-0 truncate"
+                    />
                   </span>
                   <span className="font-mono text-xs text-muted-foreground">
                     {c.score.toFixed(2)}

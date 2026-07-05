@@ -19,8 +19,10 @@ const card = () => within(screen.getByTestId("review-card"))
 // data-row (см. ContextStrip.tsx) — по нему отличаем текст работы карточки
 // от совпадения внутри полосы.
 function workText(name: string): HTMLElement {
+  // queryAllByText (не getAllByText) — иначе при нуле совпадений бросило бы
+  // до нашей проверки, съев осознанное сообщение об ошибке ниже.
   const match = card()
-    .getAllByText(name)
+    .queryAllByText(name)
     .find((el) => !el.closest("[data-row]"))
   if (!match) {
     throw new Error(`текст работы карточки "${name}" не найден`)

@@ -202,9 +202,13 @@ describe("EstimatePage", () => {
     // Полоса контекста (Task 1, спека 3.5) смонтирована внутри карточки и
     // дублирует source_name активной строки — строки полосы несут data-row
     // (см. ContextStrip.tsx), по нему отличаем текст работы карточки.
+    // queryAllByText (не getAllByText) + явная проверка — иначе на нуле
+    // совпадений throw случился бы до этой строки, а на "всё внутри
+    // data-row" toBeInTheDocument() получил бы undefined вместо элемента.
     const workText = within(screen.getByTestId("review-card"))
-      .getAllByText(ROW_NEEDS_REVIEW.source_name)
+      .queryAllByText(ROW_NEEDS_REVIEW.source_name)
       .find((el) => !el.closest("[data-row]"))
+    expect(workText).toBeDefined()
     expect(workText).toBeInTheDocument()
   })
 
