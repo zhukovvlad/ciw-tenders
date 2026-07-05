@@ -13,6 +13,23 @@ import type { MatchRow, MatchStatus } from "@/lib/types"
 // имени строки ловит не карточку, а полосу (ложноположительный тест)
 const card = () => within(screen.getByTestId("review-card"))
 
+// Task 1 (спека 3.5): полоса контекста теперь смонтирована ВНУТРИ карточки
+// (слот contextStrip), а не соседом — своё окно ±2 включает активную строку,
+// поэтому её source_name дублируется внутри card(). Строки полосы несут
+// data-row (см. ContextStrip.tsx) — по нему отличаем текст работы карточки
+// от совпадения внутри полосы.
+function workText(name: string): HTMLElement {
+  // queryAllByText (не getAllByText) — иначе при нуле совпадений бросило бы
+  // до нашей проверки, съев осознанное сообщение об ошибке ниже.
+  const match = card()
+    .queryAllByText(name)
+    .find((el) => !el.closest("[data-row]"))
+  if (!match) {
+    throw new Error(`текст работы карточки "${name}" не найден`)
+  }
+  return match
+}
+
 vi.mock("@/lib/api/articles", () => ({
   searchArticles: vi.fn().mockResolvedValue([]),
 }))
@@ -107,7 +124,7 @@ const ROWS: MatchRow[] = [
 describe("режимы", () => {
   it("дефолт — очередь: карточка первой спорной", () => {
     render(<Wrap rows={ROWS} />)
-    expect(card().getByText("Спорная А")).toBeInTheDocument()
+    expect(workText("Спорная А")).toBeInTheDocument()
     // это карточка, а не таблица: у грида роль table
     expect(screen.queryByRole("table")).not.toBeInTheDocument()
   })
@@ -129,9 +146,7 @@ describe("поток очереди", () => {
     render(<Wrap rows={ROWS} onReview={onReview} />)
     await userEvent.keyboard("{Enter}")
     expect(onReview).toHaveBeenCalledWith(3, "confirm", undefined)
-    await waitFor(() =>
-      expect(card().getByText("Спорная Б")).toBeInTheDocument()
-    )
+    await waitFor(() => expect(workText("Спорная Б")).toBeInTheDocument())
   })
 
   it("0 — без пары; ← возвращает к решённой", async () => {
@@ -140,7 +155,7 @@ describe("поток очереди", () => {
     await userEvent.keyboard("0")
     expect(onReview).toHaveBeenCalledWith(3, "reject", undefined)
     await userEvent.keyboard("{ArrowLeft}")
-    expect(card().getByText("Спорная А")).toBeInTheDocument()
+    expect(workText("Спорная А")).toBeInTheDocument()
   })
 
   it("ошибка PATCH: строка в голову очереди — СЛЕДУЮЩЕЙ, активную не выдёргивает", async () => {
@@ -152,12 +167,10 @@ describe("поток очереди", () => {
     await userEvent.keyboard("{Enter}") // Спорная А → упало (async), активной стала Б
     // даже ПОСЛЕ отработки фейла активная остаётся Б (пин; страж stale closure)
     await waitFor(() => expect(onReview).toHaveBeenCalledTimes(1))
-    expect(card().getByText("Спорная Б")).toBeInTheDocument()
+    expect(workText("Спорная Б")).toBeInTheDocument()
     await userEvent.keyboard("{Enter}") // решаем Б
     // Спорная А вернулась в голову — теперь активна она
-    await waitFor(() =>
-      expect(card().getByText("Спорная А")).toBeInTheDocument()
-    )
+    await waitFor(() => expect(workText("Спорная А")).toBeInTheDocument())
   })
 
   it("пустая очередь — терминальный экран", () => {
@@ -180,7 +193,7 @@ describe("поток очереди", () => {
     await userEvent.click(
       screen.getByRole("button", { name: /вернуться к последнему решению/i })
     )
-    expect(card().getByText("Единственная")).toBeInTheDocument()
+    expect(workText("Единственная")).toBeInTheDocument()
   })
 })
 
@@ -192,9 +205,7 @@ describe("сброс состояния карточки между строка
     await userEvent.type(input, "штукатурка")
     expect(input).toHaveValue("штукатурка")
     await userEvent.click(card().getByRole("button", { name: /без пары/i }))
-    await waitFor(() =>
-      expect(card().getByText("Спорная Б")).toBeInTheDocument()
-    )
+    await waitFor(() => expect(workText("Спорная Б")).toBeInTheDocument())
     expect(card().getByPlaceholderText(/искать в справочнике/i)).toHaveValue("")
   })
 })
@@ -204,9 +215,9 @@ describe("грид ↔ очередь", () => {
     render(<Wrap rows={ROWS} url="/estimates/5?view=grid" />)
     await userEvent.click(screen.getByText("Уверенная"))
     expect(screen.queryByRole("table")).not.toBeInTheDocument()
-    // карточка ИМЕННО уверенной строки (перерешение) — скоуп обязателен,
-    // «Уверенная» есть и в полосе контекста
-    expect(card().getByText("Уверенная")).toBeInTheDocument()
+    // карточка ИМЕННО уверенной строки (перерешение) — «Уверенная» есть и в
+    // полосе контекста, поэтому различаем по data-row (см. workText)
+    expect(workText("Уверенная")).toBeInTheDocument()
   })
 
   it("возврат в очередь табом после клика из грида — поток, а не старая карточка", async () => {
@@ -215,7 +226,7 @@ describe("грид ↔ очередь", () => {
     await userEvent.click(screen.getByRole("tab", { name: /таблица/i })) // ушли в грид табом
     await userEvent.click(screen.getByRole("tab", { name: /очередь/i })) // вернулись
     // явный выбор сброшен (deselect при уходе в грид) — активна первая спорная
-    expect(card().getByText("Спорная А")).toBeInTheDocument()
+    expect(workText("Спорная А")).toBeInTheDocument()
   })
 })
 
@@ -230,5 +241,41 @@ describe("read-only (завершённая смета)", () => {
     expect(
       screen.getByRole("button", { name: /выгрузить/i })
     ).toBeInTheDocument()
+  })
+})
+
+describe("зона решения", () => {
+  it("зона решения ограничена по ширине и центрирована", () => {
+    render(<Wrap rows={ROWS} />)
+    const zone = screen.getByTestId("decision-zone")
+    expect(zone.className).toContain("max-w-")
+    expect(zone.className).toContain("mx-auto")
+    expect(zone).toContainElement(screen.getByTestId("review-card"))
+  })
+})
+
+describe("кнопка «Завершить»", () => {
+  it("«Завершить» приглушена при нерешённых, primary при pending === 0", () => {
+    // Экран с 2 нерешёнными спорными строками (ROWS)
+    render(<Wrap rows={ROWS} />)
+    // Ищем кнопку триггер (не "Завершить всё равно"); используем exact match
+    const btns = screen.getAllByRole("button", { name: "Завершить" })
+    // При pending > 0 есть AlertDialog триггер — это первая кнопка "Завершить"
+    const btn = btns[0]
+    // При pending > 0 кнопка должна быть outline, не содержать bg-primary
+    expect(btn.className).not.toContain("bg-primary")
+  })
+
+  it("«Завершить» primary, когда спорных не осталось", () => {
+    // Фикстура: все строки confident/решённые → pending === 0
+    const allResolvedRows = [
+      row(1, 0, "excluded", { source_name: "Орг-заголовок" }),
+      row(2, 1, "confident", { source_name: "Уверенная 1" }),
+      row(3, 2, "confident", { source_name: "Уверенная 2" }),
+    ]
+    render(<Wrap rows={allResolvedRows} />)
+    const btn = screen.getByRole("button", { name: "Завершить" })
+    // При pending === 0 кнопка должна быть primary (единственная такая)
+    expect(btn.className).toContain("bg-primary")
   })
 })

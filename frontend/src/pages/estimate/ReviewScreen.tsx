@@ -224,7 +224,9 @@ export function ReviewScreen({
             ) : (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button size="sm">
+                  {/* Демоушен (спека 3.5 §2): primary «загорается» при pending === 0 —
+                      кнопка не приглашает, пока по нажатию ругается диалогом */}
+                  <Button size="sm" variant="outline">
                     <Check className="size-4" />
                     Завершить
                   </Button>
@@ -281,12 +283,18 @@ export function ReviewScreen({
           onUndo={queue.undo}
         />
       ) : (
-        <>
+        <div
+          data-testid="decision-zone"
+          className="mx-auto w-full max-w-[68rem] px-4 py-4"
+        >
           <ReviewCard
             key={active.row_number}
             row={active}
             decision={decisionFor(state, active)}
             canUndo={queue.canUndo}
+            contextStrip={
+              <ContextStrip state={state} activeRowNumber={active.row_number} />
+            }
             onConfirmRecommendation={() =>
               commit(
                 active,
@@ -326,8 +334,7 @@ export function ReviewScreen({
               )
             }
           />
-          <ContextStrip state={state} activeRowNumber={active.row_number} />
-        </>
+        </div>
       )}
     </div>
   )

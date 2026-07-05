@@ -5,11 +5,26 @@ import type { MatchRow, ReviewState } from "@/lib/types"
 import { decisionFor, statusLabel } from "@/lib/reviewState"
 import { cn } from "@/lib/utils"
 import { dsHairline } from "@/components/common/ds-table"
+import { ArrowLeft } from "lucide-react"
 
 const WINDOW = 2
 
-function topSection(r: MatchRow): string {
-  return r.breadcrumb[0] ?? r.source_name
+// Открывашка — структурный предикат по крошке СЛЕДУЮЩЕЙ строки, НЕ по статусу
+// (excluded — не детектор заголовка: WORK-заголовки матчатся; спека 3.5 §2).
+// Равенства достаточно, prefix-сравнение не нужно: nearest-persisted-резолв
+// не порождает неперсистированных уровней в крошке — у первого
+// персистированного потомка X путь равен X.breadcrumb + [X.name] ТОЧНО.
+function isOpener(r: MatchRow, next: MatchRow | undefined): boolean {
+  if (!next) return false
+  if (next.breadcrumb.length !== r.breadcrumb.length + 1) return false
+  return (
+    next.breadcrumb[r.breadcrumb.length] === r.source_name &&
+    r.breadcrumb.every((name, k) => name === next.breadcrumb[k])
+  )
+}
+
+function pathsEqual(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((x, k) => x === b[k])
 }
 
 function rightSide(state: ReviewState, r: MatchRow): string {
@@ -30,38 +45,66 @@ export function ContextStrip({
   const ordered = [...state.rows].sort((a, b) => a.sourceIndex - b.sourceIndex)
   const i = ordered.findIndex((r) => r.row_number === activeRowNumber)
   if (i === -1) return null
-  const win = ordered.slice(Math.max(0, i - WINDOW), i + WINDOW + 1)
+  const openers = ordered.map((r, g) => isOpener(r, ordered[g + 1]))
+  // Эффективный путь (спека §4 п.1): открывашка живёт в разделе, который открывает.
+  const paths = ordered.map((r, g) =>
+    openers[g] ? [...r.breadcrumb, r.source_name] : r.breadcrumb
+  )
+  const start = Math.max(0, i - WINDOW)
+  const win = ordered.slice(start, i + WINDOW + 1)
   return (
-    <div className={cn("mt-3 rounded-md border text-xs", dsHairline)}>
+    <div className={cn("rounded-md border text-xs", dsHairline)}>
       {win.map((r, j) => {
-        const boundary = j > 0 && topSection(win[j - 1]) !== topSection(r)
+        const g = start + j
+        const boundary = j > 0 && !pathsEqual(paths[g - 1], paths[g])
+        // §4 п.3: перед открывашкой разделитель подавлен — заголовок объявляет
+        // себя сам (стилизация — Task 8, вторая половина правила).
+        const divider = boundary && !openers[g]
+        // Последний уровень нового эффективного пути; пустой путь (граница к
+        // корню, «путь укоротился») — разделитель без подписи.
+        const label = paths[g][paths[g].length - 1]
         const muted = r.status === "excluded" || r.status === "pending"
         return (
           <div key={r.row_number}>
-            {boundary && (
+            {divider && (
               <div
                 data-testid="section-boundary"
                 className="border-t-2 border-[var(--ds-border-strong)]"
-              />
+              >
+                {label && (
+                  <div className="px-3 pt-1 text-[11px] tracking-wide text-muted-foreground uppercase">
+                    Раздел — {label}
+                  </div>
+                )}
+              </div>
             )}
             <div
               data-row
+              data-opener={openers[g] || undefined}
               data-active={r.row_number === activeRowNumber || undefined}
-              className={
-                "flex items-center gap-2 px-3 py-1.5 " +
-                (r.row_number === activeRowNumber
-                  ? "bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]"
-                  : "") +
-                (muted ? " opacity-60" : "")
-              }
+              className={cn(
+                "flex items-center gap-2 px-3 py-1.5",
+                r.row_number === activeRowNumber &&
+                  "bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]",
+                muted && "opacity-60",
+                openers[g] && "font-medium"
+              )}
             >
               <span className="font-mono text-muted-foreground">
                 {r.section_code}
               </span>
               <span className="truncate">{r.source_name}</span>
-              <span className="ml-auto shrink-0 text-muted-foreground">
-                → {rightSide(state, r)}
-              </span>
+              {r.row_number === activeRowNumber ? (
+                // статус активной дублировал бы решаемое прямо сейчас (спека 3.5 §2)
+                <ArrowLeft
+                  aria-label="вы здесь"
+                  className="ml-auto size-3 shrink-0 text-primary"
+                />
+              ) : (
+                <span className="ml-auto shrink-0 text-muted-foreground">
+                  → {rightSide(state, r)}
+                </span>
+              )}
             </div>
           </div>
         )

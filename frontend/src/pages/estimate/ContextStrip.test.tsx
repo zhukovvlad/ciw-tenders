@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { ContextStrip } from "@/pages/estimate/ContextStrip"
 import { initReview } from "@/lib/reviewState"
 import type { MatchRow, MatchStatus } from "@/lib/types"
@@ -66,5 +66,220 @@ describe("ContextStrip", () => {
     render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={4} />)
     // между строкой 4 (раздел «Орг-заголовок») и строкой 5 («Раздел Б»)
     expect(screen.getByTestId("section-boundary")).toBeInTheDocument()
+  })
+
+  it("активная строка — маркер «вы здесь», не статус", () => {
+    render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />)
+    const active = screen
+      .getByText("Строка 3")
+      .closest("[data-row]") as HTMLElement
+    expect(within(active).getByLabelText("вы здесь")).toBeInTheDocument()
+    expect(active.textContent).not.toContain("→")
+  })
+
+  // Одноимённые листовые разделы под разными родителями — кейс, ради которого
+  // сравнивается ПОЛНЫЙ путь (спека §2: имена листовых уровней не уникальны).
+  const SAME_LEAF_ROWS: MatchRow[] = [
+    row(1, 0, "needs_review", {
+      source_name: "Работа 1",
+      breadcrumb: ["Топ", "Подраздел А", "Материалы"],
+    }),
+    row(2, 1, "needs_review", {
+      source_name: "Работа 2",
+      breadcrumb: ["Топ", "Подраздел Б", "Материалы"],
+    }),
+  ]
+
+  // Два подраздела под одним верхнеуровневым — кейс, на котором breadcrumb[0]
+  // молчал.
+  const SIBLING_ROWS: MatchRow[] = [
+    row(1, 0, "needs_review", {
+      source_name: "Работа А1",
+      breadcrumb: ["Топ", "Подраздел А"],
+    }),
+    row(2, 1, "needs_review", {
+      source_name: "Работа Б1",
+      breadcrumb: ["Топ", "Подраздел Б"],
+    }),
+  ]
+
+  // Заголовок (открывашка) между разделами: next.breadcrumb ===
+  // header.breadcrumb + [header.source_name] → разделитель подавлен.
+  function headerRows(headerStatus: MatchStatus): MatchRow[] {
+    return [
+      row(1, 0, "needs_review", {
+        source_name: "Работа А1",
+        breadcrumb: ["Топ", "Подраздел А"],
+      }),
+      row(2, 1, headerStatus, {
+        source_name: "Подраздел Б",
+        breadcrumb: ["Топ"],
+      }),
+      row(3, 2, "needs_review", {
+        source_name: "Работа Б1",
+        breadcrumb: ["Топ", "Подраздел Б"],
+      }),
+    ]
+  }
+
+  it("одноимённые листовые разделы под разными родителями разделяются", () => {
+    render(
+      <ContextStrip
+        state={initReview("x", SAME_LEAF_ROWS)}
+        activeRowNumber={1}
+      />
+    )
+    const b = screen.getByTestId("section-boundary")
+    expect(b.textContent).toContain("Раздел — Материалы")
+  })
+
+  it("два подраздела под одним верхнеуровневым разделяются с подписью", () => {
+    render(
+      <ContextStrip state={initReview("x", SIBLING_ROWS)} activeRowNumber={1} />
+    )
+    expect(screen.getByTestId("section-boundary").textContent).toContain(
+      "Раздел — Подраздел Б"
+    )
+  })
+
+  it("строки одного раздела границы не имеют", () => {
+    const rows = [
+      row(1, 0, "needs_review", { breadcrumb: ["Топ", "А"] }),
+      row(2, 1, "needs_review", { breadcrumb: ["Топ", "А"] }),
+    ]
+    render(<ContextStrip state={initReview("x", rows)} activeRowNumber={1} />)
+    expect(screen.queryByTestId("section-boundary")).not.toBeInTheDocument()
+  })
+
+  it.each(["excluded", "needs_review"] as const)(
+    "разделитель перед открывашкой подавлен (самообъявление), статус=%s",
+    (st) => {
+      render(
+        <ContextStrip
+          state={initReview("x", headerRows(st))}
+          activeRowNumber={1}
+        />
+      )
+      // граница А↔заголовок подавлена; заголовок↔Б1 — пути равны, границы нет
+      expect(screen.queryByTestId("section-boundary")).not.toBeInTheDocument()
+    }
+  )
+
+  it("открывашка склеена с детьми, вложенные сходятся", () => {
+    const rows = [
+      row(1, 0, "excluded", {
+        source_name: "Подраздел Б",
+        breadcrumb: ["Топ"],
+      }),
+      row(2, 1, "needs_review", {
+        source_name: "Работа Б1",
+        breadcrumb: ["Топ", "Подраздел Б"],
+      }),
+      row(3, 2, "needs_review", {
+        source_name: "Работа Б2",
+        breadcrumb: ["Топ", "Подраздел Б"],
+      }),
+    ]
+    render(<ContextStrip state={initReview("x", rows)} activeRowNumber={2} />)
+    expect(screen.queryByTestId("section-boundary")).not.toBeInTheDocument()
+    // край §4: последняя строка списка — не открывашка (next отсутствует)
+    expect(
+      screen.getByText("Работа Б2").closest("[data-row]")
+    ).not.toHaveAttribute("data-opener")
+  })
+
+  it("две границы в одном окне ±2", () => {
+    const rows = [
+      row(1, 0, "needs_review", { breadcrumb: ["Топ", "А"] }),
+      row(2, 1, "needs_review", { breadcrumb: ["Топ", "Б"] }),
+      row(3, 2, "needs_review", { breadcrumb: ["Топ", "В"] }),
+    ]
+    render(<ContextStrip state={initReview("x", rows)} activeRowNumber={2} />)
+    expect(screen.getAllByTestId("section-boundary")).toHaveLength(2)
+  })
+
+  it("«путь укоротился» до корня — разделитель без подписи (пустой label)", () => {
+    const rows = [
+      row(1, 0, "confident", {
+        source_name: "Глубокий узел",
+        breadcrumb: ["А", "Б"],
+      }),
+      row(2, 1, "confident", { source_name: "Корневой узел", breadcrumb: [] }),
+      row(3, 2, "confident", {
+        source_name: "Соседний корневой",
+        breadcrumb: [],
+      }),
+    ]
+    render(<ContextStrip state={initReview("x", rows)} activeRowNumber={2} />)
+    const boundary = screen.getByTestId("section-boundary")
+    expect(boundary).toBeInTheDocument()
+    expect(boundary.textContent).toBe("")
+  })
+
+  it("страж: семантика границы не зависит от MatchStatus", () => {
+    // одна геометрия, два разных статуса заголовка → одинаковый результат
+    const a = render(
+      <ContextStrip
+        state={initReview("x", headerRows("excluded"))}
+        activeRowNumber={3}
+      />
+    )
+    const countExcluded = a.container.querySelectorAll(
+      '[data-testid="section-boundary"]'
+    ).length
+    a.unmount()
+    const b = render(
+      <ContextStrip
+        state={initReview("x", headerRows("confident"))}
+        activeRowNumber={3}
+      />
+    )
+    const countWork = b.container.querySelectorAll(
+      '[data-testid="section-boundary"]'
+    ).length
+    expect(countWork).toBe(countExcluded)
+  })
+
+  it("парный тест самообъявления: разделитель подавлен ∧ открывашка стилизована", () => {
+    render(
+      <ContextStrip
+        state={initReview("x", headerRows("excluded"))}
+        activeRowNumber={1}
+      />
+    )
+    expect(screen.queryByTestId("section-boundary")).not.toBeInTheDocument()
+    const header = screen.getByText("Подраздел Б").closest("[data-row]")!
+    expect(header.className).toContain("font-medium")
+    // приглушение excluded сохраняется — оси разные (спека §2)
+    expect(header.className).toContain("opacity-60")
+  })
+
+  it("открывашка на краю окна (разделитель отрезан слайсом) всё равно стилизована", () => {
+    const rows = [
+      row(1, 0, "needs_review", {
+        source_name: "Работа А1",
+        breadcrumb: ["Топ", "Подраздел А"],
+      }),
+      row(2, 1, "excluded", {
+        source_name: "Подраздел Б",
+        breadcrumb: ["Топ"],
+      }),
+      row(3, 2, "needs_review", {
+        source_name: "Работа Б1",
+        breadcrumb: ["Топ", "Подраздел Б"],
+      }),
+      row(4, 3, "needs_review", {
+        source_name: "Работа Б2",
+        breadcrumb: ["Топ", "Подраздел Б"],
+      }),
+      row(5, 4, "needs_review", {
+        source_name: "Работа Б3",
+        breadcrumb: ["Топ", "Подраздел Б"],
+      }),
+    ]
+    // активная 4 → окно [2..5]: заголовок — первая строка окна, j === 0
+    render(<ContextStrip state={initReview("x", rows)} activeRowNumber={4} />)
+    const header = screen.getByText("Подраздел Б").closest("[data-row]")!
+    expect(header.className).toContain("font-medium")
   })
 })
