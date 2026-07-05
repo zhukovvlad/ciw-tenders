@@ -567,6 +567,48 @@ UPDATE` сметы в начале `apply()` перед проверкой `comp
 
 **Почему отложено:** отложено на этапе 3 UX (спека §9): компактный режим шапки высоту не менял.
 
+## 🟢 Фронтовый `REVIEWABLE` не защищён от тихого рассинхрона с `MatchStatus`
+
+**Что:** `REVIEWABLE` ([reviewState.ts](../frontend/src/lib/reviewState.ts)) — обычный массив
+статусов «требует решения». Тип `MatchStatus` исчерпывающе проверяется в `statusTone`
+(`Record<MatchStatus, string>` в [ReviewGrid.tsx](../frontend/src/pages/estimate/ReviewGrid.tsx))
+— добавление статуса в тип роняет компиляцию там. Но `REVIEWABLE` от типа не зависит: новый
+статус молча в него не попадёт, и знаменатель `progress().total` уедет, компилятор смолчит.
+Бэковый близнец `_REVIEWABLE` защищён тестом `test_reviewable_partition_covers_all_statuses`
+([test_estimate_list_progress.py](../backend/tests/test_estimate_list_progress.py)); у фронта такого
+стража нет.
+
+**Почему отложено:** множество статусов матчинга стабильно, меняется редко; риск низкочастотный.
+Дешёвая локальная страховка, не срочная.
+
+**Как чинить (frontend-local, без контрактных правок):** сделать `REVIEWABLE` exhaustive-проверяемым
+против `MatchStatus` — напр. полная `Record<MatchStatus, boolean>`-карта «reviewable?» (добавление
+статуса в тип обязывает дописать ключ → компиляция падает) и вывод массива/предиката из неё; либо
+фронт-тест-аналог `test_reviewable_partition_covers_all_statuses`.
+
+## 🟡 `REVIEWABLE` / `_REVIEWABLE` — тройное зеркало правила «требует решения» через языковую границу
+
+**Что:** список `("needs_review", "no_match", "error")` продублирован в трёх местах:
+бэк-репозиторий ([estimate_repository.py:45](../backend/app/infrastructure/db/estimate_repository.py#L45)),
+бэк-фейки тестов ([fakes.py:433](../backend/tests/fakes.py#L433)) и фронт
+([reviewState.ts](../frontend/src/lib/reviewState.ts)). Одно понятие — «какие строки оператор обязан
+разобрать» — держится копиями в двух языках (Python + TS). В лоб «одна общая переменная» невозможна:
+TS не импортирует питоновский список.
+
+**Почему отложено:** правило меняется редко; бэк-сторона защищена тестом
+(`test_reviewable_partition_covers_all_statuses`). Правильное лечение — контрактная правка (DTO,
+entity, маппинг, фейки, фикстуры, тесты), несоразмерная низкочастотному риску. Реальную дыру (тихий
+дрейф фронта) дешевле закрыть отдельным frontend-local стражем — см. соседний 🟢-пункт выше.
+
+**Как чинить (сделать бэк единственным источником правды):** отдавать «reviewable?» из API, чтобы
+фронт перестал перечислять статусы. Вариант A — per-row булев флаг `requires_decision` в
+`EstimateRowOut`, фронтовый `requiresDecision` читает его вместо `REVIEWABLE.includes(status)`.
+Вариант B — кодоген TS-констант из OpenAPI-схемы (тяжелее инфраструктурно ради одного списка).
+Прим.: чип-предикаты `isNoMatch`/`isPendingReview` — ОТДЕЛЬНАЯ, более богатая (decision-aware)
+классификация, в это зеркало не сворачиваются. См. `requiresDecision`
+([reviewState.ts](../frontend/src/lib/reviewState.ts)), `EstimateRowOut`
+([schemas.py](../backend/app/api/schemas.py)).
+
 ---
 
 ## 🟡 Тест-Postgres: миграции применяются вручную (schema drift ломает интеграционные тесты)

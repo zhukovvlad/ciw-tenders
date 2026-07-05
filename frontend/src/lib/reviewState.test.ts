@@ -86,6 +86,47 @@ describe("reviewState", () => {
     expect(filteredRows(s).every((r) => r.status === "needs_review")).toBe(true)
   })
 
+  it("filter=review: нерешённая спорная входит, решённая (любым исходом) уходит", () => {
+    const r = rowNum("needs_review")
+    const s0 = reviewReducer(base(), { type: "setFilter", filter: "review" })
+    expect(filteredRows(s0).some((x) => x.row_number === r)).toBe(true)
+    // подтверждение рекомендации решает строку — она покидает «Проверить»
+    const confirmed = reviewReducer(s0, { type: "confirmArbiter", row: r })
+    expect(filteredRows(confirmed).some((x) => x.row_number === r)).toBe(false)
+    // reject (оставить без пары) тоже решает спорную — уходит из «Проверить»
+    const rejected = reviewReducer(s0, { type: "confirmNoMatch", row: r })
+    expect(filteredRows(rejected).some((x) => x.row_number === r)).toBe(false)
+  })
+
+  it("filter=no_match: нерешённый матч-промах входит, ручной выбор выводит строку из группы", () => {
+    const r = rowNum("no_match")
+    // нерешённая строка no_match видна в фильтре «Без пары»
+    const s0 = reviewReducer(base(), { type: "setFilter", filter: "no_match" })
+    expect(filteredRows(s0).some((x) => x.row_number === r)).toBe(true)
+    // после ручного присвоения статьи строка уходит из «Без пары»
+    const s1 = reviewReducer(s0, {
+      type: "manualPick",
+      row: r,
+      candidate: {
+        id: 42,
+        article_code: "СМР-77-777",
+        name: "Ручная",
+        score: 0,
+        breadcrumb: [],
+      },
+    })
+    expect(filteredRows(s1).some((x) => x.row_number === r)).toBe(false)
+  })
+
+  it("filter=no_match: reject (оставить без пары) держит строку в группе", () => {
+    const r = rowNum("no_match")
+    const s = reviewReducer(
+      reviewReducer(base(), { type: "setFilter", filter: "no_match" }),
+      { type: "confirmNoMatch", row: r }
+    )
+    expect(filteredRows(s).some((x) => x.row_number === r)).toBe(true)
+  })
+
   it("statusLabel различает арбитра, ручной выбор и без пары", () => {
     expect(
       statusLabel(MOCK_ROWS[0], {

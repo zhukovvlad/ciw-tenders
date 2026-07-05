@@ -91,6 +91,59 @@ describe("ReviewGrid: клики", () => {
   })
 })
 
+describe("ReviewGrid: ручной выбор на строке «без пары»", () => {
+  const overridden = () =>
+    row(1, 0, "no_match", {
+      source_name: "Механические системы",
+      matched_code: null,
+      matched_name: null,
+      matched_article_id: null,
+      review_status: "overridden",
+      final_article_id: 42,
+      final_code: "СМР-77-777",
+      final_name: "Присвоенная вручную статья",
+    })
+
+  it("показывает присвоенную статью, а не «— без пары —»", () => {
+    renderGrid([overridden()])
+    expect(screen.getByText("Присвоенная вручную статья")).toBeInTheDocument()
+    expect(screen.getByText("СМР-77-777")).toBeInTheDocument()
+    expect(screen.queryByText("— без пары —")).not.toBeInTheDocument()
+  })
+
+  it("чип «Без пары» не считает решённую строку", () => {
+    renderGrid([overridden()])
+    expect(screen.getByText("Без пары · 0")).toBeInTheDocument()
+  })
+
+  it("нерешённый матч-промах остаётся в чипе «Без пары»", () => {
+    renderGrid([
+      row(1, 0, "no_match", {
+        matched_code: null,
+        matched_name: null,
+        matched_article_id: null,
+      }),
+    ])
+    expect(screen.getByText("Без пары · 1")).toBeInTheDocument()
+    expect(screen.getByText("— без пары —")).toBeInTheDocument()
+  })
+
+  it("чип «Проверить» считает только нерешённые спорные строки", () => {
+    renderGrid([
+      // решённая спорная (confirm арбитра) — не считается
+      row(1, 0, "needs_review", {
+        review_status: "confirmed",
+        final_article_id: 7,
+        final_code: "01.01",
+        final_name: "Статья",
+      }),
+      // нерешённая спорная — считается
+      row(2, 1, "needs_review"),
+    ])
+    expect(screen.getByText("Проверить · 1")).toBeInTheDocument()
+  })
+})
+
 describe("hover по кликабельности (этап 3)", () => {
   it("с onOpenRow: hover и cursor у решаемой строки, у excluded — нет", () => {
     renderGrid([

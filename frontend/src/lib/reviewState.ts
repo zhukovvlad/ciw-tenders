@@ -172,12 +172,33 @@ export function progress(state: ReviewState): {
   return { reviewed, total: required.length }
 }
 
+// Единый принцип чипов-фильтров (decision-aware, а НЕ по замороженному AI-снимку
+// r.status): строка остаётся в чипе, если [ещё не решена И её AI-бакет = бакет
+// чипа] ИЛИ [решена, и исход решения = исход чипа]. Решённая строка покидает
+// чип, счётчики убывают по мере ревью.
+
+// «Без пары»: не решена + промах матчинга, ИЛИ решена в no_match (reject).
+// Ручной/кандидатный выбор (confirmed) выводит строку — иначе присвоенная
+// вручную статья терялась бы под «— без пары —» (исходный баг таблицы).
+export function isNoMatch(row: MatchRow, decision: Decision): boolean {
+  return (
+    decision.kind === "no_match" ||
+    (decision.kind === "pending" && row.status === "no_match")
+  )
+}
+
+// «Проверить»: спорная строка, ещё не решённая оператором. Исхода «needs_review»
+// у решения нет, поэтому любое решение (confirm/pick/reject) выводит строку.
+export function isPendingReview(row: MatchRow, decision: Decision): boolean {
+  return row.status === "needs_review" && decision.kind === "pending"
+}
+
 export function filteredRows(state: ReviewState): MatchRow[] {
   switch (state.filter) {
     case "review":
-      return state.rows.filter((r) => r.status === "needs_review")
+      return state.rows.filter((r) => isPendingReview(r, decisionFor(state, r)))
     case "no_match":
-      return state.rows.filter((r) => r.status === "no_match")
+      return state.rows.filter((r) => isNoMatch(r, decisionFor(state, r)))
     default:
       return state.rows
   }
