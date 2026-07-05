@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { Database } from "lucide-react"
 import type { Candidate, Decision, MatchRow } from "@/lib/types"
 import { searchArticles } from "@/lib/api/articles"
@@ -26,6 +26,7 @@ interface ReviewCardProps {
   onManualPick: (c: Candidate) => void // выбор из поиска
   onReject: () => void // 0 — оставить без пары
   searchDebounceMs?: number // default 250; тесты передают 0
+  contextStrip?: ReactNode // полоса окружения (спека 3.5 §3 п.2): карточка не знает о ревью-стейте
 }
 
 /** Enter активен ⇔ блок рекомендации отрисован (правило: клавиша ⇔ элемент) */
@@ -50,6 +51,7 @@ export function ReviewCard({
   onManualPick,
   onReject,
   searchDebounceMs = DEFAULT_SEARCH_DEBOUNCE_MS,
+  contextStrip,
 }: ReviewCardProps) {
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<Candidate[]>([])
@@ -112,6 +114,9 @@ export function ReviewCard({
           <span>{row.source_name}</span>
         </div>
 
+        {/* 2b. Окружение (спека 3.5): крошка → строка → окружение → кандидаты */}
+        {contextStrip}
+
         {row.status === "error" ? (
           <Alert variant="destructive">
             <Badge variant="destructive" className="mb-1.5">
@@ -137,8 +142,12 @@ export function ReviewCard({
                 <span className="font-mono text-xs text-muted-foreground">
                   {row.matched_code}
                 </span>
-                <span className="flex-1">
-                  <CrumbTrail levels={row.matchedBreadcrumb} />
+                <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                  <span>{row.matched_name}</span>
+                  <CrumbTrail
+                    levels={row.matchedBreadcrumb}
+                    className="truncate"
+                  />
                 </span>
                 {row.status !== "matched_fund" && (
                   <span className="font-mono text-xs text-muted-foreground">
@@ -190,8 +199,10 @@ export function ReviewCard({
                   <span className="font-mono text-xs text-muted-foreground">
                     {c.article_code}
                   </span>
-                  <span className="flex-1">{c.name}</span>
-                  <CrumbTrail levels={c.breadcrumb} />
+                  <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                    <span>{c.name}</span>
+                    <CrumbTrail levels={c.breadcrumb} className="truncate" />
+                  </span>
                   <span className="font-mono text-xs text-muted-foreground">
                     {c.score.toFixed(2)}
                   </span>

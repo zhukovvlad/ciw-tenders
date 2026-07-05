@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { ContextStrip } from "@/pages/estimate/ContextStrip"
 import { initReview } from "@/lib/reviewState"
 import type { MatchRow, MatchStatus } from "@/lib/types"
@@ -66,5 +66,14 @@ describe("ContextStrip", () => {
     render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={4} />)
     // между строкой 4 (раздел «Орг-заголовок») и строкой 5 («Раздел Б»)
     expect(screen.getByTestId("section-boundary")).toBeInTheDocument()
+  })
+
+  it("активная строка — маркер «вы здесь», не статус", () => {
+    render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />)
+    const active = screen
+      .getByText("Строка 3")
+      .closest("[data-row]") as HTMLElement
+    expect(within(active).getByLabelText("вы здесь")).toBeInTheDocument()
+    expect(active.textContent).not.toContain("→")
   })
 })
