@@ -18,6 +18,9 @@
 - Кириллица в stdout: перед pytest выставить `$env:PYTHONIOENCODING = "utf-8"`.
 - Юнит-тесты не ходят в БД/AI: фейки портов ([backend/tests/fakes.py](../../backend/tests/fakes.py)) + `app.dependency_overrides` (паттерны — [backend/tests/conftest.py](../../backend/tests/conftest.py)).
 - Номенклатура кодов — таблица §3.4 спеки, копировать имена оттуда посимвольно.
+- HTTP-константы статусов: использовать те имена, что уже употреблены в правимом файле
+  (`estimates.py` использует новые RFC-9110-имена `HTTP_422_UNPROCESSABLE_CONTENT` /
+  `HTTP_413_CONTENT_TOO_LARGE` — не заменять на старые и наоборот).
 - Миграцию БД не применять к облачной БД в рамках задачи (`just migrate` гоняет владелец) — задача ограничивается файлом ревизии + ORM-моделью + тестом схемы.
 
 ---
@@ -410,15 +413,16 @@ git commit -m "feat(api): ApiError + единая форма тела ошибк
 
 ---
 
-### Task 3: Auth-точки в `deps.py` → `ApiError`
+### Task 3: Auth-домен: `deps.py` → `ApiError`, `account_disabled` в сервисе
 
 **Files:**
 - Modify: `backend/app/api/deps.py:92-96` (unauthorized), `:109-115` (require_admin)
-- Test: Modify `backend/tests/test_authz_matrix.py` (добавить ассерты кода)
+- Modify: `backend/app/services/auth_service.py:46` (код `account_disabled` в точке raise)
+- Test: Modify `backend/tests/test_authz_matrix.py` (ассерты кода), `backend/tests/test_auth_routes.py` (отключённая учётка)
 
 **Interfaces:**
 - Consumes: `ApiError` из Task 2.
-- Produces: 401-ответы без/с битым токеном несут `code: "not_authenticated"`; 403 — `code: "admin_required"`.
+- Produces: 401-ответы без/с битым токеном несут `code: "not_authenticated"`; 403 — `code: "admin_required"`; логин отключённой учётки — 401 + `code: "account_disabled"` (продовый путь ctor-override, без него залоченный пользователь получил бы классовый дефолт `invalid_credentials` — дезинформация «неверный пароль»).
 
 - [ ] **Step 1: Write the failing test** — в `backend/tests/test_authz_matrix.py` добавить (рядом с существующими проверками статусов, используя те же фикстуры):
 
@@ -440,12 +444,38 @@ def test_403_body_has_admin_required_code(client: TestClient, user_token: str) -
 
 Имена фикстур (`client`, `user_token`) сверить с фактическими в `test_authz_matrix.py` и переиспользовать их.
 
+В `backend/tests/test_auth_routes.py` — тест отключённой учётки (сид по образцу `_USER` в том же файле; у `User` поле `is_active`):
+
+```python
+_DISABLED = User(
+    id=3, email="off@mr.kz", password_hash="hashed::offpw", role=Role.USER,
+    created_at=_TS, is_active=False,
+)
+# _DISABLED добавить в список FakeUserRepository внутри _wire_fakes()
+
+
+def test_login_disabled_account_has_code() -> None:
+    _wire_fakes()
+    client = TestClient(app)
+    resp = client.post("/api/auth/login", json={"email": "off@mr.kz", "password": "offpw"})
+    assert resp.status_code == 401
+    assert resp.json() == {"detail": "Учётная запись отключена", "code": "account_disabled"}
+```
+
+(если у `User` поле называется иначе — сверить с `app/domain/entities.py`; пароль должен быть верным, чтобы дойти до проверки `is_active`).
+
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `cd backend; $env:PYTHONIOENCODING = "utf-8"; uv run pytest tests/test_authz_matrix.py -v`
 Expected: новые тесты FAIL (`code` отсутствует), старые PASS.
 
-- [ ] **Step 3: Implement** — в `backend/app/api/deps.py` добавить импорт `from app.api.errors import ApiError` и заменить:
+- [ ] **Step 3: Implement** — в `backend/app/services/auth_service.py:46`:
+
+```python
+            raise AuthError("Учётная запись отключена", code="account_disabled")
+```
+
+В `backend/app/api/deps.py` добавить импорт `from app.api.errors import ApiError` и заменить:
 
 ```python
     unauthorized = ApiError(
@@ -474,8 +504,8 @@ Expected: полный прогон зелёный.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add backend/app/api/deps.py backend/tests/test_authz_matrix.py
-git commit -m "feat(api): коды not_authenticated/admin_required в auth-точках deps"
+git add backend/app/api/deps.py backend/app/services/auth_service.py backend/tests/test_authz_matrix.py backend/tests/test_auth_routes.py
+git commit -m "feat(auth): коды not_authenticated/admin_required/account_disabled"
 ```
 
 ---
@@ -581,6 +611,8 @@ raise ApiError(
 )
 # upload :120-123
 except ValueError as exc:  # нет обязательных колонок — до put в MinIO
+    # код estimate_missing_columns достаётся ЛЮБОМУ ValueError разбора (сегодня он один);
+    # новый ValueError в парсере должен получить свой код, а не унаследовать этот молча
     raise ApiError(
         status.HTTP_422_UNPROCESSABLE_CONTENT, "estimate_missing_columns", str(exc)
     ) from exc
@@ -713,6 +745,9 @@ except DeletionGuardError as exc:
         {"message": str(exc), "force_required": True, "deleted": exc.deleted},
     ) from exc
 ```
+
+Объектную форму `detail` у DeletionGuard скопировать посимвольно из текущего роута
+(`articles.py:117-120`) — инвариант «detail сохраняется как есть» касается и ключей объекта.
 
 Внимание: `DuplicateError` в create-роуте несёт код точки raise (`article_code_exists`), а не классовый дефолт — глобальный хендлер `DuplicateError` из Task 2 сюда не доходит (роут ловит раньше), логика не конфликтует.
 
@@ -874,3 +909,14 @@ gh pr create --title "feat(backend): машинные коды ошибок (э�
 ```
 
 Тело PR: цель, ссылка на спеку, инвариант совместимости, чек-лист доменов. PR-2 (фронт) стартует после мержа.
+
+---
+
+## Self-Review Checklist (спека → задачи)
+
+- [ ] §3.1 доменный слой: `DomainError` + 13 классов + `EstimateNotFoundError`/`EstimateRowNotFoundError` — Task 1; замена `LookupError`-точек в сервисах — Task 4.
+- [ ] §3.2 API-слой: `ErrorOut`/`ApiError`/хендлеры (вкл. 422 + `jsonable_encoder`) — Task 2; auth-точки `deps` + `account_disabled` — Task 3; роуты смет — Task 4; роуты справочника + DeletionGuard — Task 5.
+- [ ] §3.3 серая зона: миграция `0010`, порт/репозиторий/фейки, 4 писателя, `EstimateDetailOut.status_code` — Task 6.
+- [ ] §3.4 контракт: каждый из 37 кодов имеет точку в Task 1–6 (тексты — посимвольно из таблицы); серии `matching_*`/`match_*` не перепутаны.
+- [ ] §3.5 тесты: представительный код-тест на каждый домен (auth — T2/T3, articles/import — T5, estimates/upload/review/completion/export — T4, infra 503 — T4, валидация — T2, персист — T6); санкционированные правки текстов — только `test_estimate_sweep.py` (2 шт.) и `test_import_endpoint.py:79`.
+- [ ] Инвариант совместимости: полный прогон без правок прочих текстовых ассертов — Task 7.
