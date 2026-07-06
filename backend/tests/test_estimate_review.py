@@ -35,6 +35,29 @@ def test_confirm_no_match_is_422(client, auth_headers, estimate_repo, seed_estim
         headers=auth_headers, json={"action": "confirm"},
     )
     assert resp.status_code == 422
+    assert resp.json()["code"] == "review_confirm_no_recommendation"
+
+
+def test_pick_without_article_id_is_422(client, auth_headers, estimate_repo, seed_estimate):
+    eid, nid = seed_estimate
+    _match(estimate_repo, nid, EstimateRowStatus.NO_MATCH)
+    resp = client.patch(
+        f"/api/estimates/{eid}/rows/{nid}/review",
+        headers=auth_headers, json={"action": "pick", "article_id": None},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "review_pick_requires_article"
+
+
+def test_pick_nonexistent_article_is_422(client, auth_headers, estimate_repo, seed_estimate):
+    eid, nid = seed_estimate
+    _match(estimate_repo, nid, EstimateRowStatus.NO_MATCH)
+    resp = client.patch(
+        f"/api/estimates/{eid}/rows/{nid}/review",
+        headers=auth_headers, json={"action": "pick", "article_id": 999999},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "review_article_not_found"
 
 
 def test_pick_candidate_overridden(client, auth_headers, estimate_repo, seed_estimate):
@@ -83,6 +106,7 @@ def test_review_pending_row_409(client, auth_headers, estimate_repo, seed_estima
         headers=auth_headers, json={"action": "confirm"},
     )
     assert resp.status_code == 409
+    assert resp.json()["code"] == "row_not_matched"
 
 
 def test_review_excluded_row_409(client, auth_headers, estimate_repo, seed_estimate):
@@ -97,6 +121,7 @@ def test_review_excluded_row_409(client, auth_headers, estimate_repo, seed_estim
             headers=auth_headers, json=action,
         )
         assert resp.status_code == 409, action
+        assert resp.json()["code"] == "row_not_reviewable", action
 
 
 def test_review_foreign_estimate_404(client, other_auth_headers, estimate_repo, seed_estimate):
@@ -108,6 +133,7 @@ def test_review_foreign_estimate_404(client, other_auth_headers, estimate_repo, 
         headers=other_auth_headers, json={"action": "confirm"},
     )
     assert resp.status_code == 404
+    assert resp.json()["code"] == "estimate_not_found"
 
 
 def test_pick_and_reject_keep_ai_snapshot(

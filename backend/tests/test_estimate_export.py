@@ -71,6 +71,7 @@ def test_export_strict_409_when_unreviewed(
     )
     resp = client.get(f"/api/estimates/{eid}/export?strict=true", headers=auth_headers)
     assert resp.status_code == 409
+    assert resp.json()["code"] == "export_unreviewed_rows"
 
 
 def test_export_storage_down_503(
@@ -81,3 +82,10 @@ def test_export_storage_down_503(
     # (контракт порта ObjectStorage.get, как реальный S3-адаптер) → роут отвечает 503, не 500.
     resp = client.get(f"/api/estimates/{eid}/export", headers=auth_headers)
     assert resp.status_code == 503
+    assert resp.json()["code"] == "storage_unavailable"
+
+
+def test_export_missing_estimate_404(client, auth_headers) -> None:
+    resp = client.get("/api/estimates/999999/export", headers=auth_headers)
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "estimate_not_found"

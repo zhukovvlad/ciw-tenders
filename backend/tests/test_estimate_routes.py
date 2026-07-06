@@ -119,6 +119,18 @@ def test_upload_rejects_bad_extension_without_storage() -> None:
     assert storage.put_calls == [] and repo.create_calls == 0
 
 
+def test_upload_wrong_extension_body() -> None:
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    client = _client(repo, storage)
+    resp = client.post(
+        "/api/estimates",
+        files={"file": ("smeta.txt", b"not xlsx", "text/plain")},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "file_not_xlsx"
+    assert resp.json()["detail"] == "Ожидается файл .xlsx"
+
+
 def test_upload_rejects_bad_signature() -> None:
     repo, storage = FakeEstimateRepository(), FakeObjectStorage()
     client = _client(repo, storage)
@@ -151,6 +163,7 @@ def test_upload_storage_unavailable_503() -> None:
     client = _client(repo, storage)
     resp = client.post("/api/estimates", files={"file": ("смета.xlsx", _xlsx(), _XLSX)})
     assert resp.status_code == 503
+    assert resp.json()["code"] == "storage_unavailable"
     assert repo.create_calls == 0
 
 
@@ -163,6 +176,14 @@ def test_list_and_get_ownership() -> None:
     assert len(client.get("/api/estimates").json()["items"]) == 1
     other = _client(repo, storage, user=_user(uid=9))  # чужой
     assert other.get("/api/estimates/1").status_code == 404
+
+
+def test_get_missing_estimate_body() -> None:
+    repo, storage = FakeEstimateRepository(), FakeObjectStorage()
+    client = _client(repo, storage)
+    resp = client.get("/api/estimates/999999")
+    assert resp.status_code == 404
+    assert resp.json() == {"detail": "Смета не найдена", "code": "estimate_not_found"}
 
 
 def test_delete_removes_object() -> None:

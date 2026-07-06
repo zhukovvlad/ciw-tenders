@@ -8,7 +8,7 @@ def test_retrigger_sweeps_stale_running(client, auth_headers, estimate_repo, see
     resp = client.post(f"/api/estimates/{eid}/match", headers=auth_headers)
     assert resp.status_code == 202
     assert estimate_repo.statuses[eid] == "pending"  # сброшено
-    assert "после сбоя" in resp.json()["detail"]
+    assert resp.json()["code"] == "match_requeued"
 
 
 def test_retrigger_running_not_stale_no_reset(client, auth_headers, estimate_repo, seed_estimate):
@@ -17,7 +17,7 @@ def test_retrigger_running_not_stale_no_reset(client, auth_headers, estimate_rep
     resp = client.post(f"/api/estimates/{eid}/match", headers=auth_headers)
     assert resp.status_code == 202
     assert estimate_repo.statuses[eid] == "running"
-    assert resp.json()["detail"] == "уже выполняется"
+    assert resp.json()["code"] == "match_already_running"
 
 
 def test_retrigger_stale_but_lock_held_no_reset(client, auth_headers, estimate_repo, seed_estimate):

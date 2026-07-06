@@ -16,7 +16,11 @@ from app.api.deps import (
 )
 from app.api.schemas import EstimateDetailOut, EstimateSummaryOut
 from app.domain.entities import Estimate, EstimateNode, EstimateSummary, NewEstimate, Role, User
-from app.domain.errors import EstimateCompletedError, EstimateNotCompletableError
+from app.domain.errors import (
+    EstimateCompletedError,
+    EstimateNotCompletableError,
+    EstimateNotFoundError,
+)
 from app.main import app
 from app.services.article_service import ArticleService
 from app.services.estimate_parser import EstimateParser
@@ -110,13 +114,13 @@ def test_complete_running_estimate_rejected() -> None:
 
 def test_complete_unknown_estimate_raises_lookup() -> None:
     service, _ = _service_with_ready_estimate()
-    with pytest.raises(LookupError):
+    with pytest.raises(EstimateNotFoundError):
         service.set_completed(9999, 1, is_admin=False, completed=True)
 
 
 def test_complete_foreign_estimate_raises_lookup_for_non_admin() -> None:
     service, est = _service_with_ready_estimate()  # владелец user_id=1
-    with pytest.raises(LookupError):
+    with pytest.raises(EstimateNotFoundError):
         service.set_completed(est.id, 2, is_admin=False, completed=True)
 
 
@@ -208,12 +212,14 @@ def test_patch_completion_route_conflict_for_running(client_with_running_estimat
     client, est_id = client_with_running_estimate
     resp = client.patch(f"/api/estimates/{est_id}/completion", json={"completed": True})
     assert resp.status_code == 409
+    assert resp.json()["code"] == "estimate_not_completable"
 
 
 def test_patch_completion_route_404(client_with_ready_estimate) -> None:
     client, _ = client_with_ready_estimate
     resp = client.patch("/api/estimates/9999/completion", json={"completed": True})
     assert resp.status_code == 404
+    assert resp.json()["code"] == "estimate_not_found"
 
 
 def test_review_row_conflict_when_estimate_completed(client_with_ready_estimate) -> None:
@@ -225,3 +231,4 @@ def test_review_row_conflict_when_estimate_completed(client_with_ready_estimate)
         json={"action": "confirm", "article_id": None},
     )
     assert resp.status_code == 409
+    assert resp.json()["code"] == "estimate_completed_readonly"
