@@ -250,6 +250,7 @@ class Estimate:
     created_at: datetime
     rows: list[StoredEstimateRow] = field(default_factory=list)
     status_detail: str | None = None
+    status_code: str | None = None  # машинный код статуса матчинга (этап 4, PR-1)
     is_reference: bool = False  # эталонная (источник фонда) — UI гидратирует тумблер
     completed_at: datetime | None = None  # оператор закрыл ревью (этап 1 UX); None = открыта
     # аномалии парсинга (этап 3 UX)

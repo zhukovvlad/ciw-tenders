@@ -295,7 +295,10 @@ def _do_sweep(repo: EstimateRepository, estimate_id: int, max_age_seconds: int) 
         return False
     try:
         repo.set_status(
-            estimate_id, EstimateStatus.PENDING, detail="сброшено после сбоя воркера"
+            estimate_id,
+            EstimateStatus.PENDING,
+            detail="сброшено после сбоя воркера",
+            code="matching_reset_after_crash",
         )
         return True
     finally:

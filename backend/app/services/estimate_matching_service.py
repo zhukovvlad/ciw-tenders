@@ -100,6 +100,7 @@ class EstimateMatchingService:
                     estimate_id,
                     EstimateStatus.PARTIAL_ERROR,
                     detail=f"errors={errors} unfinished={unfinished}",
+                    code="matching_partial_error",
                 )
             else:
                 self._estimates.set_status(estimate_id, EstimateStatus.READY)
@@ -108,7 +109,10 @@ class EstimateMatchingService:
             raise  # gate: обёртка ретраит/блокирует — summary НЕ пишем (не терминал)
         except Exception as exc:  # noqa: BLE001 — непредвиденный сбой не оставляем в running
             self._estimates.set_status(
-                estimate_id, EstimateStatus.PARTIAL_ERROR, detail=f"unexpected: {exc}"
+                estimate_id,
+                EstimateStatus.PARTIAL_ERROR,
+                detail=f"unexpected: {exc}",
+                code="matching_unexpected",
             )
             self._log_summary(estimate_id, counts, excluded, fund_hits, start)
             raise
@@ -239,7 +243,7 @@ class EstimateMatchingService:
                 self._estimates.touch(estimate_id)
         return counts
 
-    def mark_blocked(self, estimate_id: int, detail: str) -> None:
+    def mark_blocked(self, estimate_id: int, detail: str, code: str | None = None) -> None:
         """Вызывается обёрткой при исчерпании gate-retry. Под локом, не затирает реальный
         результат."""
         if not self._estimates.try_matching_lock(estimate_id):
@@ -247,6 +251,8 @@ class EstimateMatchingService:
         try:
             if self._estimates.get_status(estimate_id) in _TERMINAL:
                 return  # B успел сматчить на границе ретраев → не клоббим
-            self._estimates.set_status(estimate_id, EstimateStatus.BLOCKED, detail=detail)
+            self._estimates.set_status(
+                estimate_id, EstimateStatus.BLOCKED, detail=detail, code=code
+            )
         finally:
             self._estimates.release_matching_lock(estimate_id)

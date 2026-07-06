@@ -254,6 +254,7 @@ class EstimateDetailOut(BaseModel):
     filename: str
     status: str
     status_detail: str | None = None
+    status_code: str | None = None
     created_at: datetime
     is_reference: bool = False
     completed_at: datetime | None = None
@@ -276,6 +277,7 @@ class EstimateDetailOut(BaseModel):
         ]
         return cls(
             id=e.id, filename=e.filename, status=e.status, status_detail=e.status_detail,
+            status_code=e.status_code,
             created_at=e.created_at, is_reference=e.is_reference, completed_at=e.completed_at,
             rows=rows,
             anomalies=[StructuralAnomalyOut(**asdict(a)) for a in e.anomalies],

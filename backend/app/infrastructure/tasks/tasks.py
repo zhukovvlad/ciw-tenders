@@ -28,7 +28,9 @@ def run_match(service, estimate_id: int, *, is_final: bool) -> None:
         service.match_estimate(estimate_id)
     except DictionaryNotReadyError as exc:
         if is_final:
-            service.mark_blocked(estimate_id, detail=f"timeout ждали справочник: {exc}")
+            service.mark_blocked(
+                estimate_id, detail=f"timeout ждали справочник: {exc}", code=exc.code
+            )
             return
         raise
 

@@ -366,6 +366,7 @@ class FakeEstimateRepository(EstimateRepository):
         self.nodes: dict[int, dict] = {}  # node_id -> {estimate_id, embedding_input, ...}
         self.statuses: dict[int, str] = {}  # estimate_id -> status
         self.details: dict[int, str | None] = {}
+        self.codes: dict[int, str | None] = {}
         self.touch_count: dict[int, int] = {}
         self._locks: set[int] = set()
         self.stale_running: set[int] = set()
@@ -426,6 +427,7 @@ class FakeEstimateRepository(EstimateRepository):
         self.estimates[eid] = est
         self.statuses[eid] = "pending"
         self.details[eid] = None
+        self.codes[eid] = None
         self.touch_count[eid] = 0
         self._keys[eid] = new.original_object_key
         return est
@@ -470,6 +472,7 @@ class FakeEstimateRepository(EstimateRepository):
             status=self.statuses.get(est.id, est.status),
             created_at=est.created_at, rows=rows,
             status_detail=self.details.get(est.id),
+            status_code=self.codes.get(est.id),
             is_reference=estimate_id in self.reference_ids,
             completed_at=self.completed.get(estimate_id),
             anomalies=est.anomalies,
@@ -525,10 +528,15 @@ class FakeEstimateRepository(EstimateRepository):
         self._locks.discard(estimate_id)
 
     def set_status(
-        self, estimate_id: int, status: EstimateStatus, detail: str | None = None
+        self,
+        estimate_id: int,
+        status: EstimateStatus,
+        detail: str | None = None,
+        code: str | None = None,
     ) -> None:
         self.statuses[estimate_id] = str(status)
         self.details[estimate_id] = detail
+        self.codes[estimate_id] = code
         self.touch_count[estimate_id] = self.touch_count.get(estimate_id, 0) + 1
 
     def touch(self, estimate_id: int) -> None:

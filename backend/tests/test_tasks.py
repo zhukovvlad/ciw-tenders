@@ -17,7 +17,7 @@ class _Service:
             raise DictionaryNotReadyError(total=0, pending=0)
         self.matched.append(estimate_id)
 
-    def mark_blocked(self, estimate_id: int, detail: str) -> None:
+    def mark_blocked(self, estimate_id: int, detail: str, code: str | None = None) -> None:
         self.blocked.append(estimate_id)
 
 

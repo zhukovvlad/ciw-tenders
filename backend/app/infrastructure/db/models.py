@@ -86,6 +86,7 @@ class EstimateModel(Base):
     original_object_key: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="pending")
     status_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_reference: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
