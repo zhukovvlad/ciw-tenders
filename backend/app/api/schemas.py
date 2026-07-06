@@ -21,6 +21,13 @@ from app.domain.entities import (
 )
 
 
+class ErrorOut(BaseModel):
+    """Единая форма тела ошибки: русский detail (fallback) + машинный code."""
+
+    detail: str | dict
+    code: str
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=1, max_length=1024)
