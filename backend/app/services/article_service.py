@@ -19,21 +19,27 @@ class ArticleService:
     ) -> TemplateArticle:
         if re.fullmatch(r"\d+(\.\d+)*", article_code) is None:
             raise TemplateValidationError(
-                f"Код {article_code} должен состоять из числовых сегментов (напр. 1.4.1)"
+                f"Код {article_code} должен состоять из числовых сегментов (напр. 1.4.1)",
+                code="article_code_not_numeric",
             )
         if self._repository.get_by_code(article_code) is not None:
-            raise DuplicateError(f"Статья с кодом {article_code} уже существует")
+            raise DuplicateError(
+                f"Статья с кодом {article_code} уже существует", code="article_code_exists"
+            )
         if self._repository.has_descendant_codes(article_code):
             raise TemplateValidationError(
                 f"Код {article_code} стал бы предком существующих статей — "
-                "воспользуйтесь импортом справочника"
+                "воспользуйтесь импортом справочника",
+                code="article_code_would_be_ancestor",
             )
         parent_id: int | None = None
         embedding_input = name
         if parent_code:
             parent = self._repository.get_by_code(parent_code)
             if parent is None:
-                raise TemplateValidationError(f"Родитель с кодом {parent_code} не найден")
+                raise TemplateValidationError(
+                    f"Родитель с кодом {parent_code} не найден", code="article_parent_not_found"
+                )
             parent_id = parent.id
             embedding_input = f"{parent.embedding_input}. {name}"
         article = TemplateArticle(

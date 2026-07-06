@@ -57,7 +57,9 @@ class TemplateParser:
                 skipped.append(cell)
                 continue
             if code in name_by_code:
-                raise TemplateValidationError(f"Дубликат кода в файле: {code}")
+                raise TemplateValidationError(
+                    f"Дубликат кода в файле: {code}", code="template_duplicate_code"
+                )
             name_by_code[code] = name
             order.append(code)
 
@@ -69,7 +71,9 @@ class TemplateParser:
         segments = code.split(".")
         parent_code = ".".join(segments[:-1]) or None
         if parent_code is not None and parent_code not in name_by_code:
-            raise TemplateValidationError(f"Сирота: у кода {code} нет родителя {parent_code}")
+            raise TemplateValidationError(
+                f"Сирота: у кода {code} нет родителя {parent_code}", code="template_orphan_parent"
+            )
         ancestors = [".".join(segments[:i]) for i in range(1, len(segments) + 1)]
         embedding_input = ". ".join(name_by_code[a] for a in ancestors)
         return ParsedTemplateRow(

@@ -76,7 +76,9 @@ def test_import_root_deletion_returns_409() -> None:
     app.dependency_overrides.clear()
 
     assert resp.status_code == 409
-    assert resp.json()["detail"]["force_required"] is True
+    body = resp.json()
+    assert body["detail"]["force_required"] is True  # форма detail не изменилась
+    assert body["code"] == "template_deletion_guard"  # code на верхнем уровне
 
 
 def test_import_invalid_file_returns_400() -> None:
@@ -92,6 +94,23 @@ def test_import_invalid_file_returns_400() -> None:
     app.dependency_overrides.clear()
 
     assert resp.status_code == 400
+    assert resp.json()["code"] == "template_duplicate_code"
+
+
+def test_import_orphan_parent_returns_400_with_code() -> None:
+    repo = FakeImportRepository()
+    app.dependency_overrides[get_current_user] = _admin
+    app.dependency_overrides[get_template_ingest_service] = _service_factory(repo)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/articles/import",
+        files={"file": ("Шаблон.xlsx", _xlsx(["(1.) Раздел", "(2.5.) Без родителя 2"]), _XLSX)},
+    )
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "template_orphan_parent"
 
 
 def test_import_requires_admin() -> None:

@@ -15,6 +15,12 @@ def test_search_short_query_400(client, auth_headers):
     assert resp.status_code == 400
 
 
+def test_short_query_body(client, auth_headers) -> None:
+    resp = client.get("/api/articles/search", params={"q": "а"}, headers=auth_headers)
+    assert resp.status_code == 400
+    assert resp.json() == {"detail": "Запрос слишком короткий", "code": "search_query_too_short"}
+
+
 def test_search_includes_unembedded(client, auth_headers, article_repo):
     # ручной подбор должен видеть статьи без эмбеддинга (embedding IS NULL)
     article_repo.add_article(id=3, code="2.2", name="Кровля")  # фейк: embedding=None
