@@ -282,4 +282,30 @@ describe("ContextStrip", () => {
     const header = screen.getByText("Подраздел Б").closest("[data-row]")!
     expect(header.className).toContain("font-medium")
   })
+
+  it("подпись панели «Окружение в смете» рендерится", () => {
+    render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />)
+    expect(screen.getByText(/Окружение в смете/i)).toBeInTheDocument()
+  })
+
+  it("контейнер полосы залит sunken-токеном и отбит воздухом снизу", () => {
+    const { container } = render(
+      <ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />
+    )
+    const root = container.firstElementChild!
+    // утопленная поверхность (справка ≠ обведённые кнопки кандидатов)
+    expect(root.className).toContain("bg-[var(--ds-surface-sunken)]")
+    // воздух полоса↔кандидаты больше внутристрочного шага (спека §3 п.4)
+    expect(root.className).toContain("mb-")
+  })
+
+  it("строки полосы не несут словаря кандидата (регресс-гвард роли)", () => {
+    render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />)
+    // неактивная строка: нет фрейма кандидата (rounded-md + border-border);
+    // гвард проверяет словарь, а не подстроку «border» — Task 3 навесит
+    // border-l-2 border-transparent, что этот гвард переживёт.
+    const other = screen.getByText("Строка 2").closest("[data-row]")!
+    expect(other.className).not.toContain("rounded")
+    expect(other.className).not.toContain("border-border")
+  })
 })

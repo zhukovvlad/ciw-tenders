@@ -53,7 +53,17 @@ export function ContextStrip({
   const start = Math.max(0, i - WINDOW)
   const win = ordered.slice(start, i + WINDOW + 1)
   return (
-    <div className={cn("rounded-md border text-xs", dsHairline)}>
+    <div
+      className={cn(
+        "mb-4 rounded-md border bg-[var(--ds-surface-sunken)] text-xs",
+        dsHairline
+      )}
+    >
+      {/* Подпись справочной панели (спека 3.6 §2 п.2): тот же типографический
+          словарь, что подпись разделителя «Раздел — …» ниже. */}
+      <div className="px-3 pt-2 pb-1 text-[11px] tracking-wide text-muted-foreground uppercase">
+        Окружение в смете
+      </div>
       {win.map((r, j) => {
         const g = start + j
         const boundary = j > 0 && !pathsEqual(paths[g - 1], paths[g])
