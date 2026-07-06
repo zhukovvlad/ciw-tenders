@@ -344,4 +344,25 @@ describe("ContextStrip", () => {
       within(neighbor).getByTitle("3.2 Устройство гидроизоляции фундамента")
     ).toBeInTheDocument()
   })
+
+  it("активная строка — перекрашенная кромка + тинт, маркер сохранён", () => {
+    render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />)
+    const active = screen
+      .getByText("Строка 3")
+      .closest("[data-row]") as HTMLElement
+    expect(active.className).toContain("border-l-2")
+    // тон перекрашен (не прозрачный) — twMerge схлопывает border-transparent
+    expect(active.className).not.toContain("border-transparent")
+    // тинт из 3.5 сохранён
+    expect(active.className).toContain("bg-[color-mix")
+    // маркер «вы здесь» сохранён
+    expect(within(active).getByLabelText("вы здесь")).toBeInTheDocument()
+  })
+
+  it("неактивная строка несёт кромку-резерв прозрачным тоном (нет «дёрга»)", () => {
+    render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />)
+    const other = screen.getByText("Строка 2").closest("[data-row]")!
+    expect(other.className).toContain("border-l-2")
+    expect(other.className).toContain("border-transparent")
+  })
 })
