@@ -16,10 +16,18 @@ _ADMIN = User(
 _USER = User(
     id=2, email="user@mr.kz", password_hash="hashed::userpw", role=Role.USER, created_at=_TS
 )
+_DISABLED = User(
+    id=3,
+    email="off@mr.kz",
+    password_hash="hashed::offpw",
+    role=Role.USER,
+    created_at=_TS,
+    is_active=False,
+)
 
 
 def _wire_fakes() -> None:
-    repo = FakeUserRepository([_ADMIN, _USER])
+    repo = FakeUserRepository([_ADMIN, _USER, _DISABLED])
     app.dependency_overrides[get_user_repository] = lambda: repo
     app.dependency_overrides[get_password_hasher] = FakePasswordHasher
     app.dependency_overrides[get_token_service] = FakeTokenService
@@ -42,6 +50,14 @@ def test_login_bad_credentials_401() -> None:
     client = TestClient(app)
     resp = client.post("/api/auth/login", json={"email": "admin@mr.kz", "password": "wrong"})
     assert resp.status_code == 401
+
+
+def test_login_disabled_account_has_code() -> None:
+    _wire_fakes()
+    client = TestClient(app)
+    resp = client.post("/api/auth/login", json={"email": "off@mr.kz", "password": "offpw"})
+    assert resp.status_code == 401
+    assert resp.json() == {"detail": "Учётная запись отключена", "code": "account_disabled"}
 
 
 def test_protected_route_without_token_is_401_not_403() -> None:

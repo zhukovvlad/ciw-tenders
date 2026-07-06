@@ -8,10 +8,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import lru_cache
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.api.errors import ApiError
 from app.core.config import get_settings
 from app.domain.entities import EstimateStatus, Role, User
 from app.domain.errors import TokenError
@@ -89,9 +90,10 @@ def get_current_user(
     users: UserRepository = Depends(get_user_repository),
     tokens: TokenService = Depends(get_token_service),
 ) -> User:
-    unauthorized = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Не аутентифицирован",
+    unauthorized = ApiError(
+        status.HTTP_401_UNAUTHORIZED,
+        "not_authenticated",
+        "Не аутентифицирован",
         headers={"WWW-Authenticate": "Bearer"},
     )
     if creds is None:
@@ -108,9 +110,10 @@ def get_current_user(
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role is not Role.ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Требуются права администратора",
+        raise ApiError(
+            status.HTTP_403_FORBIDDEN,
+            "admin_required",
+            "Требуются права администратора",
         )
     return user
 

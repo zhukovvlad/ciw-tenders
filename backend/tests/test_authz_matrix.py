@@ -89,3 +89,27 @@ def test_delete_all_articles_allowed_for_admin() -> None:
     resp = client.delete("/api/articles", headers={"Authorization": "Bearer token::1"})
     assert resp.status_code == 200
     assert resp.json() == {"deleted": 0}
+
+
+def test_401_body_has_not_authenticated_code() -> None:
+    _wire()
+    client = TestClient(app)
+    resp = client.get("/api/articles")  # без Authorization
+    assert resp.status_code == 401
+    assert resp.json() == {"detail": "Не аутентифицирован", "code": "not_authenticated"}
+    assert resp.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_403_body_has_admin_required_code() -> None:
+    _wire()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/articles",
+        headers={"Authorization": "Bearer token::2"},
+        json={"article_code": "1", "name": "n"},
+    )
+    assert resp.status_code == 403
+    assert resp.json() == {
+        "detail": "Требуются права администратора",
+        "code": "admin_required",
+    }

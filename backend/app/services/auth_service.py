@@ -43,7 +43,7 @@ class AuthService:
         if not self._hasher.verify(password, user.password_hash):
             raise AuthError("Неверный email или пароль")
         if not user.is_active:
-            raise AuthError("Учётная запись отключена")
+            raise AuthError("Учётная запись отключена", code="account_disabled")
         return self._tokens.issue(user)
 
     def create_user(self, email: str, password: str, role: Role = Role.USER) -> User:
