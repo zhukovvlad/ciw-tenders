@@ -365,4 +365,19 @@ describe("ContextStrip", () => {
     expect(other.className).toContain("border-l-2")
     expect(other.className).toContain("border-transparent")
   })
+
+  it("рядовой сосед приглушён по тону, открывашка — полный тон (вторая ось)", () => {
+    // headerRows: row2 «Подраздел Б» — открывашка (next.breadcrumb = [Топ,Подраздел Б]);
+    // row1 «Работа А1» — рядовой сосед; active=3 → окно включает обе, обе не активны.
+    render(
+      <ContextStrip
+        state={initReview("x", headerRows("needs_review"))}
+        activeRowNumber={3}
+      />
+    )
+    const ordinaryName = screen.getByText("Работа А1")
+    const openerName = screen.getByText("Подраздел Б")
+    expect(ordinaryName.className).toContain("text-[var(--ds-text-2)]")
+    expect(openerName.className).not.toContain("text-[var(--ds-text-2)]")
+  })
 })

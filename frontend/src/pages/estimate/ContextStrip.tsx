@@ -112,7 +112,20 @@ export function ContextStrip({
               <span className="font-mono text-muted-foreground">
                 {r.section_code}
               </span>
-              <span className="truncate">{r.source_name}</span>
+              <span
+                className={cn(
+                  "truncate",
+                  // Вторая ось открывашки (спека §2 решение #6): опускаем фон —
+                  // рядовой сосед (не активная, не открывашка) приглушается, а
+                  // открывашка остаётся на полном тоне + font-medium. Её классы
+                  // не трогаются, изгородь 3.5 цела.
+                  !openers[g] &&
+                    r.row_number !== activeRowNumber &&
+                    "text-[var(--ds-text-2)]"
+                )}
+              >
+                {r.source_name}
+              </span>
               {r.row_number === activeRowNumber ? (
                 // статус активной дублировал бы решаемое прямо сейчас (спека 3.5 §2)
                 <ArrowLeft
