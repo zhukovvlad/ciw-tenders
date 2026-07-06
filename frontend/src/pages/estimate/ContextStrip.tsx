@@ -27,12 +27,20 @@ function pathsEqual(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((x, k) => x === b[k])
 }
 
-function rightSide(state: ReviewState, r: MatchRow): string {
-  // форма Decision сверена по types.ts: confirmed-вариант несёт code/name
-  // (при изменении Decision сверь по lib/types.ts, не выдумывай поля)
+// Присвоенный сосед: код статьи (моноширинно) — сигнал «ушёл вон куда»; полное
+// имя в title. Однородный раздел иначе повторял бы длинный хвост имени в каждой
+// строке и весил больше кандидатов (спека 3.6 §2 п.3). Осознанный trade-off:
+// title недоступен с клавиатуры/тача — для сигнала соседства кода достаточно.
+// Неприсвоенные соседи — статусная подпись без изменений.
+// (форму Decision.confirmed сверять по lib/types.ts, не выдумывать поля)
+function rightSide(
+  state: ReviewState,
+  r: MatchRow
+): { text: string; title?: string; mono?: boolean } {
   const d = decisionFor(state, r)
-  if (d.kind === "confirmed") return `${d.code} ${d.name}`
-  return statusLabel(r, d)
+  if (d.kind === "confirmed")
+    return { text: d.code, title: `${d.code} ${d.name}`, mono: true }
+  return { text: statusLabel(r, d) }
 }
 
 export function ContextStrip({
@@ -74,6 +82,7 @@ export function ContextStrip({
         // корню, «путь укоротился») — разделитель без подписи.
         const label = paths[g][paths[g].length - 1]
         const muted = r.status === "excluded" || r.status === "pending"
+        const rs = rightSide(state, r)
         return (
           <div key={r.row_number}>
             {divider && (
@@ -111,8 +120,14 @@ export function ContextStrip({
                   className="ml-auto size-3 shrink-0 text-primary"
                 />
               ) : (
-                <span className="ml-auto shrink-0 text-muted-foreground">
-                  → {rightSide(state, r)}
+                <span
+                  title={rs.title}
+                  className={cn(
+                    "ml-auto shrink-0 text-muted-foreground",
+                    rs.mono && "font-mono"
+                  )}
+                >
+                  → {rs.text}
                 </span>
               )}
             </div>

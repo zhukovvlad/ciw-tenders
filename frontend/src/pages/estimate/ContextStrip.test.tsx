@@ -308,4 +308,40 @@ describe("ContextStrip", () => {
     expect(other.className).not.toContain("rounded")
     expect(other.className).not.toContain("border-border")
   })
+
+  // Присвоенный сосед (confident → confirmed через initReview): справа — код
+  // статьи, полное имя — только в title (спека §2 п.3, осознанный trade-off).
+  const ASSIGNED_ROWS: MatchRow[] = [
+    row(1, 0, "confident", {
+      source_name: "Сосед",
+      breadcrumb: ["Раздел"],
+      matched_code: "3.2",
+      matched_name: "Устройство гидроизоляции фундамента",
+    }),
+    row(2, 1, "needs_review", {
+      source_name: "Активная",
+      breadcrumb: ["Раздел"],
+    }),
+  ]
+
+  it("правая часть присвоенного соседа — код, полное имя в title", () => {
+    render(
+      <ContextStrip
+        state={initReview("x", ASSIGNED_ROWS)}
+        activeRowNumber={2}
+      />
+    )
+    const neighbor = screen
+      .getByText("Сосед")
+      .closest("[data-row]") as HTMLElement
+    // справа код, НЕ полное имя (однородный раздел не повторяет длинный хвост)
+    expect(neighbor.textContent).toContain("→ 3.2")
+    expect(neighbor.textContent).not.toContain(
+      "Устройство гидроизоляции фундамента"
+    )
+    // полное имя доступно в title
+    expect(
+      within(neighbor).getByTitle("3.2 Устройство гидроизоляции фундамента")
+    ).toBeInTheDocument()
+  })
 })
