@@ -422,9 +422,83 @@ git commit -m "feat(ux3.6): приглушение имени рядового �
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 ```
 
+### Task 6: excluded/pending вне тонового приглушения (`!muted`)
+
+Добавлена по живому гейту 2026-07-06 (спека §2 решение #6 финал). excluded/pending
+уже несут свою ось «тихо» — `opacity-60`; тон-приглушение поверх было бы двойным
+кодированием и риском двойного затухания на sunken. Гейт показал 0 excluded-
+не-открывашек на 4 сметы (двойное затухание в данных не возникает), `!muted`
+закрывает и теоретический хвост (excluded-лист без детей) по конструкции.
+
+**Files:**
+- Modify: `frontend/src/pages/estimate/ContextStrip.tsx` (условие тон-приглушения имени, строка из Task 5)
+- Test: `frontend/src/pages/estimate/ContextStrip.test.tsx`
+
+**Interfaces:**
+- Consumes: `muted` (уже вычислен в компоненте: `r.status === "excluded" || r.status === "pending"`).
+
+- [ ] **Step 1: Write the failing test**
+
+```tsx
+it("excluded/pending рядовой сосед НЕ приглушается тоном (своя ось opacity-60)", () => {
+  // excluded НЕ-открывашка (next.breadcrumb === текущему, не +1), не активная:
+  // после Task 5 попал бы под text-2; решение #6 (!muted) его исключает.
+  const rows = [
+    row(1, 0, "excluded", { source_name: "Орг-лист", breadcrumb: ["Топ"] }),
+    row(2, 1, "needs_review", { source_name: "Активная", breadcrumb: ["Топ"] }),
+  ]
+  render(<ContextStrip state={initReview("x", rows)} activeRowNumber={2} />)
+  const name = screen.getByText("Орг-лист")
+  expect(name.className).not.toContain("text-[var(--ds-text-2)]")
+})
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd frontend; npx vitest run src/pages/estimate/ContextStrip.test.tsx`
+Expected: FAIL — «Орг-лист» (excluded, не-открывашка, не активная) сейчас несёт
+`text-[var(--ds-text-2)]` (условие Task 5 его не исключает).
+
+- [ ] **Step 3: Write minimal implementation**
+
+`ContextStrip.tsx` — к условию тон-приглушения имени добавить `&& !muted`:
+
+```tsx
+              <span
+                className={cn(
+                  "truncate",
+                  // excluded/pending исключены (спека §2 решение #6): у них своя
+                  // ось «тихо» — opacity-60; тон был бы двойным кодированием.
+                  !openers[g] &&
+                    r.row_number !== activeRowNumber &&
+                    !muted &&
+                    "text-[var(--ds-text-2)]"
+                )}
+              >
+                {r.source_name}
+              </span>
+```
+
+(`muted` уже объявлен строкой выше в теле `win.map`.)
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cd frontend; npx vitest run src/pages/estimate/ContextStrip.test.tsx`
+Expected: PASS. Тест Task 5 (рядовой WORK `needs_review` приглушён, открывашка —
+нет) остаётся зелёным: `needs_review` не muted.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add frontend/src/pages/estimate/ContextStrip.tsx frontend/src/pages/estimate/ContextStrip.test.tsx
+git commit -m "feat(ux3.6): excluded/pending вне тонового приглушения (своя ось opacity-60)
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
+```
+
 ### Task 4: Верификация — полный прогон, живой гейт, devlog, PR
 
-(Прогоняется ЗАНОВО после Task 5.)
+(Прогоняется ЗАНОВО после Task 5 и Task 6.)
 
 - [ ] **Step 1: Полный прогон**
 
@@ -475,13 +549,15 @@ PR `feat/ux-stage3-6-strip-surface` → `main` через
   моноширинно; статусные подписи неприсвоенных — без изменений).
 - **§3 п.5 (кромка активной) → Task 3** (кромка-резерв `border-l-2 border-transparent`
   на всех строках, активная перекрашивает тон; тинт и маркер сохранены).
-- **§3 п.6 (приглушение имени рядового соседа) → Task 5** (рядовой не-активный
-  не-открывашка → `text-[var(--ds-text-2)]`; открывашка/активная — полный тон;
+- **§3 п.6 (приглушение имени рядового соседа) → Task 5 + Task 6** (рядовой
+  не-активный не-открывашка **не-muted** → `text-[var(--ds-text-2)]`; открывашка/
+  активная/excluded/pending — полный тон; условие `!openers[g] && !active && !muted`;
   классы открывашки 3.5 не тронуты — вторая ось через приглушение окружения).
 - **§4 тесты:** подпись рендерится (Task 1); строки без словаря кандидата
   (Task 1); right-side присвоенного = код + title (Task 2); активная — кромка +
   тинт + маркер, неактивная — резерв прозрачным тоном (Task 3); рядовой сосед
-  приглушён, открывашка — нет (Task 5). Существующие
+  приглушён, открывашка — нет (Task 5); excluded/pending не приглушаются тоном
+  (Task 6). Существующие
   тесты семантики границы 3.5 остаются зелёными без правок (§4, Global
   Constraints) — маркер-тест, парный тест самообъявления, страж независимости
   от `MatchStatus`, «путь укоротился», «две границы» не затрагиваются.
