@@ -27,12 +27,20 @@ function pathsEqual(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((x, k) => x === b[k])
 }
 
-function rightSide(state: ReviewState, r: MatchRow): string {
-  // форма Decision сверена по types.ts: confirmed-вариант несёт code/name
-  // (при изменении Decision сверь по lib/types.ts, не выдумывай поля)
+// Присвоенный сосед: код статьи (моноширинно) — сигнал «ушёл вон куда»; полное
+// имя в title. Однородный раздел иначе повторял бы длинный хвост имени в каждой
+// строке и весил больше кандидатов (спека 3.6 §2 п.3). Осознанный trade-off:
+// title недоступен с клавиатуры/тача — для сигнала соседства кода достаточно.
+// Неприсвоенные соседи — статусная подпись без изменений.
+// (форму Decision.confirmed сверять по lib/types.ts, не выдумывать поля)
+function rightSide(
+  state: ReviewState,
+  r: MatchRow
+): { text: string; title?: string; mono?: boolean } {
   const d = decisionFor(state, r)
-  if (d.kind === "confirmed") return `${d.code} ${d.name}`
-  return statusLabel(r, d)
+  if (d.kind === "confirmed")
+    return { text: d.code, title: `${d.code} ${d.name}`, mono: true }
+  return { text: statusLabel(r, d) }
 }
 
 export function ContextStrip({
@@ -53,7 +61,17 @@ export function ContextStrip({
   const start = Math.max(0, i - WINDOW)
   const win = ordered.slice(start, i + WINDOW + 1)
   return (
-    <div className={cn("rounded-md border text-xs", dsHairline)}>
+    <div
+      className={cn(
+        "mb-4 rounded-md border bg-[var(--ds-surface-sunken)] text-xs",
+        dsHairline
+      )}
+    >
+      {/* Подпись справочной панели (спека 3.6 §2 п.2): тот же типографический
+          словарь, что подпись разделителя «Раздел — …» ниже. */}
+      <div className="px-3 pt-2 pb-1 text-[11px] tracking-wide text-muted-foreground uppercase">
+        Окружение в смете
+      </div>
       {win.map((r, j) => {
         const g = start + j
         const boundary = j > 0 && !pathsEqual(paths[g - 1], paths[g])
@@ -64,6 +82,7 @@ export function ContextStrip({
         // корню, «путь укоротился») — разделитель без подписи.
         const label = paths[g][paths[g].length - 1]
         const muted = r.status === "excluded" || r.status === "pending"
+        const rs = rightSide(state, r)
         return (
           <div key={r.row_number}>
             {divider && (
@@ -83,9 +102,9 @@ export function ContextStrip({
               data-opener={openers[g] || undefined}
               data-active={r.row_number === activeRowNumber || undefined}
               className={cn(
-                "flex items-center gap-2 px-3 py-1.5",
+                "flex items-center gap-2 border-l-2 border-transparent px-3 py-1.5",
                 r.row_number === activeRowNumber &&
-                  "bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]",
+                  "border-primary bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]",
                 muted && "opacity-60",
                 openers[g] && "font-medium"
               )}
@@ -93,7 +112,24 @@ export function ContextStrip({
               <span className="font-mono text-muted-foreground">
                 {r.section_code}
               </span>
-              <span className="truncate">{r.source_name}</span>
+              <span
+                className={cn(
+                  "truncate",
+                  // Вторая ось открывашки (спека §2 решение #6): опускаем фон —
+                  // рядовой сосед (не активная, не открывашка) приглушается, а
+                  // открывашка остаётся на полном тоне + font-medium. Её классы
+                  // не трогаются, изгородь 3.5 цела.
+                  // excluded/pending исключены (спека §2 решение #6 финал): у
+                  // них своя ось «тихо» — opacity-60; тон был бы двойным
+                  // кодированием и риском двойного затухания на sunken.
+                  !openers[g] &&
+                    r.row_number !== activeRowNumber &&
+                    !muted &&
+                    "text-[var(--ds-text-2)]"
+                )}
+              >
+                {r.source_name}
+              </span>
               {r.row_number === activeRowNumber ? (
                 // статус активной дублировал бы решаемое прямо сейчас (спека 3.5 §2)
                 <ArrowLeft
@@ -101,8 +137,14 @@ export function ContextStrip({
                   className="ml-auto size-3 shrink-0 text-primary"
                 />
               ) : (
-                <span className="ml-auto shrink-0 text-muted-foreground">
-                  → {rightSide(state, r)}
+                <span
+                  title={rs.title}
+                  className={cn(
+                    "ml-auto shrink-0 text-muted-foreground",
+                    rs.mono && "font-mono"
+                  )}
+                >
+                  → {rs.text}
                 </span>
               )}
             </div>

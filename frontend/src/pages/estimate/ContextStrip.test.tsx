@@ -282,4 +282,117 @@ describe("ContextStrip", () => {
     const header = screen.getByText("Подраздел Б").closest("[data-row]")!
     expect(header.className).toContain("font-medium")
   })
+
+  it("подпись панели «Окружение в смете» рендерится", () => {
+    render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />)
+    expect(screen.getByText(/Окружение в смете/i)).toBeInTheDocument()
+  })
+
+  it("контейнер полосы залит sunken-токеном и отбит воздухом снизу", () => {
+    const { container } = render(
+      <ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />
+    )
+    const root = container.firstElementChild!
+    // утопленная поверхность (справка ≠ обведённые кнопки кандидатов)
+    expect(root.className).toContain("bg-[var(--ds-surface-sunken)]")
+    // воздух полоса↔кандидаты больше внутристрочного шага (спека §3 п.4)
+    expect(root.className).toContain("mb-")
+  })
+
+  it("строки полосы не несут словаря кандидата (регресс-гвард роли)", () => {
+    render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />)
+    // неактивная строка: нет фрейма кандидата (rounded-md + border-border);
+    // гвард проверяет словарь, а не подстроку «border» — Task 3 навесит
+    // border-l-2 border-transparent, что этот гвард переживёт.
+    const other = screen.getByText("Строка 2").closest("[data-row]")!
+    expect(other.className).not.toContain("rounded")
+    expect(other.className).not.toContain("border-border")
+  })
+
+  // Присвоенный сосед (confident → confirmed через initReview): справа — код
+  // статьи, полное имя — только в title (спека §2 п.3, осознанный trade-off).
+  const ASSIGNED_ROWS: MatchRow[] = [
+    row(1, 0, "confident", {
+      source_name: "Сосед",
+      breadcrumb: ["Раздел"],
+      matched_code: "3.2",
+      matched_name: "Устройство гидроизоляции фундамента",
+    }),
+    row(2, 1, "needs_review", {
+      source_name: "Активная",
+      breadcrumb: ["Раздел"],
+    }),
+  ]
+
+  it("правая часть присвоенного соседа — код, полное имя в title", () => {
+    render(
+      <ContextStrip
+        state={initReview("x", ASSIGNED_ROWS)}
+        activeRowNumber={2}
+      />
+    )
+    const neighbor = screen
+      .getByText("Сосед")
+      .closest("[data-row]") as HTMLElement
+    // справа код, НЕ полное имя (однородный раздел не повторяет длинный хвост)
+    expect(neighbor.textContent).toContain("→ 3.2")
+    expect(neighbor.textContent).not.toContain(
+      "Устройство гидроизоляции фундамента"
+    )
+    // полное имя доступно в title
+    expect(
+      within(neighbor).getByTitle("3.2 Устройство гидроизоляции фундамента")
+    ).toBeInTheDocument()
+  })
+
+  it("активная строка — перекрашенная кромка + тинт, маркер сохранён", () => {
+    render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />)
+    const active = screen
+      .getByText("Строка 3")
+      .closest("[data-row]") as HTMLElement
+    expect(active.className).toContain("border-l-2")
+    // тон перекрашен (не прозрачный) — twMerge схлопывает border-transparent
+    expect(active.className).not.toContain("border-transparent")
+    // тинт из 3.5 сохранён
+    expect(active.className).toContain("bg-[color-mix")
+    // маркер «вы здесь» сохранён
+    expect(within(active).getByLabelText("вы здесь")).toBeInTheDocument()
+  })
+
+  it("неактивная строка несёт кромку-резерв прозрачным тоном (нет «дёрга»)", () => {
+    render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />)
+    const other = screen.getByText("Строка 2").closest("[data-row]")!
+    expect(other.className).toContain("border-l-2")
+    expect(other.className).toContain("border-transparent")
+  })
+
+  it("рядовой сосед приглушён по тону, открывашка — полный тон (вторая ось)", () => {
+    // headerRows: row2 «Подраздел Б» — открывашка (next.breadcrumb = [Топ,Подраздел Б]);
+    // row1 «Работа А1» — рядовой сосед; active=3 → окно включает обе, обе не активны.
+    render(
+      <ContextStrip
+        state={initReview("x", headerRows("needs_review"))}
+        activeRowNumber={3}
+      />
+    )
+    const ordinaryName = screen.getByText("Работа А1")
+    const openerName = screen.getByText("Подраздел Б")
+    expect(ordinaryName.className).toContain("text-[var(--ds-text-2)]")
+    expect(openerName.className).not.toContain("text-[var(--ds-text-2)]")
+  })
+
+  it("excluded/pending рядовой сосед НЕ приглушается тоном (своя ось opacity-60)", () => {
+    // excluded НЕ-открывашка (next.breadcrumb === текущему, не +1), не активная:
+    // после Task 5 попал бы под text-2; решение #6 (!muted) его исключает.
+    const rows = [
+      row(1, 0, "excluded", { source_name: "Орг-лист", breadcrumb: ["Топ"] }),
+      row(2, 1, "needs_review", {
+        source_name: "Активная",
+        breadcrumb: ["Топ"],
+      }),
+    ]
+    render(<ContextStrip state={initReview("x", rows)} activeRowNumber={2} />)
+    const name = screen.getByText("Орг-лист")
+    expect(name.className).not.toContain("text-[var(--ds-text-2)]")
+  })
 })
