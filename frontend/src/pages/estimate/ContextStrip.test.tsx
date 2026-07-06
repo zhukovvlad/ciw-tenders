@@ -380,4 +380,19 @@ describe("ContextStrip", () => {
     expect(ordinaryName.className).toContain("text-[var(--ds-text-2)]")
     expect(openerName.className).not.toContain("text-[var(--ds-text-2)]")
   })
+
+  it("excluded/pending рядовой сосед НЕ приглушается тоном (своя ось opacity-60)", () => {
+    // excluded НЕ-открывашка (next.breadcrumb === текущему, не +1), не активная:
+    // после Task 5 попал бы под text-2; решение #6 (!muted) его исключает.
+    const rows = [
+      row(1, 0, "excluded", { source_name: "Орг-лист", breadcrumb: ["Топ"] }),
+      row(2, 1, "needs_review", {
+        source_name: "Активная",
+        breadcrumb: ["Топ"],
+      }),
+    ]
+    render(<ContextStrip state={initReview("x", rows)} activeRowNumber={2} />)
+    const name = screen.getByText("Орг-лист")
+    expect(name.className).not.toContain("text-[var(--ds-text-2)]")
+  })
 })
