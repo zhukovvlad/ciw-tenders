@@ -79,7 +79,9 @@
   `matching_unexpected`, `matching_blocked_dictionary`, `matching_reset_after_crash`.
 - `status_detail` не меняется (сырая диагностика). Старые сметы:
   `status_code IS NULL` → фронт показывает `status_detail` как сейчас (фолбэк).
-- `EstimateDetailOut` (и элемент списка) дополняется `status_code`.
+- `EstimateDetailOut` дополняется `status_code`. Элемент списка
+  (`EstimateSummaryOut`) — нет: он и сегодня не несёт `status_detail`,
+  бейдж списка ключуется по `status`, а баннер живёт на detail-странице.
 - 202-ответ перезапуска матчинга: `{"status": "accepted", "code": ...,
   "detail": <прежний текст>}` — коды `match_queued` / `match_already_running` /
   `match_requeued`.
