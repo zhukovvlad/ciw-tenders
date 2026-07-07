@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react"
+import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { Database } from "lucide-react"
 import type { MatchStatus, ReviewState } from "@/lib/types"
@@ -66,6 +67,7 @@ export function ReviewGrid({
   focusRowNumber,
   initialRect,
 }: ReviewGridProps) {
+  const { t } = useTranslation()
   const parentRef = useRef<HTMLDivElement>(null)
   const rows = filteredRows(state)
   const c = counts(state)
@@ -124,9 +126,9 @@ export function ReviewGrid({
     <div className="flex flex-col">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
         <div className="flex gap-2">
-          {chip("all", `Все · ${state.rows.length}`)}
-          {chip("review", `Проверить · ${c.review}`)}
-          {chip("no_match", `Без пары · ${c.no_match}`)}
+          {chip("all", t("review.filterAll", { n: state.rows.length }))}
+          {chip("review", t("review.filterReview", { n: c.review }))}
+          {chip("no_match", t("review.filterNoMatch", { n: c.no_match }))}
         </div>
       </div>
 
@@ -148,13 +150,13 @@ export function ReviewGrid({
               GRID_COLS
             )}
           >
-            <div role="columnheader">№ раздела</div>
-            <div role="columnheader">Работа из сметы</div>
-            <div role="columnheader">Статья справочника СМР</div>
+            <div role="columnheader">{t("review.colSection")}</div>
+            <div role="columnheader">{t("review.colWork")}</div>
+            <div role="columnheader">{t("review.colArticle")}</div>
             <div role="columnheader" className="text-right">
               Score
             </div>
-            <div role="columnheader">Статус</div>
+            <div role="columnheader">{t("review.colStatus")}</div>
           </div>
           <div
             style={{
@@ -217,7 +219,7 @@ export function ReviewGrid({
                       <span className="text-muted-foreground">—</span>
                     ) : isNoMatch(r, decision) ? (
                       <span className="text-muted-foreground">
-                        — без пары —
+                        {t("review.noPairInline")}
                       </span>
                     ) : (
                       <span>
@@ -245,13 +247,13 @@ export function ReviewGrid({
                     className={"text-sm " + statusTone[r.status]}
                   >
                     {contextRow ? (
-                      <Badge variant="outline">{label}</Badge>
+                      <Badge variant="outline">{t(label)}</Badge>
                     ) : (
                       <>
-                        {label === "Из фонда" && (
+                        {label === "statuses.fromFund" && (
                           <Database className="mr-1 inline size-3" />
                         )}
-                        {label}
+                        {t(label)}
                       </>
                     )}
                   </div>

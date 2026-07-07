@@ -1,5 +1,6 @@
 // frontend/src/pages/estimate/ReviewScreen.tsx
 import { useRef } from "react"
+import { useTranslation } from "react-i18next"
 import { Link, useSearchParams } from "react-router-dom"
 import { ArrowLeft, Check, Download } from "lucide-react"
 import type { MatchRow, ReviewState } from "@/lib/types"
@@ -23,7 +24,6 @@ import { ReviewGrid } from "@/pages/estimate/ReviewGrid"
 import { QueueDone } from "@/pages/estimate/QueueDone"
 import { useReviewQueue } from "@/lib/useReviewQueue"
 import { useReviewKeyboard } from "@/lib/useReviewKeyboard"
-import { pluralizeRu } from "@/lib/plural"
 
 export type ReviewActionKind = "confirm" | "pick" | "reject"
 
@@ -66,6 +66,7 @@ export function ReviewScreen({
   readOnly = false,
   gridInitialRect,
 }: ReviewScreenProps) {
+  const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const view: "queue" | "grid" =
     readOnly || searchParams.get("view") === "grid" ? "grid" : "queue"
@@ -187,7 +188,7 @@ export function ReviewScreen({
       <div className="flex flex-wrap items-center gap-3 border-b border-[var(--ds-hairline)] px-4 py-3">
         <span className="text-sm">{state.fileName}</span>
         <span className="text-xs text-muted-foreground">
-          · спорных решено {reviewed} из {total}
+          {t("review.disputedResolved", { reviewed, total })}
         </span>
 
         {!readOnly && (
@@ -198,8 +199,8 @@ export function ReviewScreen({
             }
           >
             <TabsList>
-              <TabsTrigger value="queue">Очередь</TabsTrigger>
-              <TabsTrigger value="grid">Таблица</TabsTrigger>
+              <TabsTrigger value="queue">{t("review.tabQueue")}</TabsTrigger>
+              <TabsTrigger value="grid">{t("review.tabTable")}</TabsTrigger>
             </TabsList>
           </Tabs>
         )}
@@ -208,18 +209,18 @@ export function ReviewScreen({
           <Button variant="ghost" size="sm" asChild>
             <Link to="/estimates">
               <ArrowLeft className="size-4" />
-              Ко всем сметам
+              {t("review.toAllEstimates")}
             </Link>
           </Button>
           <Button size="sm" variant="outline" onClick={onExport}>
             <Download className="size-4" />
-            Выгрузить Excel
+            {t("review.exportExcel")}
           </Button>
           {!readOnly &&
             (pending === 0 ? (
               <Button size="sm" onClick={onComplete}>
                 <Check className="size-4" />
-                Завершить
+                {t("review.finish")}
               </Button>
             ) : (
               <AlertDialog>
@@ -228,28 +229,23 @@ export function ReviewScreen({
                       кнопка не приглашает, пока по нажатию ругается диалогом */}
                   <Button size="sm" variant="outline">
                     <Check className="size-4" />
-                    Завершить
+                    {t("review.finish")}
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>
-                      Остались нерешённые строки
+                      {t("review.pendingTitle")}
                     </AlertDialogTitle>
                     <AlertDialogDescription>
-                      Без решения — {pending}{" "}
-                      {pluralizeRu(pending, [
-                        "спорная строка",
-                        "спорные строки",
-                        "спорных строк",
-                      ])}
-                      . Завершить всё равно? Возобновить можно в любой момент.
+                      {t("review.pendingRows", { count: pending })}
+                      {t("review.finishAnywayBody")}
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
-                    <AlertDialogCancel>Отмена</AlertDialogCancel>
+                    <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
                     <AlertDialogAction onClick={onComplete}>
-                      Завершить всё равно
+                      {t("review.finishAnyway")}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>

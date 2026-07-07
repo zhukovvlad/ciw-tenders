@@ -204,16 +204,19 @@ export function filteredRows(state: ReviewState): MatchRow[] {
   }
 }
 
+// Возвращает i18n-КЛЮЧ, не готовый текст (спека этапа 4 §non-React purity):
+// эта функция живёт в lib/, не имеет доступа к useTranslation — рендерящий
+// компонент сам зовёт t(statusLabel(row, d)).
 export function statusLabel(row: MatchRow, d: Decision): string {
   // контекстные строки (excluded/pending) не решаются в ревью — их decision
   // вечно "pending", проверяем статус строки ДО веток по d.kind (спека §2b)
-  if (row.status === "excluded") return "Контекст"
-  if (row.status === "pending") return "В обработке"
+  if (row.status === "excluded") return "statuses.context"
+  if (row.status === "pending") return "statuses.processing"
   // решение оператора важнее происхождения снимка: override/reject поверх
   // фонд-хита не должны маскироваться меткой «Из фонда» (спека фонда §12.4)
-  if (d.kind === "no_match") return "Нет совпадения"
-  if (d.kind === "pending") return "Требует проверки"
-  if (d.manual) return "Ручной выбор"
-  if (row.status === "matched_fund") return "Из фонда"
-  return "Подтверждено оператором"
+  if (d.kind === "no_match") return "statuses.noMatch"
+  if (d.kind === "pending") return "statuses.needsReview"
+  if (d.manual) return "statuses.manual"
+  if (row.status === "matched_fund") return "statuses.fromFund"
+  return "statuses.confirmedByOperator"
 }

@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Database } from "lucide-react"
 import type { Candidate, Decision, MatchRow } from "@/lib/types"
 import { searchArticles } from "@/lib/api/articles"
@@ -53,6 +54,7 @@ export function ReviewCard({
   searchDebounceMs = DEFAULT_SEARCH_DEBOUNCE_MS,
   contextStrip,
 }: ReviewCardProps) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<Candidate[]>([])
   const recommended = hasRecommendation(row)
@@ -120,9 +122,13 @@ export function ReviewCard({
         {row.status === "error" ? (
           <Alert variant="destructive">
             <Badge variant="destructive" className="mb-1.5">
-              Ошибка обработки
+              {t("review.errorProcessing")}
             </Badge>
-            <AlertDescription>{row.matchError}</AlertDescription>
+            {/* row.matchError — сырой str(exc) LLM-матчера (спека §2: строки без
+                кода), НЕ переводится; показывается как вторичная диагностика */}
+            {row.matchError && (
+              <AlertDescription>{row.matchError}</AlertDescription>
+            )}
           </Alert>
         ) : (
           <>
@@ -158,10 +164,10 @@ export function ReviewCard({
                   {row.status === "matched_fund" ? (
                     <>
                       <Database className="mr-1 inline size-3" />
-                      Из фонда
+                      {t("statuses.fromFund")}
                     </>
                   ) : (
-                    "Рекомендация AI"
+                    t("review.aiRecommendation")
                   )}
                 </span>
                 <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
@@ -215,10 +221,10 @@ export function ReviewCard({
                         {row.status === "matched_fund" ? (
                           <>
                             <Database className="mr-1 inline size-3" />
-                            Из фонда
+                            {t("statuses.fromFund")}
                           </>
                         ) : (
-                          "Рекомендация AI"
+                          t("review.aiRecommendation")
                         )}
                       </span>
                       <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
@@ -240,11 +246,11 @@ export function ReviewCard({
           <CommandInput
             value={query}
             onValueChange={setQuery}
-            placeholder="Нет верного — искать в справочнике…"
+            placeholder={t("review.searchPlaceholder")}
           />
           <CommandList>
             {query.trim() !== "" && hits.length === 0 && (
-              <CommandEmpty>Ничего не найдено</CommandEmpty>
+              <CommandEmpty>{t("review.nothingFound")}</CommandEmpty>
             )}
             {hits.map((c) => (
               <CommandItem
@@ -273,7 +279,7 @@ export function ReviewCard({
               : "")
           }
         >
-          Оставить без пары{" "}
+          {t("review.leaveNoPair")}{" "}
           <kbd className="ml-1 rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
             0
           </kbd>
@@ -285,17 +291,25 @@ export function ReviewCard({
             keyLabel={
               row.candidates.length <= 1 ? "1" : `1–${row.candidates.length}`
             }
-            text="выбрать кандидата"
+            text={t("review.hintPick")}
             muted={row.candidates.length === 0}
           />
-          <LegendItem keyLabel="0" text="без пары" muted={false} />
+          <LegendItem
+            keyLabel="0"
+            text={t("review.hintNoPair")}
+            muted={false}
+          />
           <LegendItem
             keyLabel="Enter"
-            text="подтвердить рекомендацию"
+            text={t("review.hintConfirm")}
             muted={!recommended}
           />
-          <LegendItem keyLabel="N" text="пропустить" muted={false} />
-          <LegendItem keyLabel="←" text="вернуться" muted={!canUndo} />
+          <LegendItem keyLabel="N" text={t("review.hintSkip")} muted={false} />
+          <LegendItem
+            keyLabel="←"
+            text={t("review.hintBack")}
+            muted={!canUndo}
+          />
         </div>
       </CardContent>
     </Card>
