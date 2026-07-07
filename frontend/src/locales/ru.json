@@ -16,7 +16,8 @@
     "roleUser": "Пользователь",
     "logout": "Выйти",
     "langRu": "Русский",
-    "langTr": "Türkçe"
+    "langTr": "Türkçe",
+    "langLabel": "Язык интерфейса"
   },
   "auth": {
     "enterLogin": "Введите логин",

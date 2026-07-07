@@ -72,10 +72,12 @@ describe("AppShell", () => {
     expect(screen.getByText("estimates-page")).toBeInTheDocument()
   })
 
-  it("из меню пользователя выходит (logout)", async () => {
+  it("из меню пользователя выходит (logout); переключателя языка в меню нет", async () => {
     mockAuth()
     renderShell("/estimates")
     await userEvent.click(screen.getByRole("button", { name: /a@mr\.kz/i }))
+    // Переключатель языка переехал на нав-панель — в меню его больше нет.
+    expect(screen.queryByRole("menuitemradio")).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole("menuitem", { name: /выйти/i }))
     expect(logout).toHaveBeenCalledOnce()
   })
@@ -95,11 +97,11 @@ describe("AppShell", () => {
     expect(trigger).toHaveAttribute("aria-label", "a@mr.kz")
   })
 
-  it("переключатель языка переключает интерфейс на турецкий и персистит выбор", async () => {
+  it("сегмент на нав-панели переключает интерфейс на турецкий и персистит выбор", async () => {
     mockAuth()
     renderShell("/estimates")
-    await userEvent.click(screen.getByRole("button", { name: /a@mr\.kz/i }))
-    await userEvent.click(screen.getByRole("menuitemradio", { name: "Türkçe" }))
+    // Сегмент RU/TR прямо в шапке — без открытия меню аккаунта.
+    await userEvent.click(screen.getByRole("radio", { name: "Türkçe" }))
     // Nav-текст сменился на турецкий (таб «Справочник» → «Sözlük»)
     expect(screen.getByRole("tab", { name: /Sözlük/ })).toBeInTheDocument()
     expect(localStorage.getItem("ciw.ui.lang")).toBe("tr")

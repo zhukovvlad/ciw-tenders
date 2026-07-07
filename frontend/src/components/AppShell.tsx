@@ -8,11 +8,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useAuth } from "@/lib/auth/useAuth"
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -49,37 +48,42 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </TabsList>
         </Tabs>
         {user && (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              aria-label={user.email}
-              className="ml-auto flex items-center gap-1 rounded-sm text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          <div className="ml-auto flex items-center gap-1.5 md:gap-3">
+            <ToggleGroup
+              type="single"
+              value={i18n.language.startsWith("tr") ? "tr" : "ru"}
+              onValueChange={(lng) => {
+                if (lng) void i18n.changeLanguage(lng)
+              }}
+              aria-label={t("nav.langLabel")}
             >
-              <CircleUser aria-hidden="true" className="size-4 md:hidden" />
-              <span className="hidden md:inline">{user.email}</span>
-              <ChevronDown className="size-3.5" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                {role === "admin" ? t("nav.roleAdmin") : t("nav.roleUser")}
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuRadioGroup
-                value={i18n.language.startsWith("tr") ? "tr" : "ru"}
-                onValueChange={(lng) => void i18n.changeLanguage(lng)}
+              <ToggleGroupItem value="ru" aria-label={t("nav.langRu")}>
+                RU
+              </ToggleGroupItem>
+              <ToggleGroupItem value="tr" aria-label={t("nav.langTr")}>
+                TR
+              </ToggleGroupItem>
+            </ToggleGroup>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label={user.email}
+                className="flex items-center gap-1 rounded-sm text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
               >
-                <DropdownMenuRadioItem value="ru">
-                  {t("nav.langRu")}
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="tr">
-                  {t("nav.langTr")}
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => logout()}>
-                {t("nav.logout")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <CircleUser aria-hidden="true" className="size-4 md:hidden" />
+                <span className="hidden md:inline">{user.email}</span>
+                <ChevronDown className="size-3.5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                  {role === "admin" ? t("nav.roleAdmin") : t("nav.roleUser")}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => logout()}>
+                  {t("nav.logout")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         )}
       </header>
       <main>{children}</main>
