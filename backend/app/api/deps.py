@@ -92,8 +92,8 @@ def get_current_user(
 ) -> User:
     unauthorized = ApiError(
         status.HTTP_401_UNAUTHORIZED,
-        "not_authenticated",
-        "Не аутентифицирован",
+        code="not_authenticated",
+        detail="Не аутентифицирован",
         headers={"WWW-Authenticate": "Bearer"},
     )
     if creds is None:
@@ -112,8 +112,8 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role is not Role.ADMIN:
         raise ApiError(
             status.HTTP_403_FORBIDDEN,
-            "admin_required",
-            "Требуются права администратора",
+            code="admin_required",
+            detail="Требуются права администратора",
         )
     return user
 

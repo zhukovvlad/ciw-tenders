@@ -22,6 +22,7 @@ class ApiError(HTTPException):
     def __init__(
         self,
         status_code: int,
+        *,
         code: str,
         detail: Any,
         headers: dict[str, str] | None = None,

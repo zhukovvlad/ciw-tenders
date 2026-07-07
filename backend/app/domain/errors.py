@@ -46,7 +46,13 @@ class TemplateValidationError(DomainError):
     Многопричинный класс: код ОБЯЗАТЕЛЕН в точке raise
     (article_code_not_numeric / article_code_would_be_ancestor /
     article_parent_not_found / template_duplicate_code / template_orphan_parent).
+    `code` — keyword-обязательный: пропуск на новой точке raise падает сразу,
+    а не молча наследует базовый ``"error"`` (классовый атрибут остаётся ради
+    контракта ``TemplateValidationError.code``).
     """
+
+    def __init__(self, message: str = "", *, code: str) -> None:
+        super().__init__(message, code=code)
 
 
 class StorageError(DomainError):
