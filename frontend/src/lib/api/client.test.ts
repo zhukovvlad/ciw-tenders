@@ -61,6 +61,30 @@ describe("api client", () => {
     await expect(apiGet("/x")).rejects.toMatchObject({ status: 0 })
   })
 
+  it("парсит code из тела ошибки рядом с detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch(
+        404,
+        { detail: "Смета не найдена", code: "estimate_not_found" },
+        false
+      )
+    )
+    await expect(apiGet("/estimates/1")).rejects.toMatchObject({
+      status: 404,
+      message: "Смета не найдена",
+      code: "estimate_not_found",
+    })
+  })
+
+  it("сетевая ошибка несёт code=network", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fail")))
+    await expect(apiGet("/x")).rejects.toMatchObject({
+      status: 0,
+      code: "network",
+    })
+  })
+
   it("apiUpload шлёт FormData без ручного Content-Type", async () => {
     const f = mockFetch(200, { created: 1 })
     vi.stubGlobal("fetch", f)

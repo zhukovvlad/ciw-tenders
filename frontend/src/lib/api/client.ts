@@ -2,9 +2,11 @@ export const AUTH_TOKEN_KEY = "ciw.auth.token"
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  code?: string
+  constructor(status: number, message: string, code?: string) {
     super(message)
     this.status = status
+    this.code = code
     this.name = "ApiError"
   }
 }
@@ -24,12 +26,13 @@ async function request(path: string, init: RequestInit): Promise<Response> {
   try {
     res = await fetch(`/api${path}`, init)
   } catch {
-    throw new ApiError(0, "Сеть недоступна — проверьте подключение")
+    throw new ApiError(0, "Сеть недоступна — проверьте подключение", "network")
   }
   if (!res.ok) {
     let message = res.statusText
+    let code: string | undefined
     try {
-      const body = (await res.json()) as { detail?: unknown }
+      const body = (await res.json()) as { detail?: unknown; code?: unknown }
       const detail = body?.detail
       if (typeof detail === "string") message = detail
       else if (
@@ -37,13 +40,14 @@ async function request(path: string, init: RequestInit): Promise<Response> {
         typeof (detail as { message?: unknown }).message === "string"
       )
         message = (detail as { message: string }).message
+      if (typeof body?.code === "string") code = body.code
     } catch {
       // тело не JSON — оставляем statusText
     }
     // 401 = протухшая сессия → разлогин; но неверный логин (/auth/login) — НЕ сессия, не разлогиниваем
     if (res.status === 401 && !path.startsWith("/auth/login"))
       onUnauthorized?.()
-    throw new ApiError(res.status, message)
+    throw new ApiError(res.status, message, code)
   }
   return res
 }

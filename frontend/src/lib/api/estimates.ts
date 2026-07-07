@@ -5,7 +5,7 @@ import type {
   ReviewStatus,
   StructuralAnomaly,
 } from "@/lib/types"
-import { apiGet, apiGetBlob, apiSend, apiUpload } from "./client"
+import { ApiError, apiGet, apiGetBlob, apiSend, apiUpload } from "./client"
 
 interface RowDto {
   id: number
@@ -213,7 +213,13 @@ export async function pollEstimate(
         }
         if (dto.status === "blocked") {
           cleanup()
-          reject(new Error("Обработка сметы заблокирована"))
+          reject(
+            new ApiError(
+              0,
+              "Обработка сметы заблокирована",
+              "estimate_processing_blocked"
+            )
+          )
           return
         }
         // pending/running — узлы матчатся; «готовы» = строки с терминальным
