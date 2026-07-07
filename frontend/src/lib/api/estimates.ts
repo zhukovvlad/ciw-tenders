@@ -5,7 +5,7 @@ import type {
   ReviewStatus,
   StructuralAnomaly,
 } from "@/lib/types"
-import { apiGet, apiGetBlob, apiSend, apiUpload } from "./client"
+import { ApiError, apiGet, apiGetBlob, apiSend, apiUpload } from "./client"
 
 interface RowDto {
   id: number
@@ -41,6 +41,9 @@ interface DetailDto {
   status: string
   // опциональны защитно: старый бэк (до соответствующих фич) их не присылал
   status_detail?: string | null
+  // опционален защитно: старый бэк (до PR-1 машинных кодов) его не присылал —
+  // фолбэк null сохраняет текущее поведение (сырой status_detail без заголовка по коду)
+  status_code?: string | null
   completed_at?: string | null
   is_reference?: boolean
   rows: RowDto[]
@@ -129,6 +132,7 @@ export interface EstimateDetail {
   fileName: string
   status: string
   statusDetail: string | null
+  statusCode: string | null
   completedAt: string | null // ISO
   isReference: boolean
   rows: MatchRow[]
@@ -143,6 +147,7 @@ export async function getEstimate(id: number): Promise<EstimateDetail> {
     fileName: dto.filename,
     status: dto.status,
     statusDetail: dto.status_detail ?? null,
+    statusCode: dto.status_code ?? null,
     completedAt: dto.completed_at ?? null,
     isReference: dto.is_reference ?? false,
     rows: dto.rows.map((r) => rowFromDto(r)),
@@ -213,7 +218,13 @@ export async function pollEstimate(
         }
         if (dto.status === "blocked") {
           cleanup()
-          reject(new Error("Обработка сметы заблокирована"))
+          reject(
+            new ApiError(
+              0,
+              "Обработка сметы заблокирована",
+              "estimate_processing_blocked"
+            )
+          )
           return
         }
         // pending/running — узлы матчатся; «готовы» = строки с терминальным

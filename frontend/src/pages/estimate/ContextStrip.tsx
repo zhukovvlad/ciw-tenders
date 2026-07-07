@@ -1,6 +1,7 @@
 // Полоса контекста под карточкой (спека §3b): ±2 соседних узла по source_index
 // среди ВСЕХ строк (excluded — приглушённые). Не виртуализируется — окно
 // константного размера (спека §5).
+import { useTranslation } from "react-i18next"
 import type { MatchRow, ReviewState } from "@/lib/types"
 import { decisionFor, statusLabel } from "@/lib/reviewState"
 import { cn } from "@/lib/utils"
@@ -50,6 +51,7 @@ export function ContextStrip({
   state: ReviewState
   activeRowNumber: number
 }) {
+  const { t } = useTranslation()
   const ordered = [...state.rows].sort((a, b) => a.sourceIndex - b.sourceIndex)
   const i = ordered.findIndex((r) => r.row_number === activeRowNumber)
   if (i === -1) return null
@@ -70,7 +72,7 @@ export function ContextStrip({
       {/* Подпись справочной панели (спека 3.6 §2 п.2): тот же типографический
           словарь, что подпись разделителя «Раздел — …» ниже. */}
       <div className="px-3 pt-2 pb-1 text-[11px] tracking-wide text-muted-foreground uppercase">
-        Окружение в смете
+        {t("review.envInEstimate")}
       </div>
       {win.map((r, j) => {
         const g = start + j
@@ -92,7 +94,7 @@ export function ContextStrip({
               >
                 {label && (
                   <div className="px-3 pt-1 text-[11px] tracking-wide text-muted-foreground uppercase">
-                    Раздел — {label}
+                    {t("review.section", { label })}
                   </div>
                 )}
               </div>
@@ -133,7 +135,7 @@ export function ContextStrip({
               {r.row_number === activeRowNumber ? (
                 // статус активной дублировал бы решаемое прямо сейчас (спека 3.5 §2)
                 <ArrowLeft
-                  aria-label="вы здесь"
+                  aria-label={t("review.youAreHere")}
                   className="ml-auto size-3 shrink-0 text-primary"
                 />
               ) : (
@@ -144,7 +146,7 @@ export function ContextStrip({
                     rs.mono && "font-mono"
                   )}
                 >
-                  → {rs.text}
+                  → {t(rs.text)}
                 </span>
               )}
             </div>

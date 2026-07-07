@@ -41,6 +41,8 @@ describe("mock api", () => {
     // колонки: row;source;code;name;score;status;alt2;alt3
     expect(cells[2]).toBe("СМР-99-999")
     expect(cells[4]).toBe("") // score пустой
-    expect(cells[5]).toContain("Ручной выбор")
+    // statusLabel возвращает i18n-ключ (этап 4) — сам CSV-экспорт не рендерит
+    // текст (мок-фикстура, не прод-путь: см. CLAUDE.md "lib/mock/ — фикстуры")
+    expect(cells[5]).toBe("statuses.manual")
   })
 })

@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { UploadCloud } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -30,11 +31,12 @@ export function Dropzone({
   id,
   ariaLabel,
   disabled = false,
-  idleText = "Перетащите файл или выберите",
-  hotText = "Отпустите файл",
+  idleText,
+  hotText,
   hint,
   className,
 }: DropzoneProps) {
+  const { t } = useTranslation()
   const [hot, setHot] = useState(false)
 
   function take(file: File | undefined | null) {
@@ -68,7 +70,9 @@ export function Dropzone({
     >
       <UploadCloud className="pointer-events-none size-7 text-muted-foreground" />
       <div className="pointer-events-none text-foreground">
-        {hot ? hotText : idleText}
+        {hot
+          ? (hotText ?? t("common.dropHot"))
+          : (idleText ?? t("common.dropIdle"))}
       </div>
       {hint && (
         <div className="pointer-events-none font-mono text-xs text-muted-foreground">

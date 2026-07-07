@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import { Trash2 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,6 +34,7 @@ export function ArticleTable({
   isAdmin,
   onDelete,
 }: ArticleTableProps) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState("")
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -47,8 +49,8 @@ export function ArticleTable({
   return (
     <div>
       <Input
-        aria-label="Поиск по коду или наименованию"
-        placeholder="Поиск по коду или наименованию"
+        aria-label={t("articles.searchAria")}
+        placeholder={t("articles.searchPlaceholder")}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         className="mb-3 max-w-sm"
@@ -56,8 +58,8 @@ export function ArticleTable({
       <DsTable>
         <DsTableHeader>
           <DsTableRow>
-            <DsTableHead>Код</DsTableHead>
-            <DsTableHead>Наименование</DsTableHead>
+            <DsTableHead>{t("articles.colCode")}</DsTableHead>
+            <DsTableHead>{t("articles.colName")}</DsTableHead>
             {isAdmin && <DsTableHead className="w-10" />}
           </DsTableRow>
         </DsTableHeader>
@@ -76,22 +78,31 @@ export function ArticleTable({
                   <DsTableCell>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
-                        <button type="button" aria-label="Удалить">
+                        <button
+                          type="button"
+                          aria-label={t("articles.deleteAria")}
+                        >
                           <Trash2 className="size-4 text-destructive" />
                         </button>
                       </AlertDialogTrigger>
                       <AlertDialogContent>
                         <AlertDialogHeader>
-                          <AlertDialogTitle>Удалить статью?</AlertDialogTitle>
+                          <AlertDialogTitle>
+                            {t("articles.deleteTitle")}
+                          </AlertDialogTitle>
                           <AlertDialogDescription>
-                            «{a.name}» ({a.article_code}) будет удалена.
-                            Действие необратимо.
+                            {t("articles.deleteBody", {
+                              name: a.name,
+                              code: a.article_code,
+                            })}
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
-                          <AlertDialogCancel>Отмена</AlertDialogCancel>
+                          <AlertDialogCancel>
+                            {t("common.cancel")}
+                          </AlertDialogCancel>
                           <AlertDialogAction onClick={() => onDelete?.(a.id)}>
-                            Удалить
+                            {t("common.delete")}
                           </AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>

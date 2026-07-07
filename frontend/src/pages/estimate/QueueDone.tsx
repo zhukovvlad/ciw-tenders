@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next"
 import type { ReviewState } from "@/lib/types"
 import { decisionFor, progress } from "@/lib/reviewState"
 import { Button } from "@/components/ui/button"
@@ -17,6 +18,7 @@ export function QueueDone({
   canUndo,
   onUndo,
 }: QueueDoneProps) {
+  const { t } = useTranslation()
   const { reviewed, total } = progress(state)
 
   const matched = state.rows.filter(
@@ -28,9 +30,11 @@ export function QueueDone({
 
   return (
     <div className="mx-auto max-w-md p-10 text-center">
-      <h2 className="mb-6 text-xl font-semibold">Все спорные строки решены</h2>
+      <h2 className="mb-6 text-xl font-semibold">
+        {t("estimates.allResolved")}
+      </h2>
       <p className="mb-6 text-muted-foreground">
-        Решено {reviewed} из {total}
+        {t("estimates.resolvedOf", { reviewed, total })}
       </p>
 
       <div className="mb-6 flex justify-center gap-10">
@@ -39,28 +43,28 @@ export function QueueDone({
             {matched}
           </div>
           <div className="text-xs tracking-wide text-muted-foreground uppercase">
-            сопоставлено
+            {t("review.matched")}
           </div>
         </div>
         <div>
           <div className="font-display text-4xl text-destructive">{noPair}</div>
           <div className="text-xs tracking-wide text-muted-foreground uppercase">
-            без пары
+            {t("review.noMatch")}
           </div>
         </div>
       </div>
 
       <Button onClick={onComplete} className="mb-4 w-full">
-        Завершить проверку
+        {t("estimates.finishReview")}
       </Button>
 
       <Button variant="outline" onClick={onShowGrid} className="w-full">
-        Посмотреть таблицу
+        {t("estimates.viewTable")}
       </Button>
 
       {canUndo && onUndo && (
         <Button variant="ghost" onClick={onUndo} className="mt-4 w-full">
-          ← Вернуться к последнему решению
+          {t("estimates.backToLast")}
         </Button>
       )}
     </div>

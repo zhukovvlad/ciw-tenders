@@ -2,11 +2,13 @@ import { useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { Download } from "lucide-react"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 import type { ReviewState } from "@/lib/types"
 import { decisionFor, promotableCount } from "@/lib/reviewState"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { setReference } from "@/lib/api/estimates"
+import { apiErrorText } from "@/lib/api/errorText"
 
 interface DoneScreenProps {
   state: ReviewState
@@ -25,6 +27,7 @@ export function DoneScreen({
   isReference,
   onReferenceChange,
 }: DoneScreenProps) {
+  const { t } = useTranslation()
   const [inFund, setInFund] = useState(isReference)
   const toggleSeq = useRef(0)
 
@@ -42,7 +45,7 @@ export function DoneScreen({
 
   function handleToggleFund(next: boolean) {
     if (estimateId === null) {
-      toast.error("Не удалось определить смету для добавления в фонд")
+      toast.error(t("estimates.fundUndetermined"))
       return
     }
     const seq = ++toggleSeq.current
@@ -55,21 +58,13 @@ export function DoneScreen({
         if (next && !r.is_reference && r.promoted === 0) {
           // бэк не ставит is_reference при 0 промоученных строк (toggle_reference) —
           // объясняем отщёлкивание, иначе тумблер выглядит сломанным
-          toast.info(
-            "Смета не добавлена в фонд: нет подтверждённых решений. " +
-              "Подтвердите или выберите статьи на шаге проверки и включите " +
-              "тумблер снова."
-          )
+          toast.info(t("estimates.fundNoDecisions"))
         }
       })
       .catch((err: unknown) => {
         if (seq === toggleSeq.current) setInFund(!next)
         console.error(err)
-        toast.error(
-          err instanceof Error
-            ? err.message
-            : "Не удалось обновить фонд решений"
-        )
+        toast.error(apiErrorText(err, t, "estimates.fundUpdateFailed"))
       })
   }
 
@@ -81,50 +76,48 @@ export function DoneScreen({
             {matched}
           </div>
           <div className="text-xs tracking-wide text-muted-foreground uppercase">
-            сопоставлено
+            {t("review.matched")}
           </div>
         </div>
         <div>
           <div className="font-display text-4xl text-destructive">{noPair}</div>
           <div className="text-xs tracking-wide text-muted-foreground uppercase">
-            без пары
+            {t("review.noMatch")}
           </div>
         </div>
       </div>
       <p className="mb-5 text-sm text-muted-foreground">
-        Исходный Excel + колонки: код статьи, наименование, score, статус, топ-3
-        альтернативы.
+        {t("estimates.exportHint")}
       </p>
       <Button onClick={onExport}>
         <Download className="size-4" />
-        Скачать обогащённый .xlsx
+        {t("estimates.downloadXlsx")}
       </Button>
       <div className="mt-6 flex items-center justify-center gap-3 text-left">
         <span className="text-sm text-[var(--ds-text-2)]">
-          Эталонная смета — добавить в фонд решений
+          {t("estimates.referenceToggle")}
         </span>
         <Switch
           checked={inFund}
           disabled={estimateId === null || blockedByEmpty}
           onCheckedChange={handleToggleFund}
-          aria-label="Эталонная смета — добавить в фонд решений"
+          aria-label={t("estimates.referenceToggle")}
         />
       </div>
       {blockedByEmpty && (
         <p className="mt-2 text-xs text-muted-foreground">
-          Фонд пополняют решения, принятые оператором при проверке — подтвердите
-          или выберите статьи и вернитесь сюда.
+          {t("estimates.fundHint")}
         </p>
       )}
       <div className="mt-4 flex flex-col items-center gap-2">
         <Button variant="outline" size="sm" onClick={onResume}>
-          Возобновить проверку
+          {t("estimates.resumeReview")}
         </Button>
         <Button variant="outline" size="sm" asChild>
-          <Link to="?view=grid">Просмотреть строки</Link>
+          <Link to="?view=grid">{t("estimates.viewRows")}</Link>
         </Button>
         <Link to="/estimates" className="text-sm text-[var(--ds-accent-hover)]">
-          ＋ Загрузить следующую смету
+          {t("estimates.uploadNext")}
         </Link>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -11,11 +12,12 @@ import {
 import { Label } from "@/components/ui/label"
 import { Dropzone } from "@/components/Dropzone"
 import { ApiError } from "@/lib/api/client"
+import { apiErrorText } from "@/lib/api/errorText"
 import { importTemplate } from "@/lib/api/articles"
 import type { ImportReport } from "@/lib/types"
-import { pluralizeRu } from "@/lib/plural"
 
 export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
+  const { t } = useTranslation()
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<ImportReport | null>(null)
   const [consent, setConsent] = useState(false)
@@ -32,9 +34,7 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
     try {
       setPreview(await importTemplate(f, { dryRun: true, force: false }))
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : "Не удалось прочитать файл"
-      )
+      toast.error(apiErrorText(err, t, "articles.readFailed"))
     } finally {
       setBusy(false)
     }
@@ -53,8 +53,13 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
         force: needsForce,
       })
       toast.success(
-        `Готово: создано ${res.created}, обновлено ${res.updated}, удалено ${res.deleted}, ` +
-          `без изменений ${res.unchanged}, ожидают эмбеддинга ${res.pending_embeddings}.`
+        t("articles.importDone", {
+          created: res.created,
+          updated: res.updated,
+          deleted: res.deleted,
+          unchanged: res.unchanged,
+          pending: res.pending_embeddings,
+        })
       )
       setPreview(null)
       setConsent(false)
@@ -66,9 +71,7 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
         setConflict(true)
         setConsent(false)
       }
-      toast.error(
-        err instanceof ApiError ? err.message : "Не удалось применить импорт"
-      )
+      toast.error(apiErrorText(err, t, "articles.applyFailed"))
     } finally {
       setBusy(false)
     }
@@ -82,28 +85,36 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
         onFile={onPick}
         accept=".xlsx"
         id="tpl-file"
-        ariaLabel="Файл шаблона"
-        idleText="Перетащите .xlsx-шаблон или выберите файл"
-        hint="XLSX-шаблон справочника"
+        ariaLabel={t("articles.fileLabel")}
+        idleText={t("articles.dropIdle")}
+        hint={t("articles.hint")}
         disabled={busy}
       />
       {file && (
-        <p className="mt-2 text-xs text-muted-foreground">Файл: {file.name}</p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {t("articles.fileName", { name: file.name })}
+        </p>
       )}
 
-      {busy && <p className="mt-2 text-muted-foreground">Обработка…</p>}
+      {busy && (
+        <p className="mt-2 text-muted-foreground">{t("articles.processing")}</p>
+      )}
 
       {preview && (
         <div className="mt-3 rounded-md border border-[var(--ds-hairline)] p-3">
           <p>
-            Создано {preview.created}, обновлено {preview.updated}, удалено{" "}
-            {preview.deleted}, без изменений {preview.unchanged}, ожидают
-            эмбеддинга {preview.pending_embeddings}.
+            {t("articles.previewSummary", {
+              created: preview.created,
+              updated: preview.updated,
+              deleted: preview.deleted,
+              unchanged: preview.unchanged,
+              pending: preview.pending_embeddings,
+            })}
           </p>
           {preview.skipped.length > 0 && (
             <Collapsible className="mt-2">
               <CollapsibleTrigger className="cursor-pointer text-xs text-muted-foreground">
-                Пропущено строк: {preview.skipped.length}
+                {t("articles.skipped", { n: preview.skipped.length })}
               </CollapsibleTrigger>
               <CollapsibleContent>
                 <ul className="mt-1 max-h-40 overflow-auto text-xs text-muted-foreground">
@@ -119,8 +130,10 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
               <AlertDescription>
                 <span>
                   {conflict && !preview.force_required
-                    ? "Состояние справочника изменилось с момента превью — для применения нужен принудительный режим."
-                    : `Импорт удалит ${preview.deleted} ${pluralizeRu(preview.deleted, ["строку", "строки", "строк"])} (снос корня или большой доли). Это необратимо.`}
+                    ? t("articles.staleForce")
+                    : t("articles.forceConfirmBody", {
+                        count: preview.deleted,
+                      })}
                 </span>
                 <div className="mt-1 flex items-center gap-2 text-xs">
                   <Checkbox
@@ -129,7 +142,7 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
                     onCheckedChange={(c) => setConsent(c === true)}
                   />
                   <Label htmlFor="force-consent">
-                    Да, применить принудительно
+                    {t("articles.applyForce")}
                   </Label>
                 </div>
               </AlertDescription>
@@ -140,7 +153,7 @@ export function TemplateUpload({ onApplied }: { onApplied: () => void }) {
             disabled={applyDisabled}
             className="mt-3"
           >
-            Применить
+            {t("articles.apply")}
           </Button>
         </div>
       )}

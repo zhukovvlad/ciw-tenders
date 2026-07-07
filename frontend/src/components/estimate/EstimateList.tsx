@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Trash2 } from "lucide-react"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,7 +25,8 @@ import {
   DsTableRow,
 } from "@/components/common/ds-table"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ApiError } from "@/lib/api/client"
+import { apiErrorText } from "@/lib/api/errorText"
+import { formatDate } from "@/lib/formatDate"
 import {
   deleteEstimate,
   listEstimates,
@@ -37,48 +39,51 @@ export interface EstimateListProps {
 
 type BadgeVariant = "default" | "secondary" | "outline" | "destructive"
 
+interface StatusMeta {
+  labelKey: string | undefined
+  variant: BadgeVariant
+  clickable: boolean
+}
+
 // eslint-disable-next-line react-refresh/only-export-components -- STATUS_META is a tested public API consumed by parent screens
-export const STATUS_META: Record<
-  string,
-  { label: string; variant: BadgeVariant; clickable: boolean }
-> = {
-  ready: { label: "Готово", variant: "default", clickable: true },
+export const STATUS_META: Record<string, StatusMeta> = {
+  ready: { labelKey: "statuses.ready", variant: "default", clickable: true },
   partial_error: {
-    label: "Готово с ошибками",
+    labelKey: "statuses.partialError",
     variant: "outline",
     clickable: true,
   },
-  pending: { label: "В обработке", variant: "secondary", clickable: true },
-  running: { label: "В обработке", variant: "secondary", clickable: true },
-  blocked: { label: "Отклонено", variant: "destructive", clickable: false },
+  pending: {
+    labelKey: "statuses.processing",
+    variant: "secondary",
+    clickable: true,
+  },
+  running: {
+    labelKey: "statuses.processing",
+    variant: "secondary",
+    clickable: true,
+  },
+  blocked: {
+    labelKey: "statuses.blocked",
+    variant: "destructive",
+    clickable: false,
+  },
 }
 
 function metaFor(status: string) {
   return (
     STATUS_META[status] ?? {
-      label: status,
+      labelKey: undefined,
       variant: "secondary" as BadgeVariant,
       clickable: false,
     }
   )
 }
 
-const dateFmt = new Intl.DateTimeFormat("ru-RU", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-})
-
-function formatDate(iso: string): string {
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? iso : dateFmt.format(d)
-}
-
 const PAGE = 50
 
 export function EstimateList({ onOpen }: EstimateListProps) {
+  const { t, i18n } = useTranslation()
   const [items, setItems] = useState<EstimateListItem[] | null>(null)
   const [total, setTotal] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -102,14 +107,12 @@ export function EstimateList({ onOpen }: EstimateListProps) {
         }
       })
       .catch((err) => {
-        if (!cancelled)
-          setError(
-            err instanceof ApiError ? err.message : "Не удалось загрузить сметы"
-          )
+        if (!cancelled) setError(apiErrorText(err, t, "estimates.loadFailed"))
       })
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t/apiErrorText stable enough; reloadKey drives refetch
   }, [reloadKey])
 
   async function loadMore() {
@@ -119,9 +122,7 @@ export function EstimateList({ onOpen }: EstimateListProps) {
       const r = await listEstimates({ limit: PAGE, offset: items.length })
       setItems((prev) => [...(prev ?? []), ...r.items])
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : "Не удалось загрузить сметы"
-      )
+      toast.error(apiErrorText(err, t, "estimates.loadFailed"))
     } finally {
       setLoadingMore(false)
     }
@@ -130,12 +131,10 @@ export function EstimateList({ onOpen }: EstimateListProps) {
   async function remove(id: number) {
     try {
       await deleteEstimate(id)
-      toast.success("Смета удалена")
+      toast.success(t("estimates.deleted"))
       triggerReload()
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : "Не удалось удалить смету"
-      )
+      toast.error(apiErrorText(err, t, "estimates.deleteFailed"))
     }
   }
 
@@ -159,9 +158,7 @@ export function EstimateList({ onOpen }: EstimateListProps) {
 
   if (items.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Пока нет разобранных смет — загрузите файл выше.
-      </p>
+      <p className="text-sm text-muted-foreground">{t("estimates.empty")}</p>
     )
   }
 
@@ -170,11 +167,13 @@ export function EstimateList({ onOpen }: EstimateListProps) {
       <DsTable>
         <DsTableHeader>
           <DsTableRow>
-            <DsTableHead>Файл</DsTableHead>
-            <DsTableHead>Статус</DsTableHead>
-            <DsTableHead>Проверка</DsTableHead>
-            <DsTableHead className="text-right">Узлов</DsTableHead>
-            <DsTableHead>Дата</DsTableHead>
+            <DsTableHead>{t("estimates.colFile")}</DsTableHead>
+            <DsTableHead>{t("estimates.colStatus")}</DsTableHead>
+            <DsTableHead>{t("estimates.colReview")}</DsTableHead>
+            <DsTableHead className="text-right">
+              {t("estimates.colNodes")}
+            </DsTableHead>
+            <DsTableHead>{t("estimates.colDate")}</DsTableHead>
             <DsTableHead className="w-10" />
           </DsTableRow>
         </DsTableHeader>
@@ -206,13 +205,18 @@ export function EstimateList({ onOpen }: EstimateListProps) {
                   )}
                 </DsTableCell>
                 <DsTableCell>
-                  <Badge variant={meta.variant}>{meta.label}</Badge>
+                  <Badge variant={meta.variant}>
+                    {meta.labelKey ? t(meta.labelKey) : item.status}
+                  </Badge>
                 </DsTableCell>
                 <DsTableCell className="text-muted-foreground tabular-nums">
                   {item.completedAt !== null ? (
-                    <Badge>Завершена</Badge>
+                    <Badge>{t("estimates.completed")}</Badge>
                   ) : item.totalReviewable > 0 ? (
-                    `${item.reviewedCount} из ${item.totalReviewable}`
+                    t("estimates.reviewedOf", {
+                      reviewed: item.reviewedCount,
+                      total: item.totalReviewable,
+                    })
                   ) : (
                     "—"
                   )}
@@ -221,14 +225,16 @@ export function EstimateList({ onOpen }: EstimateListProps) {
                   {item.nodesCount}
                 </DsTableCell>
                 <DsTableCell className="text-muted-foreground">
-                  {formatDate(item.createdAt)}
+                  {formatDate(item.createdAt, i18n.language)}
                 </DsTableCell>
                 <DsTableCell>
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <button
                         type="button"
-                        aria-label={`Удалить ${item.filename}`}
+                        aria-label={t("estimates.deleteAria", {
+                          filename: item.filename,
+                        })}
                         className="rounded-sm p-1 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
                         onClick={(event) => event.stopPropagation()}
                       >
@@ -237,15 +243,21 @@ export function EstimateList({ onOpen }: EstimateListProps) {
                     </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>
-                        <AlertDialogTitle>Удалить смету?</AlertDialogTitle>
+                        <AlertDialogTitle>
+                          {t("estimates.deleteTitle")}
+                        </AlertDialogTitle>
                         <AlertDialogDescription>
-                          «{item.filename}» будет удалена безвозвратно.
+                          {t("estimates.deleteBody", {
+                            filename: item.filename,
+                          })}
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
-                        <AlertDialogCancel>Отмена</AlertDialogCancel>
+                        <AlertDialogCancel>
+                          {t("common.cancel")}
+                        </AlertDialogCancel>
                         <AlertDialogAction onClick={() => void remove(item.id)}>
-                          Удалить
+                          {t("common.delete")}
                         </AlertDialogAction>
                       </AlertDialogFooter>
                     </AlertDialogContent>
@@ -264,7 +276,7 @@ export function EstimateList({ onOpen }: EstimateListProps) {
             disabled={loadingMore}
             onClick={() => void loadMore()}
           >
-            Показать ещё
+            {t("estimates.showMore")}
           </Button>
         </div>
       )}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { AlertCircle } from "lucide-react"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -10,11 +11,12 @@ import { ManualAddForm } from "@/components/articles/ManualAddForm"
 import { WipeCatalog } from "@/components/articles/WipeCatalog"
 import { TemplateUpload } from "@/components/articles/TemplateUpload"
 import { listArticles, deleteArticle } from "@/lib/api/articles"
-import { ApiError } from "@/lib/api/client"
+import { apiErrorText } from "@/lib/api/errorText"
 import { useAuth } from "@/lib/auth/useAuth"
 import type { Article } from "@/lib/types"
 
 export function ArticlesPage() {
+  const { t } = useTranslation()
   const { role } = useAuth()
   const isAdmin = role === "admin"
   const [articles, setArticles] = useState<Article[]>([])
@@ -46,20 +48,18 @@ export function ArticlesPage() {
   async function handleDelete(id: number) {
     try {
       await deleteArticle(id)
-      toast.success("Статья удалена")
+      toast.success(t("articles.deleted"))
       reload()
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : "Не удалось удалить статью"
-      )
+      toast.error(apiErrorText(err, t, "articles.deleteFailed"))
     }
   }
 
   return (
     <div className="mx-auto max-w-5xl p-6">
-      <h2 className="mb-1 font-display text-lg">Справочник СМР</h2>
+      <h2 className="mb-1 font-display text-lg">{t("articles.title")}</h2>
       <p className="mb-4 text-sm text-muted-foreground">
-        Эталонные статьи строительных работ.
+        {t("articles.subtitle")}
       </p>
 
       {isAdmin && (
@@ -67,7 +67,7 @@ export function ArticlesPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium">
-                Загрузить шаблон
+                {t("articles.uploadTemplate")}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -77,7 +77,7 @@ export function ArticlesPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium">
-                Добавить статью вручную
+                {t("articles.addManual")}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -87,7 +87,7 @@ export function ArticlesPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium">
-                Опасная зона
+                {t("articles.dangerZone")}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -98,7 +98,7 @@ export function ArticlesPage() {
       )}
 
       {status === "loading" && (
-        <div className="space-y-2" aria-label="Загрузка">
+        <div className="space-y-2" aria-label={t("articles.loadingAria")}>
           <Skeleton className="h-9 w-full" />
           <Skeleton className="h-9 w-full" />
           <Skeleton className="h-9 w-full" />
@@ -108,14 +108,14 @@ export function ArticlesPage() {
         <div>
           <Alert variant="destructive" className="mb-3">
             <AlertCircle className="size-4" />
-            <AlertTitle>Не удалось загрузить справочник.</AlertTitle>
+            <AlertTitle>{t("articles.loadFailed")}</AlertTitle>
           </Alert>
-          <Button onClick={() => void reload()}>Повторить</Button>
+          <Button onClick={() => void reload()}>{t("common.retry")}</Button>
         </div>
       )}
       {status === "ready" && articles.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          Справочник пуст{isAdmin ? " — загрузите шаблон." : "."}
+          {isAdmin ? t("articles.emptyAdmin") : t("articles.empty")}
         </p>
       )}
       {status === "ready" && articles.length > 0 && (

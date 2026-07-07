@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -13,28 +14,27 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ApiError } from "@/lib/api/client"
+import { apiErrorText } from "@/lib/api/errorText"
 import { deleteAllArticles } from "@/lib/api/articles"
 
-const CONFIRM_WORD = "УДАЛИТЬ"
-
 export function WipeCatalog({ onWiped }: { onWiped: () => void }) {
+  const { t } = useTranslation()
+  const confirmWord = t("articles.wipeConfirmWord")
   const [open, setOpen] = useState(false)
   const [word, setWord] = useState("")
   const [busy, setBusy] = useState(false)
+  const canConfirm = word === confirmWord
 
   async function wipe() {
     setBusy(true)
     try {
       const n = await deleteAllArticles()
-      toast.success(`Удалено ${n}`)
+      toast.success(t("articles.wiped", { n }))
       setWord("")
       setOpen(false)
       onWiped()
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : "Не удалось очистить справочник"
-      )
+      toast.error(apiErrorText(err, t, "articles.wipeFailed"))
       setWord("")
     } finally {
       setBusy(false)
@@ -44,7 +44,7 @@ export function WipeCatalog({ onWiped }: { onWiped: () => void }) {
   return (
     <div className="text-sm">
       <p className="mb-2 text-xs text-muted-foreground">
-        Полностью удалит все статьи. Потребуется подтверждение вводом слова.
+        {t("articles.wipeDesc")}
       </p>
       <AlertDialog
         open={open}
@@ -56,33 +56,32 @@ export function WipeCatalog({ onWiped }: { onWiped: () => void }) {
         }}
       >
         <AlertDialogTrigger asChild>
-          <Button variant="destructive">Очистить справочник</Button>
+          <Button variant="destructive">{t("articles.wipeButton")}</Button>
         </AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Очистить весь справочник?</AlertDialogTitle>
+            <AlertDialogTitle>{t("articles.wipeTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              Все статьи будут удалены безвозвратно. Введите «{CONFIRM_WORD}»,
-              чтобы подтвердить.
+              {t("articles.wipeBody", { word: confirmWord })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <Label htmlFor="wipe-confirm" className="sr-only">
-            Подтверждение
+            {t("articles.wipeInputLabel")}
           </Label>
           <Input
             id="wipe-confirm"
             value={word}
             onChange={(e) => setWord(e.target.value)}
-            placeholder={CONFIRM_WORD}
+            placeholder={confirmWord}
           />
           <AlertDialogFooter>
-            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <Button
               variant="destructive"
-              disabled={busy || word !== CONFIRM_WORD}
+              disabled={busy || !canConfirm}
               onClick={() => void wipe()}
             >
-              Очистить справочник
+              {t("articles.wipeButton")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -28,10 +28,28 @@ describe("StructureNotice", () => {
     )
     // Виден detail аномалии
     expect(screen.getByText(/код встречается 2 раз/i)).toBeInTheDocument()
+    // kindLabel — «Дубль кода» через t("structure.kindDuplicate")
+    expect(screen.getByText("Дубль кода")).toBeInTheDocument()
+    // Заголовки таблицы — через t("structure.col*")
+    expect(screen.getByText("Тип")).toBeInTheDocument()
+    expect(screen.getByText("Код")).toBeInTheDocument()
+    expect(screen.getByText("Наименование")).toBeInTheDocument()
+    expect(screen.getByText("Детали")).toBeInTheDocument()
     // Видна агрегатная строка про outline, содержащая 115
     const aggregate = screen.getByText(/вложенность взята из группировки/i)
     expect(aggregate).toBeInTheDocument()
     expect(aggregate).toHaveTextContent("115")
+  })
+
+  it("неизвестный kind рендерится как есть (fallback)", async () => {
+    const unknown: StructuralAnomaly[] = [
+      { ...ONE_ANOMALY[0], kind: "some_future_kind" },
+    ]
+    render(<StructureNotice anomalies={unknown} outlineOverrides={0} />)
+    await userEvent.click(
+      screen.getByRole("button", { name: /структура сметы/i })
+    )
+    expect(screen.getByText("some_future_kind")).toBeInTheDocument()
   })
 
   it("рендерит правильную плюрализацию: 2 замечания, 5 замечаний", () => {

@@ -135,7 +135,7 @@ describe("reviewState", () => {
         name: "y",
         manual: false,
       })
-    ).toBe("Подтверждено оператором")
+    ).toBe("statuses.confirmedByOperator")
     expect(
       statusLabel(MOCK_ROWS[0], {
         kind: "confirmed",
@@ -143,9 +143,9 @@ describe("reviewState", () => {
         name: "y",
         manual: true,
       })
-    ).toBe("Ручной выбор")
+    ).toBe("statuses.manual")
     expect(statusLabel(MOCK_ROWS[0], { kind: "no_match" })).toBe(
-      "Нет совпадения"
+      "statuses.noMatch"
     )
   })
 
@@ -158,7 +158,7 @@ describe("reviewState", () => {
         name: "b",
         manual: false,
       })
-    ).toBe("Из фонда")
+    ).toBe("statuses.fromFund")
     expect(
       statusLabel(row, {
         kind: "confirmed",
@@ -166,8 +166,8 @@ describe("reviewState", () => {
         name: "b",
         manual: true,
       })
-    ).toBe("Ручной выбор")
-    expect(statusLabel(row, { kind: "no_match" })).toBe("Нет совпадения")
+    ).toBe("statuses.manual")
+    expect(statusLabel(row, { kind: "no_match" })).toBe("statuses.noMatch")
   })
 
   it("requiresDecision: matched_fund не требует ревью (как confident)", () => {
@@ -300,8 +300,8 @@ describe("reviewState", () => {
   it("statusLabel: excluded → «Контекст», pending → «В обработке»", () => {
     const ex = { ...MOCK_ROWS[0], status: "excluded" as const }
     const pd = { ...MOCK_ROWS[0], status: "pending" as const }
-    expect(statusLabel(ex, { kind: "pending" })).toBe("Контекст")
-    expect(statusLabel(pd, { kind: "pending" })).toBe("В обработке")
+    expect(statusLabel(ex, { kind: "pending" })).toBe("statuses.context")
+    expect(statusLabel(pd, { kind: "pending" })).toBe("statuses.processing")
   })
 
   it("pick/reject на confident-строке не двигает progress() (спека editable-confident-rows §4)", () => {
