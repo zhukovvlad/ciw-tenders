@@ -19,10 +19,32 @@
     "submit": "Войти",
     "backendUnavailable": "Бэкенд недоступен — попробуйте позже"
   },
-  "estimates": {},
+  "estimates": {
+    "loadFailed": "Не удалось загрузить сметы",
+    "deleted": "Смета удалена",
+    "deleteFailed": "Не удалось удалить смету",
+    "empty": "Пока нет разобранных смет — загрузите файл выше.",
+    "colFile": "Файл",
+    "colStatus": "Статус",
+    "colReview": "Проверка",
+    "colNodes": "Узлов",
+    "colDate": "Дата",
+    "completed": "Завершена",
+    "reviewedOf": "{{reviewed}} из {{total}}",
+    "deleteAria": "Удалить {{filename}}",
+    "deleteTitle": "Удалить смету?",
+    "deleteBody": "«{{filename}}» будет удалена безвозвратно.",
+    "showMore": "Показать ещё",
+    "openFailed": "Не удалось загрузить смету"
+  },
   "review": {},
   "articles": {},
-  "statuses": {},
+  "statuses": {
+    "ready": "Готово",
+    "partialError": "Готово с ошибками",
+    "processing": "В обработке",
+    "blocked": "Отклонено"
+  },
   "structure": {},
   "errors": {
     "not_authenticated": "Не аутентифицирован",

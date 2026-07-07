@@ -19,10 +19,32 @@
     "submit": "Giriş yap",
     "backendUnavailable": "Sunucuya ulaşılamıyor — daha sonra tekrar deneyin"
   },
-  "estimates": {},
+  "estimates": {
+    "loadFailed": "Keşifler yüklenemedi",
+    "deleted": "Keşif silindi",
+    "deleteFailed": "Keşif silinemedi",
+    "empty": "Henüz işlenmiş keşif yok — yukarıdan dosya yükleyin.",
+    "colFile": "Dosya",
+    "colStatus": "Durum",
+    "colReview": "İnceleme",
+    "colNodes": "Düğüm",
+    "colDate": "Tarih",
+    "completed": "Tamamlandı",
+    "reviewedOf": "{{total}} içinden {{reviewed}}",
+    "deleteAria": "{{filename}} dosyasını sil",
+    "deleteTitle": "Keşif silinsin mi?",
+    "deleteBody": "«{{filename}}» kalıcı olarak silinecek.",
+    "showMore": "Daha fazla göster",
+    "openFailed": "Keşif yüklenemedi"
+  },
   "review": {},
   "articles": {},
-  "statuses": {},
+  "statuses": {
+    "ready": "Tamamlandı",
+    "partialError": "Hatalarla tamamlandı",
+    "processing": "İşleniyor",
+    "blocked": "Reddedildi"
+  },
   "structure": {},
   "errors": {
     "not_authenticated": "Kimlik doğrulanmadı",
