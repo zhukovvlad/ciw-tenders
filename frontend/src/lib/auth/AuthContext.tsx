@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { ApiError, AUTH_TOKEN_KEY, setOnUnauthorized } from "@/lib/api/client"
 import * as authApi from "@/lib/api/auth"
 import type { AuthUser } from "@/lib/types"
 import { AuthContext } from "@/lib/auth/useAuth"
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation()
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(
     () => !!sessionStorage.getItem(AUTH_TOKEN_KEY)
@@ -33,7 +35,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .catch((e: unknown) => {
         if (cancelled) return
         if (e instanceof ApiError && e.status === 401) logout()
-        else setError("Бэкенд недоступен — попробуйте позже")
+        else setError(t("auth.backendUnavailable"))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -41,7 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [logout])
+  }, [logout, t])
 
   const login = useCallback(async (email: string, password: string) => {
     setError(null)

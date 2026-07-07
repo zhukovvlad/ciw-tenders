@@ -7,7 +7,18 @@
     "appTitle": "MR · Keşifler"
   },
   "nav": {},
-  "auth": {},
+  "auth": {
+    "enterLogin": "Kullanıcı adını girin",
+    "enterPassword": "Şifreyi girin",
+    "invalidCredentials": "Hatalı kullanıcı adı veya şifre",
+    "loginFailed": "Giriş yapılamadı, daha sonra tekrar deneyin",
+    "brandHeading": "MR · Keşifler",
+    "subtitle": "İnşaat keşif otomasyonu",
+    "loginLabel": "Kullanıcı adı",
+    "passwordLabel": "Şifre",
+    "submit": "Giriş yap",
+    "backendUnavailable": "Sunucuya ulaşılamıyor — daha sonra tekrar deneyin"
+  },
   "estimates": {},
   "review": {},
   "articles": {},

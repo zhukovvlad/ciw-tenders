@@ -1,6 +1,9 @@
+import { useMemo } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
+import type { TFunction } from "i18next"
+import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -15,15 +18,21 @@ import {
 import { ApiError } from "@/lib/api/client"
 import { useAuth } from "@/lib/auth/useAuth"
 
-const schema = z.object({
-  email: z.string().trim().min(1, "Введите логин"),
-  password: z.string().min(1, "Введите пароль"),
-})
+function buildSchema(t: TFunction) {
+  return z.object({
+    email: z.string().trim().min(1, t("auth.enterLogin")),
+    password: z.string().min(1, t("auth.enterPassword")),
+  })
+}
 
-type FormValues = z.infer<typeof schema>
+type FormValues = z.infer<ReturnType<typeof buildSchema>>
 
 export function LoginScreen() {
   const { login } = useAuth()
+  const { t } = useTranslation()
+
+  const schema = useMemo(() => buildSchema(t), [t])
+  const [brandLeft, brandRight] = t("auth.brandHeading").split(" · ")
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -38,9 +47,7 @@ export function LoginScreen() {
     } catch (err) {
       const is401 = err instanceof ApiError && err.status === 401
       form.setError("root", {
-        message: is401
-          ? "Неверный логин или пароль"
-          : "Не удалось войти, попробуйте позже",
+        message: is401 ? t("auth.invalidCredentials") : t("auth.loginFailed"),
       })
     }
   }
@@ -48,10 +55,11 @@ export function LoginScreen() {
   return (
     <div className="flex min-h-svh flex-col items-center justify-center gap-1 bg-background">
       <div className="font-display text-2xl">
-        MR <span className="text-[var(--ds-accent-hover)]">·</span> Сметы
+        {brandLeft} <span className="text-[var(--ds-accent-hover)]">·</span>{" "}
+        {brandRight}
       </div>
       <div className="mb-5 text-xs text-muted-foreground">
-        Автоматизатор строительных смет
+        {t("auth.subtitle")}
       </div>
       <Card>
         <CardContent className="pt-6">
@@ -66,7 +74,7 @@ export function LoginScreen() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel className="text-xs text-[var(--ds-text-2)]">
-                      Логин
+                      {t("auth.loginLabel")}
                     </FormLabel>
                     <FormControl>
                       <Input className="mt-1" {...field} />
@@ -81,7 +89,7 @@ export function LoginScreen() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel className="text-xs text-[var(--ds-text-2)]">
-                      Пароль
+                      {t("auth.passwordLabel")}
                     </FormLabel>
                     <FormControl>
                       <Input type="password" className="mt-1" {...field} />
@@ -91,7 +99,7 @@ export function LoginScreen() {
                 )}
               />
               <Button type="submit" disabled={form.formState.isSubmitting}>
-                Войти
+                {t("auth.submit")}
               </Button>
               {form.formState.errors.root?.message && (
                 <p className="text-sm text-destructive" role="alert">

@@ -7,7 +7,18 @@
     "appTitle": "MR · Сметы"
   },
   "nav": {},
-  "auth": {},
+  "auth": {
+    "enterLogin": "Введите логин",
+    "enterPassword": "Введите пароль",
+    "invalidCredentials": "Неверный логин или пароль",
+    "loginFailed": "Не удалось войти, попробуйте позже",
+    "brandHeading": "MR · Сметы",
+    "subtitle": "Автоматизатор строительных смет",
+    "loginLabel": "Логин",
+    "passwordLabel": "Пароль",
+    "submit": "Войти",
+    "backendUnavailable": "Бэкенд недоступен — попробуйте позже"
+  },
   "estimates": {},
   "review": {},
   "articles": {},
