@@ -22,13 +22,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const tab = location.pathname.startsWith("/articles")
     ? "articles"
     : "estimate"
-  const [brandLeft, brandRight] = t("nav.brand").split(" · ")
   return (
     <div className="min-h-svh bg-background">
       <header className="flex items-center gap-3 border-b border-[var(--ds-hairline)] bg-[var(--ds-surface-sunken)] px-3 py-3 md:gap-5 md:px-6">
         <Link to="/estimates" className="font-display text-base">
-          {brandLeft} <span className="text-[var(--ds-accent-hover)]">·</span>{" "}
-          {brandRight}
+          MR <span className="text-[var(--ds-accent-hover)]">·</span>{" "}
+          {t("common.brandSuffix")}
         </Link>
         <Tabs
           value={tab}

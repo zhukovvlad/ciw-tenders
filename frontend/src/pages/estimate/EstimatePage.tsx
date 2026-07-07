@@ -39,18 +39,12 @@ type Meta =
   | { kind: "processing" }
   | {
       kind: "blocked"
-      detail: string | null
       statusCode: string | null
       statusDetail: string | null
     }
   | { kind: "open" }
   | { kind: "completed" }
-  | {
-      kind: "error"
-      message: string
-      statusCode: string | null
-      statusDetail: string | null
-    }
+  | { kind: "error"; message: string }
 
 // pollEstimate реджектится DOMException('AbortError') при отмене через signal —
 // такая отмена не ошибка, её нужно проглатывать молча (не показывать алерт).
@@ -106,7 +100,6 @@ export function EstimatePage() {
       if (detail.status === "blocked") {
         setMeta({
           kind: "blocked",
-          detail: detail.statusDetail,
           statusCode: detail.statusCode,
           statusDetail: detail.statusDetail,
         })
@@ -145,7 +138,6 @@ export function EstimatePage() {
           if (fresh.status === "blocked") {
             setMeta({
               kind: "blocked",
-              detail: fresh.statusDetail,
               statusCode: fresh.statusCode,
               statusDetail: fresh.statusDetail,
             })
@@ -168,8 +160,6 @@ export function EstimatePage() {
       setMeta({
         kind: "error",
         message: apiErrorText(err, t, "estimates.openFailed"),
-        statusCode: null,
-        statusDetail: null,
       })
     }
   }, [id, t])
@@ -253,21 +243,20 @@ export function EstimatePage() {
       <div className="p-8">
         <Alert variant="destructive" role="alert">
           <AlertTitle>
-            {meta.statusCode
-              ? t(`statuses.${meta.statusCode}`, {
-                  defaultValue:
-                    meta.kind === "blocked"
-                      ? t("estimates.rejected")
-                      : t("estimates.errorTitle"),
-                })
-              : meta.kind === "blocked"
-                ? t("estimates.rejected")
-                : t("estimates.errorTitle")}
+            {meta.kind === "blocked"
+              ? meta.statusCode
+                ? t(`statuses.${meta.statusCode}`, {
+                    defaultValue: t("estimates.rejected"),
+                  })
+                : t("estimates.rejected")
+              : t("estimates.errorTitle")}
           </AlertTitle>
           <AlertDescription>
-            {/* сырой status_detail как диагностика; при null — текущее поведение */}
-            {meta.statusDetail ??
-              (meta.kind === "blocked" ? (meta.detail ?? "—") : meta.message)}
+            {/* blocked: сырой status_detail как диагностика («—», если null);
+                error: текст ошибки загрузки */}
+            {meta.kind === "blocked"
+              ? (meta.statusDetail ?? "—")
+              : meta.message}
           </AlertDescription>
         </Alert>
         <Link className="mt-4 inline-block text-sm underline" to="/estimates">

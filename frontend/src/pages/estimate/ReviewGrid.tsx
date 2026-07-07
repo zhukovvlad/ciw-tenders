@@ -154,7 +154,7 @@ export function ReviewGrid({
             <div role="columnheader">{t("review.colWork")}</div>
             <div role="columnheader">{t("review.colArticle")}</div>
             <div role="columnheader" className="text-right">
-              Score
+              {t("review.colScore")}
             </div>
             <div role="columnheader">{t("review.colStatus")}</div>
           </div>

@@ -32,7 +32,6 @@ export function LoginScreen() {
   const { t } = useTranslation()
 
   const schema = useMemo(() => buildSchema(t), [t])
-  const [brandLeft, brandRight] = t("auth.brandHeading").split(" · ")
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -55,8 +54,8 @@ export function LoginScreen() {
   return (
     <div className="flex min-h-svh flex-col items-center justify-center gap-1 bg-background">
       <div className="font-display text-2xl">
-        {brandLeft} <span className="text-[var(--ds-accent-hover)]">·</span>{" "}
-        {brandRight}
+        MR <span className="text-[var(--ds-accent-hover)]">·</span>{" "}
+        {t("common.brandSuffix")}
       </div>
       <div className="mb-5 text-xs text-muted-foreground">
         {t("auth.subtitle")}

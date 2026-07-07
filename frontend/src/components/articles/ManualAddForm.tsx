@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -37,6 +37,15 @@ export function ManualAddForm({ onCreated }: { onCreated: () => void }) {
     resolver: zodResolver(schema),
     defaultValues: { article_code: "", name: "", parent_code: "" },
   })
+
+  // Смена языка перегенерирует схему (новые сообщения), но уже показанные
+  // ошибки остаются на старом языке до следующей валидации. Перепрогоняем
+  // валидацию ТОЛЬКО для полей с видимой ошибкой (иначе на нетронутой форме
+  // ошибки вспыхнули бы преждевременно).
+  useEffect(() => {
+    const errored = Object.keys(form.formState.errors) as (keyof FormValues)[]
+    if (errored.length > 0) void form.trigger(errored)
+  }, [t, form])
 
   async function onSubmit(values: FormValues) {
     try {
