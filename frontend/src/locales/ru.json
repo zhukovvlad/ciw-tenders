@@ -4,9 +4,20 @@
     "delete": "Удалить",
     "retry": "Повторить",
     "loading": "Загрузка…",
-    "appTitle": "MR · Сметы"
+    "appTitle": "MR · Сметы",
+    "dropIdle": "Перетащите файл или выберите",
+    "dropHot": "Отпустите файл"
   },
-  "nav": {},
+  "nav": {
+    "brand": "MR · Сметы",
+    "tabEstimate": "Смета",
+    "tabArticles": "Справочник",
+    "roleAdmin": "Администратор",
+    "roleUser": "Пользователь",
+    "logout": "Выйти",
+    "langRu": "Русский",
+    "langTr": "Türkçe"
+  },
   "auth": {
     "enterLogin": "Введите логин",
     "enterPassword": "Введите пароль",
@@ -171,7 +182,25 @@
     "fromFund": "Из фонда",
     "confirmedByOperator": "Подтверждено оператором"
   },
-  "structure": {},
+  "structure": {
+    "kindDuplicate": "Дубль кода",
+    "kindParentBelow": "Родитель ниже",
+    "kindParentMissing": "Нет родителя",
+    "kindDepthJump": "Скачок глубины",
+    "title_one": "Структура сметы: {{count}} замечание",
+    "title_few": "Структура сметы: {{count}} замечания",
+    "title_many": "Структура сметы: {{count}} замечаний",
+    "title_other": "Структура сметы: {{count}} замечаний",
+    "titlePlain": "Структура сметы",
+    "colType": "Тип",
+    "colCode": "Код",
+    "colName": "Наименование",
+    "colDetails": "Детали",
+    "outlineNote_one": "В {{count}} строке вложенность взята из группировки",
+    "outlineNote_few": "В {{count}} строках вложенность взята из группировки",
+    "outlineNote_many": "В {{count}} строках вложенность взята из группировки",
+    "outlineNote_other": "В {{count}} строках вложенность взята из группировки"
+  },
   "errors": {
     "not_authenticated": "Не аутентифицирован",
     "admin_required": "Требуются права администратора",

@@ -4,9 +4,20 @@
     "delete": "Sil",
     "retry": "Tekrar dene",
     "loading": "Yükleniyor…",
-    "appTitle": "MR · Keşifler"
+    "appTitle": "MR · Keşifler",
+    "dropIdle": "Dosyayı sürükleyin veya seçin",
+    "dropHot": "Dosyayı bırakın"
   },
-  "nav": {},
+  "nav": {
+    "brand": "MR · Keşifler",
+    "tabEstimate": "Keşif",
+    "tabArticles": "Sözlük",
+    "roleAdmin": "Yönetici",
+    "roleUser": "Kullanıcı",
+    "logout": "Çıkış yap",
+    "langRu": "Rusça",
+    "langTr": "Türkçe"
+  },
   "auth": {
     "enterLogin": "Kullanıcı adını girin",
     "enterPassword": "Şifreyi girin",
@@ -171,7 +182,25 @@
     "fromFund": "Fondan",
     "confirmedByOperator": "Operatör tarafından onaylandı"
   },
-  "structure": {},
+  "structure": {
+    "kindDuplicate": "Kod tekrarı",
+    "kindParentBelow": "Üst öğe altta",
+    "kindParentMissing": "Üst öğe yok",
+    "kindDepthJump": "Derinlik sıçraması",
+    "title_one": "Keşif yapısı: {{count}} uyarı",
+    "title_few": "Keşif yapısı: {{count}} uyarı",
+    "title_many": "Keşif yapısı: {{count}} uyarı",
+    "title_other": "Keşif yapısı: {{count}} uyarı",
+    "titlePlain": "Keşif yapısı",
+    "colType": "Tür",
+    "colCode": "Kod",
+    "colName": "Adı",
+    "colDetails": "Detaylar",
+    "outlineNote_one": "{{count}} satırda iç içe geçme gruplamadan alındı",
+    "outlineNote_few": "{{count}} satırda iç içe geçme gruplamadan alındı",
+    "outlineNote_many": "{{count}} satırda iç içe geçme gruplamadan alındı",
+    "outlineNote_other": "{{count}} satırda iç içe geçme gruplamadan alındı"
+  },
   "errors": {
     "not_authenticated": "Kimlik doğrulanmadı",
     "admin_required": "Yönetici yetkisi gerekli",

@@ -4,6 +4,14 @@ import userEvent from "@testing-library/user-event"
 import { Dropzone } from "./Dropzone"
 
 describe("Dropzone", () => {
+  it("дефолтные тексты idle/hot берутся из словаря (common.dropIdle/dropHot)", () => {
+    render(<Dropzone onFile={vi.fn()} accept=".xlsx" id="f" ariaLabel="файл" />)
+    expect(screen.getByText("Перетащите файл или выберите")).toBeInTheDocument()
+    const zone = screen.getByText(/перетащите/i).closest("label")!
+    fireEvent.dragOver(zone)
+    expect(screen.getByText("Отпустите файл")).toBeInTheDocument()
+  })
+
   it("выбор файла через клик вызывает onFile", async () => {
     const onFile = vi.fn()
     render(<Dropzone onFile={onFile} accept=".xlsx" id="f" ariaLabel="файл" />)

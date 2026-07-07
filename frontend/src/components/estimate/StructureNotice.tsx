@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import {
   Collapsible,
@@ -14,7 +15,6 @@ import {
   DsTableRow,
 } from "@/components/common/ds-table"
 import type { StructuralAnomaly } from "@/lib/types"
-import { pluralizeRu } from "@/lib/plural"
 
 // Блок «Структура сметы» — справка по результату парсинга. Аномалии
 // персистятся на бэке (estimates.structure_anomalies) и приходят в
@@ -25,21 +25,25 @@ export interface StructureNoticeProps {
   outlineOverrides: number
 }
 
-const KIND_LABELS: Record<string, string> = {
-  duplicate_code: "Дубль кода",
-  parent_below: "Родитель ниже",
-  parent_missing: "Нет родителя",
-  depth_jump: "Скачок глубины",
+const KIND_KEYS: Record<string, string> = {
+  duplicate_code: "structure.kindDuplicate",
+  parent_below: "structure.kindParentBelow",
+  parent_missing: "structure.kindParentMissing",
+  depth_jump: "structure.kindDepthJump",
 }
 
+// Возвращает ключ словаря для известных kind; для неизвестных — сырой kind
+// (t() на несуществующем ключе просто возвращает его же строкой — fallback
+// срабатывает сам собой).
 function kindLabel(kind: string): string {
-  return KIND_LABELS[kind] ?? kind
+  return KIND_KEYS[kind] ?? kind
 }
 
 export function StructureNotice({
   anomalies,
   outlineOverrides,
 }: StructureNoticeProps) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
 
   if (anomalies.length === 0 && outlineOverrides === 0) return null
@@ -47,8 +51,8 @@ export function StructureNotice({
   // Когда построчных аномалий нет (только агрегат outline) — не показываем «0 замечаний».
   const title =
     anomalies.length > 0
-      ? `Структура сметы: ${anomalies.length} ${pluralizeRu(anomalies.length, ["замечание", "замечания", "замечаний"])}`
-      : "Структура сметы"
+      ? t("structure.title", { count: anomalies.length })
+      : t("structure.titlePlain")
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="mb-4">
@@ -71,17 +75,17 @@ export function StructureNotice({
           <DsTable>
             <DsTableHeader>
               <DsTableRow>
-                <DsTableHead>Тип</DsTableHead>
-                <DsTableHead>Код</DsTableHead>
-                <DsTableHead>Наименование</DsTableHead>
-                <DsTableHead>Детали</DsTableHead>
+                <DsTableHead>{t("structure.colType")}</DsTableHead>
+                <DsTableHead>{t("structure.colCode")}</DsTableHead>
+                <DsTableHead>{t("structure.colName")}</DsTableHead>
+                <DsTableHead>{t("structure.colDetails")}</DsTableHead>
               </DsTableRow>
             </DsTableHeader>
             <DsTableBody>
               {anomalies.map((a) => (
                 <DsTableRow key={`${a.sourceIndex}-${a.kind}`}>
                   <DsTableCell className="text-xs whitespace-nowrap">
-                    {kindLabel(a.kind)}
+                    {t(kindLabel(a.kind))}
                   </DsTableCell>
                   <DsTableCell className="font-mono text-xs">
                     {a.code}
@@ -98,9 +102,7 @@ export function StructureNotice({
 
         {outlineOverrides > 0 && (
           <p className="px-3 py-2 text-xs text-muted-foreground">
-            В {outlineOverrides}{" "}
-            {pluralizeRu(outlineOverrides, ["строке", "строках", "строках"])}{" "}
-            вложенность взята из группировки
+            {t("structure.outlineNote", { count: outlineOverrides })}
           </p>
         )}
       </CollapsibleContent>

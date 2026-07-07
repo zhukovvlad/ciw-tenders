@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom"
 import type { AuthUser } from "@/lib/types"
 import * as authCtx from "@/lib/auth/useAuth"
+import i18n from "@/lib/i18n"
 import { AppShell } from "./AppShell"
 
 const USER: AuthUser = {
@@ -44,7 +45,14 @@ function renderShell(initialPath: string) {
   )
 }
 
-afterEach(() => {
+afterEach(async () => {
+  // Порядок важен: afterEach выполняются в обратном порядке регистрации,
+  // так что этот блок отрабатывает ДО глобального cleanup() из test/setup.ts —
+  // AppShell на этот момент ещё смонтирован. changeLanguage триггерит
+  // languageChanged → ре-рендер AppShell; если мок useAuth уже снят,
+  // ре-рендер зовёт реальный useAuth() без AuthProvider и падает. Поэтому
+  // сначала возвращаем язык (мок ещё активен), потом снимаем моки.
+  await act(() => i18n.changeLanguage("ru"))
   vi.restoreAllMocks()
   logout.mockClear()
 })
@@ -85,5 +93,16 @@ describe("AppShell", () => {
     renderShell("/estimates")
     const trigger = screen.getByRole("button", { name: /a@mr\.kz/i })
     expect(trigger).toHaveAttribute("aria-label", "a@mr.kz")
+  })
+
+  it("переключатель языка переключает интерфейс на турецкий и персистит выбор", async () => {
+    mockAuth()
+    renderShell("/estimates")
+    await userEvent.click(screen.getByRole("button", { name: /a@mr\.kz/i }))
+    await userEvent.click(screen.getByRole("menuitemradio", { name: "Türkçe" }))
+    // Nav-текст сменился на турецкий (таб «Справочник» → «Sözlük»)
+    expect(screen.getByRole("tab", { name: /Sözlük/ })).toBeInTheDocument()
+    expect(localStorage.getItem("ciw.ui.lang")).toBe("tr")
+    expect(document.documentElement.lang).toBe("tr")
   })
 })
