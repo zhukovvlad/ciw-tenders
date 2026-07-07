@@ -252,7 +252,7 @@ export function EstimatePage() {
               : t("estimates.errorTitle")}
           </AlertTitle>
           <AlertDescription>
-            {/* blocked: сырой status_detail как диагностика (—, если пусто);
+            {/* blocked: сырой status_detail как диагностика («—», если null);
                 error: текст ошибки загрузки */}
             {meta.kind === "blocked"
               ? (meta.statusDetail ?? "—")
