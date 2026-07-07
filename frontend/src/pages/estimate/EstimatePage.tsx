@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 import type { Progress } from "@/lib/mock/api"
 import type { StructuralAnomaly } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -18,9 +19,15 @@ import {
   pollEstimate,
   setCompletion,
 } from "@/lib/api/estimates"
+import { apiErrorText } from "@/lib/api/errorText"
 import { ProcessingScreen } from "@/pages/estimate/ProcessingScreen"
 import { ReviewScreen } from "@/pages/estimate/ReviewScreen"
 import { DoneScreen } from "@/pages/estimate/DoneScreen"
+
+// Экспортное имя файла: латинский суффикс, не из словаря (filesystem-safe,
+// не привязан к языку интерфейса — санкционированное изменение поведения,
+// см. спека §Global Constraints / task-5-brief).
+const EXPORT_SUFFIX = "_matched.xlsx"
 
 interface NoticeState {
   anomalies: StructuralAnomaly[]
@@ -30,10 +37,20 @@ interface NoticeState {
 type Meta =
   | { kind: "loading" }
   | { kind: "processing" }
-  | { kind: "blocked"; detail: string | null }
+  | {
+      kind: "blocked"
+      detail: string | null
+      statusCode: string | null
+      statusDetail: string | null
+    }
   | { kind: "open" }
   | { kind: "completed" }
-  | { kind: "error"; message: string }
+  | {
+      kind: "error"
+      message: string
+      statusCode: string | null
+      statusDetail: string | null
+    }
 
 // pollEstimate реджектится DOMException('AbortError') при отмене через signal —
 // такая отмена не ошибка, её нужно проглатывать молча (не показывать алерт).
@@ -42,6 +59,7 @@ function isAbortError(err: unknown): boolean {
 }
 
 export function EstimatePage() {
+  const { t } = useTranslation()
   const params = useParams()
   const id = Number(params.id)
   const [searchParams] = useSearchParams()
@@ -86,7 +104,12 @@ export function EstimatePage() {
         outlineOverrides: detail.outlineOverrides,
       })
       if (detail.status === "blocked") {
-        setMeta({ kind: "blocked", detail: detail.statusDetail })
+        setMeta({
+          kind: "blocked",
+          detail: detail.statusDetail,
+          statusCode: detail.statusCode,
+          statusDetail: detail.statusDetail,
+        })
         return
       }
       if (detail.status === "pending" || detail.status === "running") {
@@ -120,7 +143,12 @@ export function EstimatePage() {
           const fresh = await getEstimate(id) // упадёт — поймает внешний catch
           if (signal.aborted) return
           if (fresh.status === "blocked") {
-            setMeta({ kind: "blocked", detail: fresh.statusDetail })
+            setMeta({
+              kind: "blocked",
+              detail: fresh.statusDetail,
+              statusCode: fresh.statusCode,
+              statusDetail: fresh.statusDetail,
+            })
             return
           }
           throw pollErr
@@ -139,11 +167,12 @@ export function EstimatePage() {
       console.error(err)
       setMeta({
         kind: "error",
-        message:
-          err instanceof Error ? err.message : "Не удалось открыть смету",
+        message: apiErrorText(err, t, "estimates.openFailed"),
+        statusCode: null,
+        statusDetail: null,
       })
     }
-  }, [id])
+  }, [id, t])
 
   useEffect(() => {
     // IIFE, а не прямой void load(): eslint (react-hooks/set-state-in-effect)
@@ -174,7 +203,9 @@ export function EstimatePage() {
         // confident-строки из грида (она не в очереди спорных — commitFailed
         // порядок для неё не трогает). Имя строки — требование спеки §3a.
         toast.error(
-          `Не удалось сохранить решение по строке «${prev?.source_name ?? rowNumber}»`
+          t("estimates.rowSaveFailed", {
+            name: prev?.source_name ?? rowNumber,
+          })
         )
         return false
       })
@@ -186,12 +217,12 @@ export function EstimatePage() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
-      a.download = `${fileName.replace(/\.[^.]+$/, "")}_сопоставлено.xlsx`
+      a.download = `${fileName.replace(/\.[^.]+$/, "")}${EXPORT_SUFFIX}`
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
       console.error(err)
-      toast.error(err instanceof Error ? err.message : "Экспорт не удался")
+      toast.error(apiErrorText(err, t, "estimates.exportFailed"))
     }
   }
 
@@ -202,18 +233,14 @@ export function EstimatePage() {
       )
       .catch((err: unknown) => {
         console.error(err)
-        toast.error(
-          err instanceof Error
-            ? err.message
-            : "Не удалось изменить статус сметы"
-        )
+        toast.error(apiErrorText(err, t, "estimates.statusChangeFailed"))
       })
   }
 
   if (!Number.isInteger(id)) return <NotFound />
   if (meta.kind === "loading")
     return (
-      <div className="space-y-2 p-8" aria-label="Загрузка">
+      <div className="space-y-2 p-8" aria-label={t("estimates.loadingAria")}>
         <Skeleton className="h-9 w-full" />
         <Skeleton className="h-9 w-full" />
         <Skeleton className="h-9 w-full" />
@@ -226,14 +253,25 @@ export function EstimatePage() {
       <div className="p-8">
         <Alert variant="destructive" role="alert">
           <AlertTitle>
-            {meta.kind === "blocked" ? "Смета отклонена" : "Ошибка"}
+            {meta.statusCode
+              ? t(`statuses.${meta.statusCode}`, {
+                  defaultValue:
+                    meta.kind === "blocked"
+                      ? t("estimates.rejected")
+                      : t("estimates.errorTitle"),
+                })
+              : meta.kind === "blocked"
+                ? t("estimates.rejected")
+                : t("estimates.errorTitle")}
           </AlertTitle>
           <AlertDescription>
-            {meta.kind === "blocked" ? (meta.detail ?? "—") : meta.message}
+            {/* сырой status_detail как диагностика; при null — текущее поведение */}
+            {meta.statusDetail ??
+              (meta.kind === "blocked" ? (meta.detail ?? "—") : meta.message)}
           </AlertDescription>
         </Alert>
         <Link className="mt-4 inline-block text-sm underline" to="/estimates">
-          ← Ко всем сметам
+          {t("estimates.backToAll")}
         </Link>
       </div>
     )
@@ -280,13 +318,14 @@ export function EstimatePage() {
 }
 
 function NotFound() {
+  const { t } = useTranslation()
   return (
     <div className="p-8">
       <Alert variant="destructive" role="alert">
-        <AlertTitle>Смета не найдена</AlertTitle>
+        <AlertTitle>{t("estimates.notFound")}</AlertTitle>
       </Alert>
       <Link className="mt-4 inline-block text-sm underline" to="/estimates">
-        ← Ко всем сметам
+        {t("estimates.backToAll")}
       </Link>
     </div>
   )

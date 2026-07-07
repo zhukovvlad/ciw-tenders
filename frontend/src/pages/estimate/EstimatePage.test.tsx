@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { EstimatePage } from "@/pages/estimate/EstimatePage"
 import {
+  exportEstimate,
   getEstimate,
   patchRowReview,
   pollEstimate,
@@ -55,6 +56,7 @@ const READY = {
   fileName: "a.xlsx",
   status: "ready",
   statusDetail: null,
+  statusCode: null,
   completedAt: null,
   isReference: false,
   rows: [ROW_NEEDS_REVIEW],
@@ -95,6 +97,57 @@ describe("EstimatePage", () => {
     })
     renderAt(5)
     expect(await screen.findByRole("alert")).toHaveTextContent("нет строк СМР")
+  })
+
+  it("blocked со status_code (§4.4): заголовок баннера — из statuses.{код}, сырой status_detail — вторичным текстом", async () => {
+    vi.mocked(getEstimate).mockResolvedValue({
+      ...READY,
+      status: "blocked",
+      statusDetail: "errors=3 unfinished=0",
+      statusCode: "matching_partial_error",
+      rows: [],
+    })
+    renderAt(5)
+    const alert = await screen.findByRole("alert")
+    expect(within(alert).getByText("Готово с ошибками")).toBeInTheDocument()
+    expect(alert).toHaveTextContent("errors=3 unfinished=0")
+  })
+
+  it("blocked со status_code:null → текущее поведение (заголовок «Смета отклонена», сырой detail)", async () => {
+    vi.mocked(getEstimate).mockResolvedValue({
+      ...READY,
+      status: "blocked",
+      statusDetail: "нет строк СМР",
+      statusCode: null,
+      rows: [],
+    })
+    renderAt(5)
+    const alert = await screen.findByRole("alert")
+    expect(within(alert).getByText("Смета отклонена")).toBeInTheDocument()
+    expect(alert).toHaveTextContent("нет строк СМР")
+  })
+
+  it("экспорт: скачиваемый файл получает нейтральный латинский суффикс _matched.xlsx (не «_сопоставлено»)", async () => {
+    vi.mocked(getEstimate).mockResolvedValue(READY)
+    vi.mocked(exportEstimate).mockResolvedValue(new Blob(["x"]))
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: vi.fn().mockReturnValue("blob:mock-url"),
+      revokeObjectURL: vi.fn(),
+    })
+    let downloadedName = ""
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        downloadedName = this.download
+      })
+    renderAt(5)
+    await userEvent.click(
+      await screen.findByRole("button", { name: /Выгрузить Excel/ })
+    )
+    await waitFor(() => expect(downloadedName).toBe("a_matched.xlsx"))
+    clickSpy.mockRestore()
+    vi.unstubAllGlobals()
   })
 
   it("«Завершить» дергает setCompletion и показывает итог", async () => {
