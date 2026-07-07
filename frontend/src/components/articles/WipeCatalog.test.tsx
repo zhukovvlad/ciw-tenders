@@ -4,7 +4,10 @@ import userEvent from "@testing-library/user-event"
 import { toast } from "sonner"
 import * as articlesApi from "@/lib/api/articles"
 import { ApiError } from "@/lib/api/client"
+import ru from "@/locales/ru.json"
 import { WipeCatalog } from "./WipeCatalog"
+
+const CONFIRM_WORD = ru.articles.wipeConfirmWord
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -33,7 +36,7 @@ describe("WipeCatalog", () => {
     expect(confirm).toBeDisabled()
     await userEvent.type(
       within(dialog).getByLabelText(/подтверждени/i),
-      "УДАЛИТЬ"
+      CONFIRM_WORD
     )
     expect(confirm).toBeEnabled()
   })
@@ -45,7 +48,7 @@ describe("WipeCatalog", () => {
     const dialog = await openDialog()
     await userEvent.type(
       within(dialog).getByLabelText(/подтверждени/i),
-      "УДАЛИТЬ"
+      CONFIRM_WORD
     )
     await userEvent.click(
       within(dialog).getByRole("button", { name: /очистить справочник/i })
@@ -65,7 +68,7 @@ describe("WipeCatalog", () => {
     render(<WipeCatalog onWiped={vi.fn()} />)
     const dialog = await openDialog()
     const input = within(dialog).getByLabelText(/подтверждени/i)
-    await userEvent.type(input, "УДАЛИТЬ")
+    await userEvent.type(input, CONFIRM_WORD)
     await userEvent.click(
       within(dialog).getByRole("button", { name: /очистить справочник/i })
     )
