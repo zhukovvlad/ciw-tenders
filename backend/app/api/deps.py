@@ -8,10 +8,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import lru_cache
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.api.errors import ApiError
 from app.core.config import get_settings
 from app.domain.entities import EstimateStatus, Role, User
 from app.domain.errors import TokenError
@@ -89,8 +90,9 @@ def get_current_user(
     users: UserRepository = Depends(get_user_repository),
     tokens: TokenService = Depends(get_token_service),
 ) -> User:
-    unauthorized = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
+    unauthorized = ApiError(
+        status.HTTP_401_UNAUTHORIZED,
+        code="not_authenticated",
         detail="Не аутентифицирован",
         headers={"WWW-Authenticate": "Bearer"},
     )
@@ -108,8 +110,9 @@ def get_current_user(
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role is not Role.ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise ApiError(
+            status.HTTP_403_FORBIDDEN,
+            code="admin_required",
             detail="Требуются права администратора",
         )
     return user
@@ -292,7 +295,10 @@ def _do_sweep(repo: EstimateRepository, estimate_id: int, max_age_seconds: int) 
         return False
     try:
         repo.set_status(
-            estimate_id, EstimateStatus.PENDING, detail="сброшено после сбоя воркера"
+            estimate_id,
+            EstimateStatus.PENDING,
+            detail="сброшено после сбоя воркера",
+            code="matching_reset_after_crash",
         )
         return True
     finally:

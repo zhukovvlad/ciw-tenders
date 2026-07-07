@@ -9,6 +9,8 @@ from __future__ import annotations
 from app.domain.entities import EstimateRowStatus, ReviewStatus, StoredEstimateRow
 from app.domain.errors import (
     EstimateCompletedError,
+    EstimateNotFoundError,
+    EstimateRowNotFoundError,
     InvalidReviewActionError,
     RowNotMatchedError,
     RowNotReviewableError,
@@ -35,14 +37,14 @@ class EstimateReviewService:
     ) -> StoredEstimateRow:
         est = self._estimates.get(estimate_id, requester_id, is_admin=is_admin)
         if est is None:
-            raise LookupError("Смета не найдена")  # роут → 404
+            raise EstimateNotFoundError("Смета не найдена")  # роут → 404
         if est.completed_at is not None:
             raise EstimateCompletedError(
                 "Смета завершена — возобновите проверку, чтобы менять решения"
             )
         row = next((r for r in est.rows if r.id == row_id), None)
         if row is None:
-            raise LookupError("Строка не найдена")
+            raise EstimateRowNotFoundError("Строка не найдена")
         if row.status == _PENDING:
             raise RowNotMatchedError("Строка ещё не сматчена")
         if row.status == str(EstimateRowStatus.EXCLUDED):
@@ -59,15 +61,18 @@ class EstimateReviewService:
 
         updated = self._estimates.get(estimate_id, requester_id, is_admin=is_admin)
         if updated is None:  # гонка: смета удалена между записью и перечитыванием → 404
-            raise LookupError("Смета не найдена")
+            raise EstimateNotFoundError("Смета не найдена")
         updated_row = next((r for r in updated.rows if r.id == row_id), None)
         if updated_row is None:
-            raise LookupError("Строка не найдена")
+            raise EstimateRowNotFoundError("Строка не найдена")
         return updated_row
 
     def _confirm(self, row: StoredEstimateRow) -> None:
         if row.matched_article_id is None:
-            raise InvalidReviewActionError("Нет рекомендации AI — confirm недоступен")
+            raise InvalidReviewActionError(
+                "Нет рекомендации AI — confirm недоступен",
+                code="review_confirm_no_recommendation",
+            )
         self._estimates.save_review_decision(
             row.id, review_status=str(ReviewStatus.CONFIRMED),
             final_article_id=row.matched_article_id,
@@ -76,14 +81,16 @@ class EstimateReviewService:
 
     def _pick(self, row: StoredEstimateRow, article_id: int | None) -> None:
         if article_id is None:
-            raise InvalidReviewActionError("pick требует article_id")
+            raise InvalidReviewActionError(
+                "pick требует article_id", code="review_pick_requires_article"
+            )
         cand = next((c for c in row.candidates if c.id == article_id), None)
         if cand is not None:
             code, name = cand.code, cand.name
         else:
             art = self._articles.get_by_id(article_id)
             if art is None:
-                raise InvalidReviewActionError("Статья не найдена")
+                raise InvalidReviewActionError("Статья не найдена", code="review_article_not_found")
             code, name = art.article_code, art.name
         status = (
             ReviewStatus.CONFIRMED

@@ -124,6 +124,22 @@ def test_node_transient_becomes_error_partial() -> None:
     assert next(iter(repo.nodes.values()))["status"] == "error"
 
 
+def test_partial_error_sets_status_code() -> None:
+    """Task 6 (этап 4, PR-1): errors/unfinished partial_error проставляет status_code."""
+    repo = FakeEstimateRepository()
+    est = repo.create(NewEstimate(1, "a.xlsx", "k"), [_node("1")])
+    art = _ready_articles([ArticleCandidate(_article(1, "1.1"), 0.5)])
+
+    class _BoomLLM(FakeLLMMatcher):
+        def choose_best(self, query, candidates):
+            raise TransientError("429")
+
+    _service(repo, art, llm=_BoomLLM()).match_estimate(est.id)
+    assert repo.get_status(est.id) == EstimateStatus.PARTIAL_ERROR
+    assert repo.details[est.id] == "errors=1 unfinished=0"  # детальный текст прежний
+    assert repo.codes[est.id] == "matching_partial_error"  # код добавился
+
+
 def test_mark_blocked_noop_if_terminal() -> None:
     repo = FakeEstimateRepository()
     est = repo.create(NewEstimate(1, "a.xlsx", "k"), [_node("1")])

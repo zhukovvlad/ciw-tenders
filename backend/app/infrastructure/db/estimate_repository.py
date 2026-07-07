@@ -86,6 +86,7 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             created_at=m.created_at,
             rows=[cls._row_to_entity(r) for r in rows],
             status_detail=m.status_detail,
+            status_code=m.status_code,
             is_reference=m.is_reference,
             completed_at=m.completed_at,
             anomalies=[
@@ -245,11 +246,15 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
         self._session.scalar(select(func.pg_advisory_unlock(_NS_MATCH, estimate_id)))
 
     def set_status(
-        self, estimate_id: int, status: EstimateStatus, detail: str | None = None
+        self,
+        estimate_id: int,
+        status: EstimateStatus,
+        detail: str | None = None,
+        code: str | None = None,
     ) -> None:
         self._session.execute(
             update(EstimateModel).where(EstimateModel.id == estimate_id).values(
-                status=str(status), status_detail=detail, updated_at=func.now()
+                status=str(status), status_detail=detail, status_code=code, updated_at=func.now()
             )
         )
         self._session.commit()

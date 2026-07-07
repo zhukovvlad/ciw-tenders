@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 
 from app.api.deps import (
     get_article_service,
@@ -11,6 +11,7 @@ from app.api.deps import (
     get_template_ingest_service,
     require_admin,
 )
+from app.api.errors import ApiError
 from app.api.schemas import (
     ArticleCreate,
     ArticleOut,
@@ -42,8 +43,10 @@ def search_articles(
     service: ArticleService = Depends(get_article_service),
 ) -> list[ArticleSearchOut]:
     if len(q.strip()) < 2:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Запрос слишком короткий"
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            code="search_query_too_short",
+            detail="Запрос слишком короткий",
         )
     hits = service.search(q.strip(), limit=limit)
     crumbs = service.ancestor_names_by_ids([a.id for a in hits if a.id is not None])
@@ -77,9 +80,9 @@ def create_article(
             parent_code=payload.parent_code,
         )
     except DuplicateError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise ApiError(status.HTTP_409_CONFLICT, code=exc.code, detail=str(exc)) from exc
     except TemplateValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise ApiError(status.HTTP_400_BAD_REQUEST, code=exc.code, detail=str(exc)) from exc
     task_queue.enqueue_articles_embed()
     return ArticleOut.from_entity(article)
 
@@ -112,10 +115,11 @@ async def import_template(
     try:
         report = service.import_template(content, dry_run=dry_run, force=force)
     except TemplateValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise ApiError(status.HTTP_400_BAD_REQUEST, code=exc.code, detail=str(exc)) from exc
     except DeletionGuardError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            code=exc.code,
             detail={"message": str(exc), "force_required": True, "deleted": exc.deleted},
         ) from exc
     if not dry_run:

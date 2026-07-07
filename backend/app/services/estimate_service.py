@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.domain.entities import Estimate, EstimateSummary, NewEstimate, StructuralAnomaly
+from app.domain.errors import EstimateNotFoundError
 from app.domain.ports import EstimateRepository, ObjectStorage, TaskQueue
 from app.services.estimate_parser import EstimateParser
 
@@ -88,6 +89,6 @@ class EstimateService:
             estimate_id, requester_id, is_admin=is_admin, completed=completed
         )
         if res is None:
-            raise LookupError("Смета не найдена")
+            raise EstimateNotFoundError("Смета не найдена")
         _, completed_at = res
         return completed_at

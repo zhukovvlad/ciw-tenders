@@ -12,7 +12,7 @@ import openpyxl
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.domain.entities import StoredEstimateRow
-from app.domain.errors import InvalidReviewActionError
+from app.domain.errors import EstimateNotFoundError, InvalidReviewActionError
 from app.domain.ports import EstimateRepository, ObjectStorage
 
 _HEADER = "статья смр"  # нормализованный заголовок-приёмник
@@ -28,10 +28,10 @@ class EstimateExportService:
     ) -> bytes:
         key = self._estimates.get_object_key(estimate_id, requester_id, is_admin=is_admin)
         if key is None:
-            raise LookupError("Смета не найдена")
+            raise EstimateNotFoundError("Смета не найдена")
         est = self._estimates.get(estimate_id, requester_id, is_admin=is_admin)
         if est is None:  # смета удалена между get_object_key и get (гонка) → 404, не 500
-            raise LookupError("Смета не найдена")
+            raise EstimateNotFoundError("Смета не найдена")
         if strict:
             unreviewed = [
                 r for r in est.rows
@@ -39,7 +39,8 @@ class EstimateExportService:
             ]
             if unreviewed:
                 raise InvalidReviewActionError(
-                    f"Не просмотрено строк: {len(unreviewed)}"
+                    f"Не просмотрено строк: {len(unreviewed)}",
+                    code="export_unreviewed_rows",
                 )
         raw = self._storage.get(key)  # сбой MinIO → StorageError долетит до роута → 503
         wb = openpyxl.load_workbook(BytesIO(raw))

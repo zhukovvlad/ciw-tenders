@@ -218,9 +218,15 @@ class EstimateRepository(ABC):
 
     @abstractmethod
     def set_status(
-        self, estimate_id: int, status: EstimateStatus, detail: str | None = None
+        self,
+        estimate_id: int,
+        status: EstimateStatus,
+        detail: str | None = None,
+        code: str | None = None,
     ) -> None:
-        """Пишет статус + status_detail, бампает updated_at."""
+        """Пишет статус + status_detail + status_code, бампает updated_at.
+
+        detail/code перезаписываются каждым вызовом (переход в READY очищает оба)."""
         ...
 
     @abstractmethod

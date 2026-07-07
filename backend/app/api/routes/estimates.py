@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import (
@@ -21,6 +21,7 @@ from app.api.deps import (
     get_task_queue,
     require_admin,
 )
+from app.api.errors import ApiError
 from app.api.schemas import (
     CompletionOut,
     CompletionToggleIn,
@@ -38,6 +39,8 @@ from app.domain.entities import Role, StoredEstimateRow, User
 from app.domain.errors import (
     EstimateCompletedError,
     EstimateNotCompletableError,
+    EstimateNotFoundError,
+    EstimateRowNotFoundError,
     InvalidReviewActionError,
     RowNotMatchedError,
     RowNotReviewableError,
@@ -77,7 +80,9 @@ def retrigger_match(
 ) -> dict[str, str]:
     est = repository.get(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN)
     if est is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND, code=EstimateNotFoundError.code, detail="Смета не найдена"
+        )
 
     # Зависший running после жёсткого краша воркера: sweeper на выделенном коннекте берёт
     # advisory-лок как арбитр живости (занят → воркер жив → no-op) и сбрасывает running→pending.
@@ -85,12 +90,12 @@ def retrigger_match(
 
     task_queue.enqueue_match(estimate_id)
     if swept:
-        detail = "перезапущено после сбоя"
+        code, detail = "match_requeued", "перезапущено после сбоя"
     elif est.status == "running":
-        detail = "уже выполняется"
+        code, detail = "match_already_running", "уже выполняется"
     else:
-        detail = "поставлено в очередь"
-    return {"status": "accepted", "detail": detail}
+        code, detail = "match_queued", "поставлено в очередь"
+    return {"status": "accepted", "code": code, "detail": detail}
 
 
 @router.post("", response_model=EstimateUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -101,11 +106,16 @@ async def upload_estimate(
     settings: Settings = Depends(get_settings),
 ) -> EstimateUploadResponse:
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Ожидается файл .xlsx")
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            code="file_not_xlsx",
+            detail="Ожидается файл .xlsx",
+        )
     max_bytes = int(settings.estimate_max_upload_mb * 1024 * 1024)
-    too_large = HTTPException(
+    too_large = ApiError(
         status.HTTP_413_CONTENT_TOO_LARGE,
-        f"Файл больше {settings.estimate_max_upload_mb} МБ",
+        code="file_too_large",
+        detail=f"Файл больше {settings.estimate_max_upload_mb} МБ",
     )
     if file.size is not None and file.size > max_bytes:  # быстрый путь, если size заполнен
         raise too_large
@@ -113,14 +123,26 @@ async def upload_estimate(
     if len(content) > max_bytes:  # авторитетный бэкстоп — не зависит от версии Starlette
         raise too_large
     if not content.startswith(_XLSX_SIGNATURE):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Файл не является .xlsx (ZIP)")
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            code="file_not_zip",
+            detail="Файл не является .xlsx (ZIP)",
+        )
 
     try:
         result = service.ingest(content, file.filename, owner_id=user.id or 0)
     except ValueError as exc:  # нет обязательных колонок — до put в MinIO
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+        # код estimate_missing_columns достаётся ЛЮБОМУ ValueError разбора (сегодня он один);
+        # новый ValueError в парсере должен получить свой код, а не унаследовать этот молча
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            code="estimate_missing_columns",
+            detail=str(exc),
+        ) from exc
     except StorageError as exc:  # ТОЛЬКО сбой MinIO → 503; прочее (БД и т.п.) → 500
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Хранилище недоступно") from exc
+        raise ApiError(
+            status.HTTP_503_SERVICE_UNAVAILABLE, code=exc.code, detail="Хранилище недоступно"
+        ) from exc
 
     return EstimateUploadResponse(
         id=result.estimate.id,
@@ -156,7 +178,9 @@ def get_estimate(
 ) -> EstimateDetailOut:
     est = service.get(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN)
     if est is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND, code=EstimateNotFoundError.code, detail="Смета не найдена"
+        )
     ids = _collect_article_ids(est.rows)
     crumbs = article_service.ancestor_names_by_ids(ids) if ids else {}
     return EstimateDetailOut.from_entity(est, article_crumbs=crumbs)
@@ -169,7 +193,9 @@ def delete_estimate(
     service: EstimateService = Depends(get_estimate_service),
 ) -> None:
     if not service.delete(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND, code=EstimateNotFoundError.code, detail="Смета не найдена"
+        )
 
 
 @router.patch("/{estimate_id}/rows/{row_id}/review", response_model=EstimateRowOut)
@@ -186,16 +212,18 @@ def review_row(
             estimate_id, row_id, decision.action, decision.article_id,
             user.id or 0, is_admin=user.role is Role.ADMIN,
         )
-    except LookupError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except (EstimateNotFoundError, EstimateRowNotFoundError) as exc:
+        raise ApiError(status.HTTP_404_NOT_FOUND, code=exc.code, detail=str(exc)) from exc
     except EstimateCompletedError as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        raise ApiError(status.HTTP_409_CONFLICT, code=exc.code, detail=str(exc)) from exc
     except RowNotMatchedError as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        raise ApiError(status.HTTP_409_CONFLICT, code=exc.code, detail=str(exc)) from exc
     except RowNotReviewableError as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        raise ApiError(status.HTTP_409_CONFLICT, code=exc.code, detail=str(exc)) from exc
     except InvalidReviewActionError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, code=exc.code, detail=str(exc)
+        ) from exc
     # Крошка СТРОКИ не гидратируется здесь: её пересчёт требует всех строк сметы —
     # PATCH отдаёт крошки СТАТЕЙ (одной строки), breadcrumb остаётся [] (Task 6 мержит prev).
     ids = _collect_article_ids([row])
@@ -215,10 +243,10 @@ def toggle_completion(
             estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN,
             completed=body.completed,
         )
-    except LookupError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except EstimateNotFoundError as exc:
+        raise ApiError(status.HTTP_404_NOT_FOUND, code=exc.code, detail=str(exc)) from exc
     except EstimateNotCompletableError as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        raise ApiError(status.HTTP_409_CONFLICT, code=exc.code, detail=str(exc)) from exc
     return CompletionOut(completed_at=completed_at)
 
 
@@ -232,7 +260,9 @@ def toggle_reference(
 ) -> dict:
     # лёгкая проверка владения: get() тянул бы все строки с векторами ради 404
     if not repository.exists(estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Смета не найдена")
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND, code=EstimateNotFoundError.code, detail="Смета не найдена"
+        )
     if body.is_reference:
         promoted = fund_service.promote(estimate_id)  # 0 → is_reference не выставлен (см. Task 5)
         return {"is_reference": repository.is_reference(estimate_id), "promoted": promoted}
@@ -260,12 +290,14 @@ def export_estimate(
         data = service.export(
             estimate_id, user.id or 0, is_admin=user.role is Role.ADMIN, strict=strict
         )
-    except LookupError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except EstimateNotFoundError as exc:
+        raise ApiError(status.HTTP_404_NOT_FOUND, code=exc.code, detail=str(exc)) from exc
     except InvalidReviewActionError as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        raise ApiError(status.HTTP_409_CONFLICT, code=exc.code, detail=str(exc)) from exc
     except StorageError as exc:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Хранилище недоступно") from exc
+        raise ApiError(
+            status.HTTP_503_SERVICE_UNAVAILABLE, code=exc.code, detail="Хранилище недоступно"
+        ) from exc
     filename = "estimate_matched.xlsx"
     return StreamingResponse(
         iter([data]),

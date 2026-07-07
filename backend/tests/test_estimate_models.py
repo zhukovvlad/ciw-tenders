@@ -27,3 +27,8 @@ def test_estimate_match_snapshot_columns() -> None:
         "match_error",
     } <= rcols
     assert "status_detail" in EstimateModel.__table__.columns.keys()
+
+
+def test_estimate_status_code_column() -> None:
+    """Task 6 (этап 4, PR-1): status_code — машинный код статуса матчинга."""
+    assert "status_code" in EstimateModel.__table__.columns.keys()

@@ -21,6 +21,13 @@ from app.domain.entities import (
 )
 
 
+class ErrorOut(BaseModel):
+    """Единая форма тела ошибки: русский detail (fallback) + машинный code."""
+
+    detail: str | dict
+    code: str
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=1, max_length=1024)
@@ -247,6 +254,7 @@ class EstimateDetailOut(BaseModel):
     filename: str
     status: str
     status_detail: str | None = None
+    status_code: str | None = None
     created_at: datetime
     is_reference: bool = False
     completed_at: datetime | None = None
@@ -269,6 +277,7 @@ class EstimateDetailOut(BaseModel):
         ]
         return cls(
             id=e.id, filename=e.filename, status=e.status, status_detail=e.status_detail,
+            status_code=e.status_code,
             created_at=e.created_at, is_reference=e.is_reference, completed_at=e.completed_at,
             rows=rows,
             anomalies=[StructuralAnomalyOut(**asdict(a)) for a in e.anomalies],
