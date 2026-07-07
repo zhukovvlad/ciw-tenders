@@ -239,7 +239,6 @@ export function ReviewScreen({
                     </AlertDialogTitle>
                     <AlertDialogDescription>
                       {t("review.pendingRows", { count: pending })}
-                      {t("review.finishAnywayBody")}
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
