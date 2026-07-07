@@ -1,0 +1,20 @@
+{
+  "common": {
+    "cancel": "Отмена",
+    "delete": "Удалить",
+    "retry": "Повторить",
+    "loading": "Загрузка…",
+    "appTitle": "MR · Сметы"
+  },
+  "nav": {},
+  "auth": {},
+  "estimates": {},
+  "review": {},
+  "articles": {},
+  "statuses": {},
+  "structure": {},
+  "errors": {
+    "generic": "Что-то пошло не так",
+    "network": "Сеть недоступна — проверьте подключение"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "common": {
+    "cancel": "İptal",
+    "delete": "Sil",
+    "retry": "Tekrar dene",
+    "loading": "Yükleniyor…",
+    "appTitle": "MR · Keşifler"
+  },
+  "nav": {},
+  "auth": {},
+  "estimates": {},
+  "review": {},
+  "articles": {},
+  "statuses": {},
+  "structure": {},
+  "errors": {
+    "generic": "Bir şeyler ters gitti",
+    "network": "Ağ kullanılamıyor — bağlantınızı kontrol edin"
+  }
+}

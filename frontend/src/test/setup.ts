@@ -1,7 +1,9 @@
 import "@testing-library/jest-dom/vitest"
 
 import { cleanup } from "@testing-library/react"
-import { afterEach } from "vitest"
+import { afterEach, beforeAll } from "vitest"
+
+import i18n from "@/lib/i18n"
 
 // jsdom не реализует Pointer Capture / scrollIntoView, которые дёргает Radix.
 if (!Element.prototype.hasPointerCapture) {
@@ -40,6 +42,10 @@ if (!window.matchMedia) {
       dispatchEvent: () => false,
     }) as MediaQueryList
 }
+
+beforeAll(async () => {
+  await i18n.changeLanguage("ru")
+})
 
 afterEach(() => {
   cleanup()
