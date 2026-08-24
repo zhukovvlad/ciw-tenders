@@ -85,9 +85,12 @@ eval-matching benchmark="":
 celery-worker *args="--pool=solo --loglevel=info --without-mingle --without-gossip":
     cd {{backend}}; $env:LOG_DIR="logs/celery"; uv run celery -A app.infrastructure.tasks.celery_app worker {{args}}
 
-# MinIO (S3-хранилище оригиналов смет): API на :9020, консоль на :9021, данные в ./minio-data (gitignored).
-# Порт 9000 на общей машине занят чужим процессом (IPv4) — держим свой инстанс на 9020;
-# S3_ENDPOINT в backend/.env должен указывать на http://127.0.0.1:9020 (именно IPv4, не localhost).
+# MinIO (S3-хранилище оригиналов смет): API на :9120, консоль на :9121, данные в ./minio-data (gitignored).
+# На общей машине заняты чужими процессами и 9000, и 9020-9024 (loopback) — держим свой инстанс на 9120/9121.
+# Коварно: MinIO биндится к каждому интерфейсу отдельно, поэтому при занятом 127.0.0.1 он ругается
+# «bind: Only one usage...», но продолжает работать на LAN-адресе — а запросы на 127.0.0.1 уходят чужому
+# процессу. Проверять занятость до запуска: netstat -ano | grep ':9120 '.
+# S3_ENDPOINT в backend/.env должен указывать на http://127.0.0.1:9120 (именно IPv4, не localhost).
 # Учётки по умолчанию minioadmin/minioadmin — держать в согласии с S3_ACCESS_KEY/S3_SECRET_KEY в backend/.env.
 minio:
-    minio server minio-data --address ":9020" --console-address ":9021"
+    minio server minio-data --address ":9120" --console-address ":9121"
