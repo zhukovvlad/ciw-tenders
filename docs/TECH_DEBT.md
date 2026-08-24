@@ -840,3 +840,23 @@ turkish-speaking рецензенту на момент реализации.
 [ReviewCard.tsx](../frontend/src/pages/estimate/ReviewCard.tsx),
 [QueueDone.tsx](../frontend/src/pages/estimate/QueueDone.tsx), финальное ревью ветки
 `feat/ux-stage2-pr-b-review-screen`.
+
+## 🟢 Фразовый оргтокен «Урбан блок»: метка заглавными сходит за голову
+
+Фразовый оргтокен `_ORG_PHRASE_RE` ([classification.py](../backend/app/domain/classification.py))
+делает `Урбан блок Ub1A` молчаливым ORG за счёт того, что метка `Ub1A` рвётся токенизатором
+`[A-Za-zА-Яа-яёЁ]+` на «Ub» (2 буквы, не `isupper()` → `_is_abbrev` False, `len < 3`) и «A»
+(одна буква). Ни один за содержательную голову не сходит.
+
+Если в другой смете ту же метку напишут **заглавными** — `UB1A` вместо `Ub1A` — то «UB» пройдёт
+`_is_abbrev` (2–4 заглавные) и сойдёт за голову: получим UNSURE вместо ORG. Аналогично сломается
+метка без цифры-разделителя (`UbA` — 3 буквы подряд → голова).
+
+**Почему отложено:** деградация безопасная по асимметрии — не ложный ORG, а лишний вызов
+LLM-арбитра, который такую строку и так признает каркасом. В «Смете Тушино» (единственный
+источник данных на сегодня) написание `Ub`. Лечить вслепую — усложнять `_is_abbrev` под
+неподтверждённую форму; вернуться, когда появится смета с другим написанием метки.
+
+**Связано:** [classification.py](../backend/app/domain/classification.py),
+[test_classification.py](../backend/tests/test_classification.py),
+[devlog 2026-08-24](devlog/2026-08-24-org-filter-urban-block-phrase.md).

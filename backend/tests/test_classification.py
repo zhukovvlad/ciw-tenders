@@ -19,6 +19,9 @@ from app.domain.entities import WorkClass
         "Очереди строительства",
         "1 Этап ЖК",
         "Корпус № 2; 3; 4",
+        "Урбан блок Ub1A",   # фраза раздельно
+        "Урбанблок Ub1А",    # та же фраза слитно
+        "Урбанблока Ub1B",   # + падежное окончание
     ],
 )
 def test_contains_org_token_true(name: str) -> None:
@@ -32,6 +35,8 @@ def test_contains_org_token_true(name: str) -> None:
         "работы на этаже 3",   # этаж ≠ этап
         "Этажность здания",    # этаж + здание (не оргтокены)
         "Гидроизоляция подземной части здания",
+        "Урбан блокировка",   # закрытый набор окончаний не пускает «блокировка»
+        "Монтаж блоков ФБС",  # «блок» без «урбан» — работный термин
     ],
 )
 def test_contains_org_token_false(name: str) -> None:
@@ -51,6 +56,7 @@ def test_has_work_word_true(name: str) -> None:
         "Корпус № 2; 3; 4",
         "и в том числе",    # стоп-слова
         "прочее",
+        "Урбан блок Ub1A",  # фраза вычеркнута; метка Ub1A за голову не сходит
     ],
 )
 def test_has_work_word_false(name: str) -> None:
@@ -66,6 +72,10 @@ def test_has_work_word_false(name: str) -> None:
         ("Наружное освещение 1 Этап ЖК", WorkClass.UNSURE),  # смесь → LLM
         ("МАФ Корпус 3", WorkClass.UNSURE),            # аббрев-работа + орг → НЕ ORG
         ("Объект озеленения", WorkClass.UNSURE),       # объект + голова → НЕ молчаливый ORG
+        ("Урбан блок Ub1A", WorkClass.ORG),            # чистый каркас → ORG без LLM
+        ("Урбанблока Ub1B", WorkClass.ORG),            # слитно + падеж — тот же каркас
+        ("Устройство кровли Урбанблока Ub1А", WorkClass.UNSURE),  # смесь → LLM
+        ("Монтаж блоков ФБС", WorkClass.WORK),         # «блок» без «урбан» — работа
     ],
 )
 def test_classify_lexical(name: str, expected: WorkClass) -> None:
@@ -150,3 +160,15 @@ def test_is_excluded_work_and_unsure_kept() -> None:
 
     assert is_excluded(WorkClass.WORK, is_leaf=True, has_non_org_ancestor=False) is False
     assert is_excluded(WorkClass.UNSURE, is_leaf=False, has_non_org_ancestor=False) is False
+
+
+def test_urban_block_ancestor_stripped_from_embedding_input() -> None:
+    """«Урбан блок Ub1A» как предок: был WORK и оставался в крошке, стал ORG → выброшен.
+
+    Именно эта смена org-стрипа обязывает бампнуть CRUMB_DERIVATION_VERSION.
+    """
+    ancestor = "Урбан блок Ub1A"
+    crumb = build_embedding_input(
+        "Устройство кровли", [(ancestor, classify_lexical(ancestor))]
+    )
+    assert crumb == "Устройство кровли"

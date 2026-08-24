@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from app.domain.classification import CRUMB_DERIVATION_VERSION
 from app.domain.decision_fund import FundEntry, cache_key_hash, normalize_cache_key
 from app.services.decision_fund_service import DecisionFundService
 from tests.fakes import (
@@ -44,8 +45,8 @@ def test_promote_anti_inflation_skips_confirmed_fund_hit() -> None:
     )
     DecisionFundService(repo, fund).promote(eid)
     # matched_fund+confirmed НЕ промоутится (накрутка); matched_fund+overridden → промоутится
-    assert (cache_key_hash(normalize_cache_key("a")), 1) not in fund.entries
-    assert (cache_key_hash(normalize_cache_key("b")), 1) in fund.entries
+    assert (cache_key_hash(normalize_cache_key("a")), CRUMB_DERIVATION_VERSION) not in fund.entries
+    assert (cache_key_hash(normalize_cache_key("b")), CRUMB_DERIVATION_VERSION) in fund.entries
 
 
 def test_promote_dedupes_repeated_rows_in_one_batch() -> None:
@@ -63,7 +64,7 @@ def test_promote_dedupes_repeated_rows_in_one_batch() -> None:
     promoted = DecisionFundService(repo, fund).promote(eid)
     assert promoted == 1  # одна запись фонда, не две
     key = cache_key_hash(normalize_cache_key("демонтаж перегородок"))
-    assert set(fund.entries) == {(key, 1)}
+    assert set(fund.entries) == {(key, CRUMB_DERIVATION_VERSION)}
     assert repo.is_reference(eid) is True
 
 

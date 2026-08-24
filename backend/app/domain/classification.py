@@ -20,6 +20,17 @@ _ORG_STEMS = (
 # Литералы без окончаний — организационные аббревиатуры.
 _ORG_LITERALS = ("жк", "бц")
 
+# Фразовые оргтокены — там, где оргсмысл несёт ТОЛЬКО пара слов. «Урбан блок» пишут и
+# раздельно, и слитно, и в падежах («Урбанблока Ub1B») — одно выражение на все формы (\s*).
+# Окончания перечислены ЗАКРЫТЫМ набором, а не `[а-яё]*`: жадный хвост дожевал бы
+# «Урбан блокировка» до конца слова, и правая граница его бы не отсекла.
+# «блок» отдельным стемом быть НЕ может — он работный термин (см. про «блок ФБС» выше),
+# поэтому фраза вычёркивается из имени целиком перед поиском головы в has_work_word.
+_ORG_PHRASE_RE = re.compile(
+    r"(?<![а-яёa-z])урбан\s*блок(?:а|у|е|ом|и|ов|ам|ами|ах)?(?![а-яёa-z])",
+    re.IGNORECASE,
+)
+
 _ORG_STEM_RE = re.compile(
     r"(?<![а-яё])(?:" + "|".join(_ORG_STEMS) + r")[а-яё]*",
     re.IGNORECASE,
@@ -40,7 +51,8 @@ def _is_org_token(token: str) -> bool:
 
 def contains_org_token(name: str) -> bool:
     return (
-        _ORG_STEM_RE.search(name) is not None
+        _ORG_PHRASE_RE.search(name) is not None
+        or _ORG_STEM_RE.search(name) is not None
         or _ORG_LITERAL_RE.search(name) is not None
     )
 
@@ -66,8 +78,11 @@ def has_work_word(name: str) -> bool:
     Ошибается В СТОРОНУ «голова есть»: аббревиатура 2–4 заглавные считается головой.
     Оргтокены (вкл. ЖК/БЦ) отсекаются ПЕРВЫМИ — иначе они сами 2 заглавные и
     ложно сочлись бы головой.
+
+    Фразовые оргтокены вычёркиваются ДО токенизации: их части (например «блок») по
+    отдельности работные, и потокенно их не отсеять.
     """
-    for token in _TOKEN_RE.findall(name):
+    for token in _TOKEN_RE.findall(_ORG_PHRASE_RE.sub(" ", name)):
         if _is_org_token(token):
             continue
         if token.lower() in _STOPWORDS:
@@ -243,4 +258,4 @@ def build_embedding_input(
 # (build_embedding_input / org-стрип / резолв предков) → бампаем версию (старый фонд мажет мимо).
 # ТАКЖЕ бампаем при изменении normalize_cache_key (domain/decision_fund.py) — ключи фонда
 # хэшируются поверх неё, иначе весь фонд молча остынет.
-CRUMB_DERIVATION_VERSION = 1
+CRUMB_DERIVATION_VERSION = 2
