@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     admin_email: str = ""
     admin_password: str = ""
 
-    s3_endpoint: str = "http://localhost:9000"
+    s3_endpoint: str = "http://127.0.0.1:9120"  # дефолт под just minio, см. justfile
     s3_access_key: str = "minioadmin"
     s3_secret_key: str = "minioadmin"
     s3_bucket: str = "estimates"
