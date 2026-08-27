@@ -55,6 +55,25 @@ def test_context_trusted_stops_at_reviewed_or_confident() -> None:
     assert ctx2 == AncestorContext("5", False)
 
 
+def test_context_rejected_confident_ancestor_is_transparent() -> None:
+    # confident-предок, но оператор отклонил (review_status="rejected" — «статьи нет»):
+    # matched_code не должен просочиться потомку как доверенный контекст
+    nodes = [
+        _tn(1, 1, "4", status="confident", matched_code="4", review_status="rejected"),
+        _tn(2, 2, "4.1"),
+    ]
+    p = resolve_parents(nodes)
+    assert effective_ancestor_context(1, nodes, p) == AncestorContext(None, False)
+
+
+def test_context_barrier_with_no_trusted_ancestor() -> None:
+    # needs_review-корень без доверенного предка выше: барьер взведён, код отсутствует —
+    # именно это состояние гасит fund_key_v3 (спека §6.1) на самой частой форме сомнительной цепочки
+    nodes = [_tn(1, 1, "1", status="needs_review"), _tn(2, 2, "1.1")]
+    p = resolve_parents(nodes)
+    assert effective_ancestor_context(1, nodes, p) == AncestorContext(None, True)
+
+
 def test_context_transparent_statuses_and_root() -> None:
     nodes = [
         _tn(1, 1, "1", status="excluded"), _tn(2, 2, "1.1", status="no_match"), _tn(3, 3, "1.1.1"),
