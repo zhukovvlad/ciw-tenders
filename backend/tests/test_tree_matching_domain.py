@@ -12,11 +12,20 @@ from app.domain.entities import (
     TreeNode,
 )
 from app.domain.tree_matching import (
+    F_INCONSISTENT,
+    F_MISSING,
+    F_OUTSIDE_PARENT,
+    F_UNKNOWN_CODE,
     Chunk,
+    build_hints,
     effective_ancestor_context,
     estimate_tokens,
+    neighbors,
     resolve_parents,
     split_sections,
+    to_node_match,
+    validate_one,
+    validate_verdicts,
 )
 from tests.fakes import make_tree_node as _tn
 
@@ -146,3 +155,94 @@ def test_split_token_budget_and_row_too_large() -> None:
     )
     assert chunks[0].indices == [0] and chunks[1].oversized == [1] and chunks[1].indices == [1]
     assert chunks[2].indices == [2]
+
+
+CAT = {c.code: c for c in [
+    CatalogArticle(1, "4", "Конструктив", None), CatalogArticle(2, "4.2", "Надземная", "4"),
+    CatalogArticle(3, "4.2.1", "Гориз 1-й", "4.2"), CatalogArticle(4, "4.2.2", "Верт 1-й", "4.2"),
+    CatalogArticle(5, "4.2.3", "Гориз проч", "4.2"), CatalogArticle(6, "9", "Лифты", None),
+]}
+TRUSTED = AncestorContext("4.2", False)
+ROOT = AncestorContext(None, False)
+BARRIER = AncestorContext("4.2", True)
+
+
+def test_hint_for_trust_rules() -> None:
+    from app.domain.tree_matching import hint_for
+    assert hint_for(_tn(1, 1, "4", status="confident", matched_code="4")) == ("4", True)
+    assert hint_for(_tn(
+        1, 1, "4", status="needs_review", matched_code="4",
+        review_status="overridden", final_code="5", final_article_id=5,
+    )) == ("5", True)
+    assert hint_for(_tn(1, 1, "4", status="needs_review", matched_code="4")) == ("4", False)
+    # confident, но оператор отверг → старый код НЕ показывать как [уже: …]
+    assert hint_for(_tn(
+        1, 1, "4", status="confident", matched_code="4", review_status="rejected",
+    )) is None
+    for st in ("excluded", "no_match", "error", "pending"):
+        assert hint_for(_tn(1, 1, "4", status=st, matched_code="4")) is None
+
+
+def test_build_hints_only_for_non_targets() -> None:
+    nodes = [_tn(1, 1, "4", status="confident", matched_code="4"),
+             _tn(2, 2, "4.1", status="needs_review", matched_code="4.2"),
+             _tn(3, 3, "4.1.1", status="excluded"), _tn(4, 3, "4.1.2")]
+    assert build_hints([0, 1, 2, 3], nodes, targets={4}) == {1: ("4", True), 2: ("4.2", False)}
+
+
+def test_validate_flags() -> None:
+    codes = set(CAT)
+    ok = {"i": 1, "code": "4.2.1", "sure": True, "alt": "4.2.3"}
+    unknown = {"i": 1, "code": "77", "sure": True, "alt": None}
+    no_code = {"i": 1, "code": None, "sure": True, "alt": None}
+    org_with_code = {"i": 1, "code": "4.2.1", "sure": True, "alt": None, "kind": "org"}
+    outside = {"i": 1, "code": "9", "sure": True, "alt": None}
+    rollup_up = {"i": 1, "code": "4", "sure": True, "alt": None}
+    malformed = {"i": 1, "code": "4.2.1", "sure": "yes", "alt": "4.2.1"}
+    assert validate_one(ok, 1, codes, TRUSTED)[1] == ()
+    assert F_UNKNOWN_CODE in validate_one(unknown, 1, codes, TRUSTED)[1]
+    assert F_INCONSISTENT in validate_one(no_code, 1, codes, TRUSTED)[1]
+    assert F_INCONSISTENT in validate_one(org_with_code, 1, codes, TRUSTED)[1]
+    assert F_OUTSIDE_PARENT in validate_one(outside, 1, codes, TRUSTED)[1]
+    assert validate_one(outside, 1, codes, ROOT)[1] == ()  # корень: нет проверки
+    assert validate_one(rollup_up, 1, codes, TRUSTED)[1] == ()  # роллап вверх допустим
+    assert validate_one(None, 1, codes, TRUSTED) == (None, (F_MISSING,))
+    _, flags = validate_one(malformed, 1, codes, TRUSTED)
+    assert "malformed" in flags
+
+
+def test_validate_many_ignores_foreign_and_duplicates() -> None:
+    raw = [{"i": 9, "code": "4", "sure": True}, {"i": 1, "code": "4.2.1", "sure": True},
+           {"i": 1, "code": "4.2.2", "sure": True}]
+    out = validate_verdicts(raw, targets={1, 2}, catalog_codes=set(CAT), ctx_of=lambda i: TRUSTED)
+    assert out[1][0].article_code == "4.2.1" and out[2] == (None, (F_MISSING,))
+    assert 9 not in out
+
+
+def test_to_node_match_matrix() -> None:
+    codes = set(CAT)
+    ok = validate_one({"i": 1, "code": "4.2.1", "sure": True, "alt": "4.2.3"}, 1, codes, TRUSTED)
+    m = to_node_match(ok, TRUSTED, CAT)
+    assert m.status == "confident" and m.matched_code == "4.2.1" and m.matched_id == 3
+    assert [c.code for c in m.candidates][:2] == ["4.2.1", "4.2.3"]
+    assert all(c.score is None for c in m.candidates)
+    assert to_node_match(ok, BARRIER, CAT).status == "needs_review"  # барьер гасит sure
+    unsure = validate_one({"i": 1, "code": "4.2.1", "sure": False, "alt": None}, 1, codes, TRUSTED)
+    assert to_node_match(unsure, TRUSTED, CAT).status == "needs_review"
+    org = validate_one({"i": 1, "code": "org", "sure": True, "alt": None}, 1, codes, TRUSTED)
+    assert to_node_match(org, TRUSTED, CAT).status == "excluded"
+    none = validate_one({"i": 1, "code": "none", "sure": True, "alt": None}, 1, codes, TRUSTED)
+    assert to_node_match(none, TRUSTED, CAT).status == "no_match"
+    unk = validate_one({"i": 1, "code": "77", "sure": True, "alt": None}, 1, codes, TRUSTED)
+    m = to_node_match(unk, TRUSTED, CAT)
+    assert m.status == "needs_review" and m.matched_code is None
+    # дети trusted + сама
+    assert {c.code for c in m.candidates} == {"4.2", "4.2.1", "4.2.2", "4.2.3"}
+    miss = to_node_match((None, (F_MISSING,)), TRUSTED, CAT)
+    assert miss.status == "error" and miss.match_error == "tree_missing_verdict"
+
+
+def test_neighbors_order_and_limit() -> None:
+    c = neighbors(CAT, "4.2.1", "4.2.3", limit=5)
+    # выбранная, альт, сёстры, родитель
+    assert [x.code for x in c] == ["4.2.1", "4.2.3", "4.2.2", "4.2"]
