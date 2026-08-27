@@ -286,3 +286,176 @@ describe("ReviewCard: error-строка", () => {
     ).toBe(false)
   })
 })
+
+describe("ReviewCard: блок «Ваш выбор»", () => {
+  const CAND2: Candidate = {
+    id: 9,
+    article_code: "07.01",
+    name: "Кровельные работы",
+    score: 0.64,
+    breadcrumb: ["07 Кровля"],
+  }
+
+  it("override: показывает код, имя и крошку кандидата по коду", () => {
+    const r = row(5, 2, "needs_review", {
+      matched_code: "01.01",
+      matched_name: "Статья",
+      candidates: [CAND, CAND2],
+    })
+    renderCard(r, {
+      decision: {
+        kind: "confirmed",
+        code: CAND2.article_code,
+        name: CAND2.name,
+        manual: false,
+      },
+    })
+    const block = screen.getByTestId("your-choice")
+    expect(within(block).getByText("07.01")).toBeInTheDocument()
+    expect(within(block).getByText("Кровельные работы")).toBeInTheDocument()
+    expect(within(block).getByText(/07 Кровля/)).toBeInTheDocument()
+  })
+
+  it("выбор из поиска: крошка из finalBreadcrumb, когда код совпал с final_code", () => {
+    const r = row(5, 2, "needs_review", {
+      matched_code: "01.01",
+      matched_name: "Статья",
+      candidates: [],
+      final_code: "09.09",
+      finalBreadcrumb: ["09 Прочее"],
+    })
+    renderCard(r, {
+      decision: {
+        kind: "confirmed",
+        code: "09.09",
+        name: "Найденная статья",
+        manual: true,
+      },
+    })
+    const block = screen.getByTestId("your-choice")
+    expect(within(block).getByText(/09 Прочее/)).toBeInTheDocument()
+  })
+
+  it("крошки нет, если код решения не совпал с final_code и не найден в кандидатах", () => {
+    const r = row(5, 2, "needs_review", {
+      matched_code: "01.01",
+      matched_name: "Статья",
+      candidates: [],
+      final_code: "99.99",
+      finalBreadcrumb: ["99 Устаревшее"],
+    })
+    renderCard(r, {
+      decision: {
+        kind: "confirmed",
+        code: "09.09",
+        name: "Найденная статья",
+        manual: true,
+      },
+    })
+    const block = screen.getByTestId("your-choice")
+    expect(within(block).queryByText(/99 Устаревшее/)).toBeNull()
+  })
+
+  it("строка no_match, решённая через поиск: блок есть, подписи рекомендации нет", () => {
+    const r = row(5, 2, "no_match", {
+      matched_code: null,
+      matched_name: null,
+      candidates: [],
+      final_code: "09.09",
+      finalBreadcrumb: [],
+    })
+    renderCard(r, {
+      decision: {
+        kind: "confirmed",
+        code: "09.09",
+        name: "Найденная статья",
+        manual: true,
+      },
+    })
+    expect(screen.getByTestId("your-choice")).toBeInTheDocument()
+    expect(screen.queryByText("Рекомендация системы")).toBeNull()
+  })
+
+  it("строка error, решённая через поиск: блок есть и стоит ВЫШЕ Alert-а", () => {
+    const r = row(5, 2, "error", {
+      matched_code: null,
+      matched_name: null,
+      matchError: "LLM timeout",
+      candidates: [],
+      final_code: "09.09",
+    })
+    renderCard(r, {
+      decision: {
+        kind: "confirmed",
+        code: "09.09",
+        name: "Найденная статья",
+        manual: true,
+      },
+    })
+    const block = screen.getByTestId("your-choice")
+    const alertText = screen.getByText("LLM timeout")
+    // DOCUMENT_POSITION_FOLLOWING === 4: alert идёт ПОСЛЕ блока
+    expect(
+      block.compareDocumentPosition(alertText) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it("подтверждение самой рекомендации блок НЕ показывает", () => {
+    const r = row(5, 2, "needs_review", {
+      matched_code: "01.01",
+      matched_name: "Статья",
+      candidates: [],
+    })
+    renderCard(r, {
+      decision: {
+        kind: "confirmed",
+        code: "01.01",
+        name: "Статья",
+        manual: false,
+      },
+    })
+    expect(screen.queryByTestId("your-choice")).toBeNull()
+  })
+
+  it("нерешённая строка блок НЕ показывает (pending)", () => {
+    renderCard(row(5, 2, "needs_review", { candidates: [] }))
+    expect(screen.queryByTestId("your-choice")).toBeNull()
+  })
+
+  it("нерешённая error-строка блок НЕ показывает", () => {
+    renderCard(
+      row(5, 2, "error", {
+        matched_code: null,
+        matched_name: null,
+        matchError: "LLM timeout",
+        candidates: [],
+      })
+    )
+    expect(screen.queryByTestId("your-choice")).toBeNull()
+  })
+
+  it("reject-решение блок НЕ показывает", () => {
+    renderCard(row(5, 2, "no_match", { candidates: [] }), {
+      decision: { kind: "no_match" },
+    })
+    expect(screen.queryByTestId("your-choice")).toBeNull()
+  })
+
+  it("при показанном блоке рекомендация уходит под подпись «Рекомендация системы»", () => {
+    const r = row(5, 2, "needs_review", {
+      matched_code: "01.01",
+      matched_name: "Статья",
+      candidates: [CAND2],
+    })
+    renderCard(r, {
+      decision: {
+        kind: "confirmed",
+        code: CAND2.article_code,
+        name: CAND2.name,
+        manual: false,
+      },
+    })
+    expect(screen.getByText("Рекомендация системы")).toBeInTheDocument()
+  })
+})
