@@ -130,7 +130,7 @@ class TreeMatcher(ABC):
 
 `ArticleRepository.list_catalog() -> list[CatalogArticle]` — весь справочник (id, code, name, parent_code).
 
-`DecisionFundRepository.lookup_many(keys: Sequence[str], version) -> dict[str, list[int]]` — батч exact-lookup по ключам чанка (живые статьи по ключу); `precedents_for(names: Sequence[str]) -> list[FundPrecedent]` — §6.3.
+`DecisionFundRepository.records_for_names(names: Sequence[str], version) -> list[FundPrecedent]` — **один** запрос на чанк: все живые записи фонда версии 3 по нормализованным именам целей (любой родитель). Из этого набора локально, без БД, решаются и exact-hit (полный ключ → ровно одна статья), и прецеденты для промпта (§6.3). `FundPrecedent` дополняется `article_id` и `key` (полный ключ v3).
 
 ### 3.3. Чистые функции (`domain/tree_matching.py`, без I/O)
 
@@ -196,50 +196,70 @@ lock → running
 catalog = articles.list_catalog();  пусто → status=blocked, code="catalog_empty"
 catalog_tokens > 25% окна → status=blocked, code="catalog_too_large"
 tree = estimates.fetch_tree(id);  parents = resolve_parents(tree)     # tree — РАБОЧЕЕ дерево, mutable
-targets = {n.id : n.status ∈ {pending, error, no_match} ∧ review_status == unreviewed}
 EXPECTED = (pending, error, no_match)
+is_target(i) = tree[i].status ∈ EXPECTED ∧ tree[i].review_status == unreviewed
+failed_roots = set()                                                  # индексы корней упавших поддеревьев
 
-def commit(i, result):                       # единая точка записи
+def commit(i, result):                                                # единая точка записи
     ok = estimates.save_node_match_cas(tree[i].id, result, EXPECTED)
     tree[i] = tree[i].with_result(result) if ok else estimates.refresh_tree_node(tree[i].id)
 
-for chunk in split_sections(...):                                   # порядок документа
-    if chunk.section in failed_sections:                            # предковый чанк упал
-        for i in chunk.targets: commit(i, error("tree_ancestor_failed")); continue
-    # 4.1 pre-call: контекст известен ДО вызова → exact-фонд и подсказки
-    ctx = {i: effective_ancestor_context(i, tree, parents) for i in chunk}
-    keys = {i: fund_key_v3(tree[i], ctx[i]) for i in chunk.targets if key is not None}
-    hits = fund.lookup_many(keys.values(), FUND_KEY_VERSION)        # батч
-    for i, key in keys.items():
-        if single_live(hits[key]): commit(i, matched_fund(...))     # tree[i] обновлён → виден потомкам
-    remaining = [i for i in chunk.targets if tree[i].status in EXPECTED]
-    # 4.2 LLM
-    req = SectionMatchRequest(nodes, ancestors, build_hints(chunk, ctx), remaining, catalog,
-                              precedents=fund.precedents_for(names_of(remaining), budget))
-    try: verdicts = matcher.match_section(req)
+def contexts(idxs): return {i: effective_ancestor_context(i, tree, parents) for i in idxs}
+
+def resolve_exact(i, ctx_i, records):                                 # локально, без БД
+    key = fund_key_v3(tree[i], ctx_i)                                 # None при барьере
+    live = {r.article_id for r in records if r.key == key}
+    return single(live) if key is not None else None
+
+for chunk in split_sections(...):                                     # порядок документа
+    if any(r ∈ ancestors_of(chunk.root) ∪ {chunk.root} for r in failed_roots):
+        for i in chunk.targets(is_target): commit(i, error("tree_ancestor_failed"))
+        continue                                                      # ← outer continue: чанк пропущен
+    targets = [i for i in chunk if is_target(i)]
+    records = fund.records_for_names(names_of(targets), FUND_KEY_VERSION) if fund_enabled else []   # 1 запрос на чанк
+
+    # 4.1 pre-call exact-фонд — контекст, известный ДО вызова модели
+    for i in targets (в порядке source_index):
+        hit = resolve_exact(i, contexts([i])[i], records)             # контекст свежий: предыдущие commit уже в tree
+        if hit: commit(i, matched_fund(hit))
+    remaining = [i for i in targets if is_target(i)]
+    if not remaining: continue
+
+    # 4.2 LLM — контекст и подсказки ПЕРЕСЧИТАНЫ после pre-call записей
+    ctx = contexts(chunk)
+    req = SectionMatchRequest(nodes=chunk, ancestors=path_with_codes(chunk.root, tree, parents),
+                              hints=build_hints(chunk, ctx), targets=remaining, catalog=catalog,
+                              precedents=select_precedents(records, budget))
+    try:
+        verdicts = matcher.match_section(req)
     except TransientError as exc:
-        failed_sections.add(chunk.section)
-        for i in remaining: commit(i, error(f"tree_transient: {exc}")); continue
-    # 4.3 post-call: СВЕРХУ ВНИЗ по документу; контекст ребёнка пересчитывается после родителя
+        failed_roots.add(chunk.root)
+        for i in remaining: commit(i, error(f"tree_transient: {exc}"))
+        continue                                                      # ← outer continue
+
+    # 4.3 post-call — СВЕРХУ ВНИЗ; контекст ребёнка считается по уже принятому вердикту родителя
     for i in remaining (в порядке source_index):
-        ctx_i = effective_ancestor_context(i, tree, parents)        # видит принятые вердикты предков этого же чанка
-        key = fund_key_v3(tree[i], ctx_i)
-        if key and single_live(fund.lookup_many([key])):            # фонд авторитетнее модели
-            commit(i, matched_fund(...)); continue
-        v = validate_one(verdicts.get(i), req, catalog, ctx_i)      # outside_parent по свежему trusted_code
-        commit(i, to_node_match(v, ctx_i, catalog))                 # confident только без барьера
+        ctx_i = contexts([i])[i]
+        hit = resolve_exact(i, ctx_i, records)                        # фонд авторитетнее модели; без БД
+        if hit: commit(i, matched_fund(hit)); continue                # ← inner continue
+        v = validate_one(verdicts.get(i), req, catalog, ctx_i)        # outside_parent по свежему trusted_code
+        commit(i, to_node_match(v, ctx_i, catalog))                   # confident только без барьера
+
 finalize: errors/unfinished → partial_error иначе ready
 ```
+
+`fund_enabled` = `apply_fund ∧ FUND_KEY_VERSION-ветка реализована` (§11: в PR 1 обе фондовые ветки выключены константой, `records` пуст, `resolve_exact` всегда `None`, прецедентов нет).
 
 Инварианты:
 - **Контекст ≠ цели.** Все строки чанка идут в промпт; вердикт запрашивается и записывается только по целям. Повторный запуск не перепишет `confident`/`needs_review`/`matched_fund`/`excluded` — CAS по `status IN (pending, error, no_match)`.
 - **Рабочее дерево всегда актуально.** Успешный CAS заменяет `TreeNode` результатом записи; проигранный — перечитыванием строки. Следующие узлы (в чанке и в дочерних чанках) видят свежие `status`/`matched_code`/`final_code`.
 - **Один ответ обрабатывается сверху вниз.** Вердикт родителя принимается раньше ребёнка, и контекст ребёнка (`trusted_code`, барьер, ключ фонда, `outside_parent`) считается по уже принятому вердикту родителя, а не по состоянию до вызова. Признанное ограничение: **прецеденты** для строк, чей родитель решается тем же вызовом, запрашиваются по имени без родителя (§6.3) — модель видит их вместе с родительским контекстом каждого прецедента и сама сопоставляет.
-- **Фонд авторитетнее модели.** Exact-hit применяется дважды: до вызова (для целей с уже доверенным контекстом — экономит токены ответа) и после (для целей, чей контекст стал доверенным внутри чанка) — в обоих случаях только без барьера.
+- **Фонд авторитетнее модели, БД — один запрос на чанк.** `records_for_names` грузит все живые записи по именам целей до вызова; exact-hit и прецеденты решаются из этого набора локально. Exact-hit применяется дважды: до вызова (контекст доверенный до вызова — экономит токены ответа) и после (контекст стал доверенным внутри чанка) — в обоих случаях только без барьера. После pre-call записей контекст, путь предков и подсказки **пересчитываются** — модель видит `[уже: код]` родителя, закрытого фондом секунду назад.
+- **Упавшее поддерево завершается консервативно.** `failed_roots` хранит корни упавших чанков; все последующие чанки, чей корень лежит в упавшем поддереве (включая его собственный корень при делении), получают `error` по целям. Чанки-сиблинги вне поддерева обрабатываются штатно.
 - **Транзиент фиксируется.** Оставшиеся цели упавшего чанка и цели всех дочерних чанков раздела получают `error` с машинным `match_error` (`tree_transient` / `tree_ancestor_failed`) через тот же CAS — ретрай `no_match`-цели не может тихо остаться терминальным, `partial_error` гарантирован (как в RAG-пути, [estimate_matching_service.py:238](../../../backend/app/services/estimate_matching_service.py#L238)).
 - **Порядок.** Чанки последовательны (дочерние зависят от эффективного контекста предков). Параллелизм между независимыми разделами — TECH_DEBT.
 - `_classify_nodes`, `_apply_fund` (стадия до LLM), `_embed_nodes`, гейт `matching_readiness` при `tree` **не вызываются**.
-- Сбой одного чанка не валит смету: строки остаются `pending` → `partial_error` → ре-триггер продолжает с них в том же порядке.
+- Сбой одного чанка не валит смету: его цели и цели дочерних чанков получают `error` (машинный код) → `partial_error` → ре-триггер берёт их как цели в том же порядке.
 
 `build_estimate_matching_service` ([deps.py:181](../../../backend/app/api/deps.py#L181)) выбирает ветку по `settings.matching_engine`; `apply_fund=False` (харнесс) отключает и exact-hit, и прецеденты.
 
@@ -291,7 +311,7 @@ Startup-валидация только конфигурации: слаг не�
 
 ### 6.1. Lookup — в обходе, не до LLM
 
-Ключ `fund_key_v3(node, ctx)` вычисляется для каждой цели дважды (§4): до вызова модели — по контексту предков из предыдущих чанков/прогонов, и после — сверху вниз по принятым вердиктам этого же чанка. При `has_uncertain_barrier` ключ `None` — exact-применение **пропускается**, а находка (если есть) уходит в прецеденты как подсказка. Хит с ровно одной живой статьёй (`resolve_fund_decision` как сейчас) → `matched_fund` через тот же CAS, снимок без кандидатов; post-call хит имеет приоритет над вердиктом модели. Lookup — батчем `lookup_many` по ключам чанка. Смешение с v2 исключено фильтром `crumb_version = FUND_KEY_VERSION` в `lookup`; старые записи v2 инертны, их чистит существующий `rebuild`.
+Ключ `fund_key_v3(node, ctx)` вычисляется для каждой цели дважды (§4): до вызова модели — по контексту предков из предыдущих чанков/прогонов, и после — сверху вниз по принятым вердиктам этого же чанка. При `has_uncertain_barrier` ключ `None` — exact-применение **пропускается**, а находка (если есть) уходит в прецеденты как подсказка. Хит с ровно одной живой статьёй (`resolve_fund_decision` как сейчас) → `matched_fund` через тот же CAS, снимок без кандидатов; post-call хит имеет приоритет над вердиктом модели. К БД — один `records_for_names` на чанк; разрешение по полному ключу — локально. Смешение с v2 исключено фильтром `crumb_version = FUND_KEY_VERSION` в `lookup`; старые записи v2 инертны, их чистит существующий `rebuild`.
 
 ### 6.2. Promotion — то же дерево, та же функция
 
@@ -299,7 +319,7 @@ Startup-валидация только конфигурации: слаг не�
 
 ### 6.3. Прецеденты в промпт
 
-`precedents_for(names)` возвращает по **нормализованным именам** целей чанка записи фонда версии 3 (все ключи с этим именем, любой родитель), JOIN к живым статьям. Запрос по имени, а не по полному ключу, — сознательно: для строк, чей родитель решается тем же вызовом, parent-код до вызова неизвестен (§4); каждый прецедент несёт свой `parent_article_code`, и модель сопоставляет его с контекстом строки сама. Правила: полный ключ `(имя, родитель)` с **несколькими** статьями — конфликт, в промпт не идёт (счётчик в summary); дедуп по полному ключу; сортировка `votes desc`; отсечение по `tree_precedents_budget`. Формат блока: `имя | в разделе (код родителя) имя родителя → (код) статья — N решений`.
+`select_precedents(records, budget)` строит блок из того же набора `records_for_names(names)` — записей фонда версии 3 по **нормализованным именам** целей чанка (все ключи с этим именем, любой родитель), JOIN к живым статьям. Запрос по имени, а не по полному ключу, — сознательно: для строк, чей родитель решается тем же вызовом, parent-код до вызова неизвестен (§4); каждый прецедент несёт свой `parent_article_code`, и модель сопоставляет его с контекстом строки сама. Правила: полный ключ `(имя, родитель)` с **несколькими** статьями — конфликт, в промпт не идёт (счётчик в summary); дедуп по полному ключу; сортировка `votes desc`; отсечение по `tree_precedents_budget`. Формат блока: `имя | в разделе (код родителя) имя родителя → (код) статья — N решений`.
 
 ### 6.4. Инвалидация
 
@@ -359,9 +379,9 @@ Startup-валидация только конфигурации: слаг не�
 ## 10. Тесты
 
 - **Домен:** `resolve_parents` (дубли кодов между этапами, скачок глубины); `effective_ancestor_context` (вся таблица §3.3, пример A→B→C, корень); `split_sections` (раздел-одиночка, деление по детям, порядок «родитель раньше ребёнка», лимит по токенам, **единственный ребёнок больше лимита → рекурсия, цепочка без сиблингов завершается**, узел больше бюджета → `tree_row_too_large`); `validate_verdicts` (каждый флаг, дубликат, чужой `node_id`, `alt == code`); `to_node_match` (полная матрица kind × sure × барьер × флаги — единственный путь в `confident`); `neighbors`; `fund_key_v3` (барьер → `None`); `estimate_tokens`.
-- **Сервис** (фейк `TreeMatcher` в `tests/fakes.py`): happy path; контекст ≠ цели (не-цели не перезаписываются); **вердикт родителя из того же ответа входит в контекст ребёнка** (одинаковые имена «Прочее» под разными разделами → разные `X.99`, `outside_parent` срабатывает по свежему родителю); **успешный вердикт предкового чанка входит в контекст дочернего** (`trusted_code` виден без перечитывания); транзиент чанка → оставшиеся цели и цели дочерних чанков в `error` с машинным кодом → `partial_error` даже если единственной целью был `no_match`; ре-триггер доматчивает только `error`; CAS `False` на предке → перечитан `final_code` до потомков; exact-hit фонда пропущен при барьере, а post-call хит побеждает вердикт модели.
+- **Сервис** (фейк `TreeMatcher` в `tests/fakes.py`): happy path; контекст ≠ цели (не-цели не перезаписываются); **pre-call фонд закрыл родителя → LLM-запрос ребёнка содержит свежий `[уже: код]`** (проверяется через захваченный `SectionMatchRequest` фейка); ровно один вызов фонда на чанк (счётчик фейка); упавший сиблинг-раздел не влияет на соседний; **вердикт родителя из того же ответа входит в контекст ребёнка** (одинаковые имена «Прочее» под разными разделами → разные `X.99`, `outside_parent` срабатывает по свежему родителю); **успешный вердикт предкового чанка входит в контекст дочернего** (`trusted_code` виден без перечитывания); транзиент чанка → оставшиеся цели и цели дочерних чанков в `error` с машинным кодом → `partial_error` даже если единственной целью был `no_match`; ре-триггер доматчивает только `error`; CAS `False` на предке → перечитан `final_code` до потомков; exact-hit фонда пропущен при барьере, а post-call хит побеждает вердикт модели.
 - **Адаптер** (стаб httpx): валидный JSON; битый JSON → все цели `missing`; `finish_reason=length` → деление чанка; ниже минимума → `error`; `cache_control` присутствует в теле запроса.
-- **Репозиторий/фонд:** `save_node_match_cas` по обоим предикатам (интеграционный, `TEST_DATABASE_URL`); `precedents_for` — конфликт исключён, `votes` сортировка; инвариант «ключ промоушена = ключ lookup».
+- **Репозиторий/фонд:** `save_node_match_cas` по обоим предикатам (интеграционный, `TEST_DATABASE_URL`); `records_for_names` + `select_precedents` — конфликт по полному ключу исключён, `votes` сортировка, один запрос на чанк; инвариант «ключ промоушена = ключ lookup».
 - **Харнесс:** `top1_strict`, группа C на синтетических исходах (в т.ч. уверенный матч на `structural` снижает precision).
 - **API/фронт:** `score: null` сериализуется и не рендерится; `dependents_hint` считается по позиционному поддереву и равен `0` при `confirm`; toast и переход в грид.
 
@@ -369,9 +389,9 @@ Startup-валидация только конфигурации: слаг не�
 
 ## 11. План PR
 
-1. **Ядро за флагом.** Домен (§3.3) + порт + фейк + `fetch_tree`/`save_node_match_cas`/`list_catalog` + сервис (§4) + адаптер (§5) + конфиг + `score` nullable сквозь стек (§7.1). Default `rag`.
-2. **Харнесс.** `--engine`, `top1_strict`, группа C, замороженный RAG-baseline, сид бенчмарка id=2 (нужен специалист-разметчик — запрос отдельно).
-3. **Фонд v3.** `FUND_KEY_VERSION`, lookup в обходе, promotion по дереву, `precedents_for`, промпт-блок; `dependents_hint` + фронт-подсказка (§7.2–7.3).
+1. **Ядро за флагом — без фонда.** Домен (§3.3, включая `fund_key_v3`/`effective_ancestor_context` — они нужны валидации и барьеру) + порт + фейк + `fetch_tree`/`refresh_tree_node`/`save_node_match_cas`/`list_catalog` + сервис (§4) + адаптер (§5) + конфиг + `score` nullable сквозь стек (§7.1). **Промежуточная семантика:** `fund_enabled = False` жёстко — `records` пуст, exact-hit не срабатывает, блок прецедентов не рендерится; `matched_fund` для `tree` в PR 1 недостижим. Default `rag`. Включённый вручную `tree` полностью работоспособен без фонда.
+2. **Харнесс.** `--engine`, `top1_strict`, группа C, замороженный RAG-baseline, сид бенчмарка id=2 (нужен специалист-разметчик — запрос отдельно). Замер PR 1 — ориентировочный, **не гейт**.
+3. **Фонд v3.** `FUND_KEY_VERSION`, `records_for_names`, pre/post exact в обходе, promotion по дереву, прецеденты в промпт, снятие константы `fund_enabled`; `dependents_hint` + фронт-подсказка (§7.2–7.3). **Гейт §9 выполняется только после PR 3.**
 4. **Гейт → default `tree` → вырезание RAG:** `_classify_nodes`/`WorkTypeClassifier`/`openrouter_classifier`, `_embed_nodes` узлов, `MatchingService.match_one`/`LLMMatcher`/арбитр-адаптеры, порог/`top_k`, гейт `matching_readiness` в матчинге, `CRUMB_DERIVATION_VERSION`, `PromotableRow`; миграция — `DROP COLUMN estimate_rows.embedding`; PIPELINE.md переписывается.
 
 ---
