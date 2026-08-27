@@ -100,6 +100,22 @@ describe("useReviewQueue: skip (N)", () => {
     expect(result.current.queue.map((r) => r.row_number)).toEqual([20, 50, 10])
     expect(result.current.activeRow?.row_number).toBe(20) // выбор сброшен
   })
+
+  it("N на СПОРНОЙ строке, открытой ИЗ ГРИДА, не двигает позицию потока (mirror FIX-1)", () => {
+    const { result } = setup()
+    // до захода в грид поток стоит на самой ранней спорной — 20 (si=1)
+    expect(result.current.activeRow?.row_number).toBe(20)
+    // открываем ИЗ ГРИДА другую спорную строку (50, si=4) — она не текущая
+    // строка потока; в отличие от N-на-ad-hoc-строке выше, 50 состоит в
+    // очереди спорных, поэтому идёт по «in-queue»-ветке skip
+    act(() => result.current.openFromGrid(50))
+    act(() => void result.current.skip())
+    act(() => result.current.deselect())
+    // поток обязан вернуться туда, где был ДО захода в грид (20), а не
+    // «прыгнуть» вперёд на sourceIndex строки из грида (иначе была бы 10 —
+    // первая нерешённая строго после si=4)
+    expect(result.current.activeRow?.row_number).toBe(20)
+  })
 })
 
 describe("useReviewQueue: deselect (ручной уход в грид табом)", () => {
