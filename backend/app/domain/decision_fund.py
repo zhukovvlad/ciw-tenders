@@ -11,6 +11,12 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from app.domain.entities import AncestorContext, TreeNode
+
+FUND_KEY_VERSION = 3  # ключ v3: (норм. имя строки, код доверенной статьи предка);
+# отдельно от CRUMB_DERIVATION_VERSION (см. domain/classification.py)
+_KEY_SEP = "\x1f"
+
 
 @dataclass(frozen=True, slots=True)
 class FundHit:
@@ -63,3 +69,10 @@ def resolve_fund_decision(live_article_ids: Sequence[int]) -> int | None:
     (0 → промах/только мёртвые; ≥2 различных → конфликт → молчим)."""
     distinct = set(live_article_ids)
     return next(iter(distinct)) if len(distinct) == 1 else None
+
+
+def fund_key_v3(node: TreeNode, ctx: AncestorContext) -> str | None:
+    """None при барьере: exact-фонд на сомнительном контексте не применяется (спека §6.1)."""
+    if ctx.has_uncertain_barrier:
+        return None
+    return f"{normalize_cache_key(node.name)}{_KEY_SEP}{ctx.trusted_code or ''}"
