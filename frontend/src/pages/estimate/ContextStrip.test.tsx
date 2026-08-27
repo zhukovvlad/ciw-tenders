@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { ContextStrip } from "@/pages/estimate/ContextStrip"
 import { initReview } from "@/lib/reviewState"
 import type { MatchRow, MatchStatus } from "@/lib/types"
@@ -394,5 +395,72 @@ describe("ContextStrip", () => {
     render(<ContextStrip state={initReview("x", rows)} activeRowNumber={2} />)
     const name = screen.getByText("Орг-лист")
     expect(name.className).not.toContain("text-[var(--ds-text-2)]")
+  })
+})
+
+describe("ContextStrip: навигация по клику", () => {
+  it("клик по решаемой строке зовёт onNavigate с её row_number", async () => {
+    const onNavigate = vi.fn()
+    render(
+      <ContextStrip
+        state={initReview("x", ROWS)}
+        activeRowNumber={3}
+        onNavigate={onNavigate}
+      />
+    )
+    await userEvent.click(screen.getByText("Строка 2"))
+    expect(onNavigate).toHaveBeenCalledWith(2)
+  })
+
+  it("excluded/pending не кликабельны: не button, onNavigate не зовётся", async () => {
+    const onNavigate = vi.fn()
+    render(
+      <ContextStrip
+        state={initReview("x", ROWS)}
+        activeRowNumber={3}
+        onNavigate={onNavigate}
+      />
+    )
+    const excluded = screen.getByText("Орг-заголовок").closest("[data-row]")!
+    expect(excluded.tagName).toBe("DIV")
+    await userEvent.click(excluded)
+    expect(onNavigate).not.toHaveBeenCalled()
+  })
+
+  it("активная строка не кликабельна (клик по себе — no-op)", () => {
+    render(
+      <ContextStrip
+        state={initReview("x", ROWS)}
+        activeRowNumber={3}
+        onNavigate={vi.fn()}
+      />
+    )
+    const active = screen.getByText("Строка 3").closest("[data-row]")!
+    expect(active.tagName).toBe("DIV")
+  })
+
+  it("кликабельная строка — button с аффордансом грида, без словаря кандидата", () => {
+    render(
+      <ContextStrip
+        state={initReview("x", ROWS)}
+        activeRowNumber={3}
+        onNavigate={vi.fn()}
+      />
+    )
+    const clickable = screen.getByText("Строка 2").closest("[data-row]")!
+    expect(clickable.tagName).toBe("BUTTON")
+    expect(clickable.className).toContain("hover:bg-muted/50")
+    expect(clickable.className).toContain("cursor-pointer")
+    // видимый focus-ring — требование a11y из спеки
+    expect(clickable.className).toContain("focus-visible:ring-3")
+    // роль полосы сохранена: не кандидат
+    expect(clickable.className).not.toContain("rounded")
+    expect(clickable.className).not.toContain("border-border")
+  })
+
+  it("без onNavigate строки остаются неинтерактивными (обратная совместимость)", () => {
+    render(<ContextStrip state={initReview("x", ROWS)} activeRowNumber={3} />)
+    const other = screen.getByText("Строка 2").closest("[data-row]")!
+    expect(other.tagName).toBe("DIV")
   })
 })
