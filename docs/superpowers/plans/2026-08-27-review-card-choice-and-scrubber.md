@@ -30,7 +30,14 @@
 
 **Этого недостаточно.** `commitFailed` вызывается из `.then` упавшего PATCH-а и одновременно **пиннит оператора** на строке, которую он решает прямо сейчас (существующее поведение, защищённое пин-тестом «STALE CLOSURE»). Когда оператор решит эту строку, её `committed` перезапишет позицию на «после себя» — а откатившаяся строка обычно раньше по документу, значит она снова уедет в хвост и подхватится только обёрткой в самом конце прохода. Инвариант умрёт молча, ровно чего спека и опасалась.
 
-**Решение в плане:** у откатившейся строки отдельный приоритетный слот `priority` (row_number), который проверяется перед позицией. Он не требует ручного сброса — гаснет сам, как только строка перестала быть `pending`. Позиция остаётся простым `number | null` без разновидностей `after`/`from`.
+**Решение в плане:** у откатившихся строк отдельный **упорядоченный список** `priorities: number[]`, который проверяется перед позицией. Позиция остаётся простым `number | null` без разновидностей `after`/`from`.
+
+Почему список, а не одиночный слот — два дефекта, которые слот даёт:
+
+1. **Потеря конкурентного отката.** Два PATCH-а бывают in-flight одновременно, и упасть могут оба. Одиночный слот второй записью затирает первый, и первая откатившаяся строка теряет приоритет — прежнее переупорядочивание `order` держало обе. Список добавляет каждую, последний откат первым (как и делал `[rowNumber, ...rest]`).
+2. **Залипание на `N`.** Приоритет проверяется раньше позиции, поэтому пропуск приоритетной строки вернул бы её же: оператор жмёт `N`, а карточка не меняется. Поэтому `skip` **убирает** активную строку из `priorities` — она возвращается в обычный позиционный поток и подхватится обёрткой в конце прохода, ровно как любая пропущенная.
+
+`committed` тоже убирает строку из списка (решена — приоритет не нужен), а фильтр по `pending` в `autoActive` страхует от любых остатков.
 
 Это единственное отступление от спеки; остальное реализуется как написано.
 
@@ -362,16 +369,18 @@ Alert-ом: сначала выбор оператора, затем диагн�
 
 **Files:**
 
-- Modify: `frontend/src/pages/estimate/ReviewCard.tsx` (бейдж `Enter` внутри кнопки синтетической рекомендации ~строка 172; `LegendItem` с `keyLabel="Enter"` ~строка 303)
+- Modify: `frontend/src/pages/estimate/ReviewCard.tsx` — **ДВА** бейджа `Enter` (внутри кнопки синтетической рекомендации ~строка 172 И внутри кандидата-рекомендации ~строка 230), `LegendItem` с `keyLabel="Enter"` ~строка 303, комментарий-doc у `hasRecommendation` ~строка 33
 - Modify: `frontend/src/pages/estimate/ReviewScreen.tsx:124` (гейт `canConfirm`)
-- Test: `frontend/src/pages/estimate/ReviewCard.test.tsx`
+- Test: `frontend/src/pages/estimate/ReviewCard.test.tsx`, `frontend/src/pages/estimate/ReviewScreen.test.tsx`
 
 **Interfaces:**
 
-- Consumes: `decision: Decision` — уже проп `ReviewCard`; `hasRecommendation(row)` из `@/pages/estimate/ReviewCard`; `decisionFor(state, row)` из `@/lib/reviewState`; `data-testid="your-choice"` (Task 1).
+- Consumes: `decision: Decision` — уже проп `ReviewCard`; `hasRecommendation(row)` из `@/pages/estimate/ReviewCard`; `decisionFor(state, row)` из `@/lib/reviewState`; хелперы `Wrap`, `ROWS`, `workText` из `ReviewScreen.test.tsx`.
 - Produces: ничего для последующих задач.
 
 **Зачем:** после Task 1 рекомендация стоит НИЖЕ блока «Ваш выбор», поэтому случайный `Enter` на решённой строке вероятнее — а он перезаписал бы выбор оператора одним нажатием. Правило: `Enter` активен только пока `decision.kind === "pending"`. Клик по рекомендации остаётся (явный ручной возврат к ней), исчезает только бейдж и работа клавиши — инвариант «нет бейджа ⇒ нет клавиши» сохранён.
+
+**Внимание: бейджей `Enter` в карточке ДВА, и оба надо закрыть одним условием.** Рекомендация рисуется по-разному в зависимости от того, входит ли `matched_code` в `row.candidates`: если НЕ входит — отдельным «синтетическим» блоком (гейт `syntheticRecommendation`), если входит — обычной кандидатной строкой с веткой `isRecommendation`, у которой **свой** `kbd`-бейдж `Enter` на [ReviewCard.tsx:230](../../../frontend/src/pages/estimate/ReviewCard.tsx#L230). Закрыть только первый — оставить видимый бейдж при отключённой клавише, то есть сломать тот самый инвариант, ради которого задача и делается.
 
 - [ ] **Step 1: Написать падающие тесты**
 
@@ -419,6 +428,40 @@ describe("ReviewCard: Enter гаснет на решённых строках", 
     await userEvent.click(rec)
     expect(props.onConfirmRecommendation).toHaveBeenCalledTimes(1)
   })
+
+  // ВТОРОЙ бейдж: когда matched_code входит в candidates, рекомендация — это
+  // кандидатная строка с веткой isRecommendation и собственным kbd Enter.
+  const recAsCandidate: Candidate = {
+    id: 1,
+    article_code: "01.01",
+    name: "Статья",
+    score: 0.9,
+    breadcrumb: ["01 Раздел"],
+  }
+  const rc = row(6, 3, "needs_review", {
+    matched_code: "01.01",
+    matched_name: "Статья",
+    candidates: [recAsCandidate],
+  })
+
+  it("рекомендация ВНУТРИ candidates: на pending бейдж Enter есть", () => {
+    renderCard(rc)
+    const cand = screen.getByText("Статья").closest("button")!
+    expect(within(cand).getByText("Enter")).toBeInTheDocument()
+  })
+
+  it("рекомендация ВНУТРИ candidates: на решённой строке бейджа Enter нет", () => {
+    renderCard(rc, {
+      decision: {
+        kind: "confirmed",
+        code: "07.01",
+        name: "Кровельные работы",
+        manual: false,
+      },
+    })
+    const cand = screen.getByText("Статья").closest("button")!
+    expect(within(cand).queryByText("Enter")).toBeNull()
+  })
 })
 ```
 
@@ -426,9 +469,41 @@ describe("ReviewCard: Enter гаснет на решённых строках", 
 
 Run: `cd frontend && npx vitest run src/pages/estimate/ReviewCard.test.tsx -t "Enter гаснет"`
 
-Expected: FAIL на «бейджа Enter у рекомендации нет» — бейдж находится. Два других теста проходят сразу (пины существующего поведения).
+Expected: FAIL на двух тестах — «бейджа Enter у рекомендации нет» и «рекомендация ВНУТРИ candidates: на решённой строке бейджа Enter нет»: оба бейджа находятся. Остальные проходят сразу (пины существующего поведения).
 
-- [ ] **Step 3: Скрыть бейдж и приглушить легенду**
+- [ ] **Step 3: Написать падающий интеграционный тест на инертность клавиши**
+
+Бейдж и работа клавиши — разные вещи: гейт живёт в `ReviewScreen`, и без своего теста он остался бы непокрытым. Решённую строку удобнее всего открыть через `←` (undo): `queue.undo` меняет активную, но `reopen` не диспатчит, поэтому строка открывается именно решённой.
+
+Добавить в `frontend/src/pages/estimate/ReviewScreen.test.tsx` (хелперы `Wrap`, `ROWS`, `workText` — уже в файле; `←` — это `ArrowLeft`, см. `useReviewKeyboard`):
+
+```tsx
+describe("Enter на решённой строке инертен", () => {
+  it("← открывает решённую строку, повторный Enter ничего не коммитит", async () => {
+    const onReview = vi.fn().mockResolvedValue(true)
+    render(<Wrap rows={ROWS} onReview={onReview} />)
+    // решаем «Спорная А»
+    await userEvent.keyboard("{Enter}")
+    expect(onReview).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(workText("Спорная Б")).toBeInTheDocument())
+    // ← возвращает к уже решённой «Спорная А»
+    await userEvent.keyboard("{ArrowLeft}")
+    expect(workText("Спорная А")).toBeInTheDocument()
+    // Enter здесь обязан быть инертным: иначе одно нажатие перезаписало бы
+    // решение оператора
+    await userEvent.keyboard("{Enter}")
+    expect(onReview).toHaveBeenCalledTimes(1)
+  })
+})
+```
+
+- [ ] **Step 4: Запустить интеграционный тест и убедиться, что падает**
+
+Run: `cd frontend && npx vitest run src/pages/estimate/ReviewScreen.test.tsx -t "инертен"`
+
+Expected: FAIL — `expected "spy" to be called 1 times, but got 2 times`: второй `Enter` прошёл через `canConfirm` и закоммитил.
+
+- [ ] **Step 5: Скрыть ОБА бейджа и приглушить легенду**
 
 В `frontend/src/pages/estimate/ReviewCard.tsx` заменить безусловный бейдж внутри кнопки синтетической рекомендации:
 
@@ -451,6 +526,26 @@ Expected: FAIL на «бейджа Enter у рекомендации нет» �
                 )}
 ```
 
+Затем — **второй бейдж**, внутри кандидата-рекомендации (~строка 230, в ветке `{isRecommendation && (`). Заменить:
+
+```tsx
+                      <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
+                        Enter
+                      </kbd>
+```
+
+на:
+
+```tsx
+                      {/* тот же инвариант, второе место отрисовки
+                          рекомендации: matched_code входит в candidates */}
+                      {decision.kind === "pending" && (
+                        <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
+                          Enter
+                        </kbd>
+                      )}
+```
+
 И в постоянной легенде клавиш заменить:
 
 ```tsx
@@ -471,7 +566,7 @@ Expected: FAIL на «бейджа Enter у рекомендации нет» �
           />
 ```
 
-- [ ] **Step 4: Закрыть клавишу в `ReviewScreen`**
+- [ ] **Step 6: Закрыть клавишу в `ReviewScreen` и поправить устаревший комментарий**
 
 В `frontend/src/pages/estimate/ReviewScreen.tsx:124` заменить:
 
@@ -492,30 +587,51 @@ Expected: FAIL на «бейджа Enter у рекомендации нет» �
 
 `decisionFor` уже импортирован в этом файле (используется при рендере `ReviewCard`) — новый импорт не нужен. Если `tsc` скажет иначе, добавить его в существующий импорт из `@/lib/reviewState`.
 
-- [ ] **Step 5: Запустить тесты и убедиться, что проходят**
+Там же, в `ReviewCard.tsx`, doc-комментарий у `hasRecommendation` становится неверным — он утверждает эквивалентность, которой больше нет. Заменить:
+
+```tsx
+/** Enter активен ⇔ блок рекомендации отрисован (правило: клавиша ⇔ элемент) */
+```
+
+на:
+
+```tsx
+/** Рекомендация отрисована? Enter активен ⇔ она отрисована И строка не решена
+ *  (второй множитель — гейт canConfirm в ReviewScreen: на решённой строке
+ *  клавиша инертна, и бейджа Enter нет ни у одной из двух отрисовок) */
+```
+
+- [ ] **Step 7: Запустить тесты и убедиться, что проходят**
 
 Run: `cd frontend && npx vitest run src/pages/estimate/ReviewCard.test.tsx src/pages/estimate/ReviewScreen.test.tsx src/lib/useReviewKeyboard.test.tsx`
 
 Expected: PASS.
 
-- [ ] **Step 6: Прогнать typecheck и весь фронт**
+- [ ] **Step 8: Прогнать typecheck и весь фронт**
 
 Run: `cd frontend && npx tsc -b && npx vitest run`
 
 Expected: чисто и зелено.
 
-- [ ] **Step 7: Отформатировать и закоммитить**
+- [ ] **Step 9: Отформатировать и закоммитить**
 
 ```bash
-cd frontend && npx prettier --write src/pages/estimate/ReviewCard.tsx src/pages/estimate/ReviewCard.test.tsx src/pages/estimate/ReviewScreen.tsx
-cd .. && git add frontend/src/pages/estimate/ReviewCard.tsx frontend/src/pages/estimate/ReviewCard.test.tsx frontend/src/pages/estimate/ReviewScreen.tsx
+cd frontend && npx prettier --write src/pages/estimate/ReviewCard.tsx src/pages/estimate/ReviewCard.test.tsx src/pages/estimate/ReviewScreen.tsx src/pages/estimate/ReviewScreen.test.tsx
+cd .. && git add frontend/src/pages/estimate/ReviewCard.tsx frontend/src/pages/estimate/ReviewCard.test.tsx frontend/src/pages/estimate/ReviewScreen.tsx frontend/src/pages/estimate/ReviewScreen.test.tsx
 git commit -m "feat(review): Enter инертен на решённых строках
 
 После демоушена рекомендации под блок «Ваш выбор» случайный Enter стал
 вероятнее, а он перезаписывал бы решение оператора одним нажатием. Теперь
-confirmArbiter активен только при decision.kind === pending; бейдж Enter на
-решённой строке скрыт (инвариант «клавиша ⇔ элемент»), клик по рекомендации
-остаётся как явный ручной возврат к ней."
+confirmArbiter активен только при decision.kind === pending.
+
+Бейджей Enter в карточке ДВА — рекомендация рисуется синтетическим блоком
+или кандидатной строкой, смотря входит ли matched_code в candidates. Закрыты
+оба: иначе на решённой строке остался бы видимый бейдж при мёртвой клавише,
+то есть ровно то нарушение «клавиша ⇔ элемент», против которого правка.
+
+Клик по рекомендации остаётся как явный ручной возврат к ней. Doc-комментарий
+hasRecommendation поправлен: эквивалентности «Enter ⇔ рекомендация отрисована»
+больше нет, добавился множитель «строка не решена»."
 ```
 
 ---
@@ -623,14 +739,53 @@ describe("useReviewQueue: скраббер-навигация", () => {
     act(() => void result.current.committed(50))
     expect(result.current.activeRow?.row_number).toBe(20)
   })
+
+  it("N на откатившейся строке действительно её пропускает (без залипания)", () => {
+    const { result } = setup()
+    act(() => void result.current.committed(20))
+    act(() => result.current.commitFailed(20))
+    act(() => void result.current.committed(50))
+    expect(result.current.activeRow?.row_number).toBe(20) // приоритет поднял
+    // приоритет проверяется раньше позиции — без снятия N вернул бы ту же 20
+    act(() => void result.current.skip())
+    expect(result.current.activeRow?.row_number).toBe(10)
+  })
+
+  it("два конкурентных отката: первый не потерян", () => {
+    const { result } = setup()
+    act(() => void result.current.committed(20))
+    act(() => void result.current.committed(50))
+    // оба PATCH-а падают; активной остаётся 10 (оператора не выдёргиваем)
+    act(() => result.current.commitFailed(20))
+    act(() => result.current.commitFailed(50))
+    expect(result.current.activeRow?.row_number).toBe(10)
+    // решаем текущую: всплывает ПОСЛЕДНИЙ откат
+    act(() => void result.current.committed(10))
+    expect(result.current.activeRow?.row_number).toBe(50)
+    // и только теперь — первый, который одиночный слот бы затёр
+    act(() => void result.current.committed(50))
+    expect(result.current.activeRow?.row_number).toBe(20)
+  })
+
+  it("N на ad-hoc строке из полосы двигает позицию вперёд", () => {
+    const { result } = setup()
+    act(() => result.current.navigateTo(30)) // confident, si=2, не в очереди
+    act(() => void result.current.skip())
+    // поток продолжается ПОСЛЕ si=2 → 50 (si=4), а не с начала документа
+    expect(result.current.activeRow?.row_number).toBe(50)
+  })
 })
 ```
+
+Существующий пин «N на ad-hoc строке из грида (не в порядке спорных): порядок цел, выход в грид» править **не нужно** — он проверяет ветку `origin=grid`, где позиция сознательно не двигается.
 
 - [ ] **Step 2: Запустить тесты и убедиться, что падают**
 
 Run: `cd frontend && npx vitest run src/lib/useReviewQueue.test.ts`
 
 Expected: FAIL — `result.current.navigateTo is not a function` в новом describe; в переписанных тестах `queue` приходит `[50, 10, 20]` вместо `[20, 50, 10]`, а `activeRow` не тот; пин PR-B даёт `10` вместо `20`.
+
+Тест «N на откатившейся строке» — страж от залипания: если реализация пропустит снятие приоритета в `skip`, он даст `20` вместо `10`. Тест «два конкурентных отката» падает на одиночном слоте: второй `commitFailed` затирает первый, и последний ассерт даёт `null` вместо `20`.
 
 - [ ] **Step 3: Заменить состояние очереди на позиционное**
 
@@ -668,9 +823,11 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
   // этого мало: commitFailed пиннит оператора на строке, которую он решает
   // сейчас, а её committed перезапишет позицию на «после себя» — откатившаяся
   // (она обычно раньше по документу) снова уехала бы в хвост. Поэтому
-  // отдельный слот, проверяемый ПЕРЕД позицией. Ручного сброса не требует:
-  // гаснет сам, когда строка перестала быть pending (условие в autoActive).
-  const [priority, setPriority] = useState<number | null>(null)
+  // отдельный список, проверяемый ПЕРЕД позицией.
+  // Именно СПИСОК, не одиночный слот: два PATCH-а бывают in-flight и падают
+  // оба — слот затёр бы первую откатившуюся строку, а прежний order держал
+  // обе. Порядок «последний откат первым», как делало [rowNumber, ...rest].
+  const [priorities, setPriorities] = useState<number[]>([])
 ```
 
 `sessionDecided` (текущая строка 51) оставить как есть, вместе с комментарием.
@@ -686,7 +843,7 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     setUndoStack([])
     setSelection(null)
     setPosition(null)
-    setPriority(null)
+    setPriorities([])
     // Сброс сессии — мутировать ref во время рендера здесь безопасно: ветка
     // выполняется однократно на смену набора и не участвует в выводе JSX.
     // eslint-disable-next-line react-hooks/refs
@@ -728,11 +885,16 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     return pending.find((r) => r.sourceIndex > position) ?? pending[0]
   }
 
-  const priorityRow = priority !== null ? byNum.get(priority) : undefined
-  const autoActive =
-    priorityRow && pending.includes(priorityRow)
-      ? priorityRow
-      : nextByPosition()
+  // Откаты PATCH идут ПЕРЕД позицией. Берём первый ещё нерешённый: список
+  // упорядочен «последний откат первым», а не-pending элементы просто
+  // пропускаются, поэтому чистить его обязательно не нужно.
+  const priorityRow =
+    priorities
+      .map((n) => byNum.get(n))
+      .find((r): r is MatchRow => r !== undefined && pending.includes(r)) ??
+    null
+
+  const autoActive = priorityRow ?? nextByPosition()
 
   const activeRow = selection ? (byNum.get(selection.row) ?? null) : autoActive
 ```
@@ -761,14 +923,22 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
   const skip = (): CommitExit => {
     const n = activeRow?.row_number
     if (n === undefined) return { kind: "next" }
+    // N = «пропустить», поэтому строка выходит из приоритетов: иначе приоритет
+    // (он проверяется раньше позиции) вернул бы её тем же рендером и оператор
+    // залип бы на ней. Строка остаётся нерешённой и подхватится обёрткой.
+    setPriorities((p) => p.filter((x) => x !== n))
     if (!queue.some((r) => r.row_number === n)) {
-      // Ad-hoc строка (confident/фонд, открытая из грида или полосы):
-      // «пропустить» = передумал — уходим туда, откуда пришли, позицию потока
-      // не двигаем.
+      // Ad-hoc строка (confident/фонд): «пропустить» = передумал — уходим
+      // туда, откуда пришли.
       const exit = exitFor(origin)
       if (exit.kind === "row")
         setSelection({ row: exit.rowNumber, origin: { kind: "flow" } })
       else setSelection(null)
+      // Позицию двигаем ТОЛЬКО если пришли потоком/полосой: тогда оператор
+      // движется по документу и ждёт продолжения после этой строки. Из грида
+      // (origin=grid) выход возвращает в таблицу, а undo — это отступление;
+      // в обоих случаях трогать позицию потока нельзя.
+      if (origin.kind === "flow") advanceFrom(n)
       return exit
     }
     // Пропущенная строка остаётся нерешённой на своём месте в порядке
@@ -786,6 +956,9 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
   const committed = (rowNumber: number): CommitExit => {
     setUndoStack((s) => [...s, rowNumber])
     sessionDecided.current.add(rowNumber)
+    // Решена — приоритет больше не нужен (фильтр по pending в autoActive и так
+    // бы её пропустил, но не копим мусор в списке).
+    setPriorities((p) => p.filter((x) => x !== rowNumber))
     const exit = exitFor(origin)
     if (exit.kind === "row")
       setSelection({ row: exit.rowNumber, origin: { kind: "flow" } })
@@ -807,7 +980,9 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     })
     sessionDecided.current.delete(rowNumber)
     // Откатившаяся строка — следующая, как только оператор закончит текущую.
-    setPriority(rowNumber)
+    // Добавляем В ГОЛОВУ и НЕ затираем прежние: два in-flight PATCH-а могут
+    // упасть оба, и терять первую откатившуюся строку нельзя.
+    setPriorities((p) => [rowNumber, ...p.filter((x) => x !== rowNumber)])
     // Не выдёргивать оператора из текущей строки: пиннуть её, если явного
     // выбора не было.
     // ВАЖНО: активная — из ref-а, НЕ из замыкания: commitFailed зовётся из
@@ -859,7 +1034,15 @@ git commit -m "feat(review): позиционная модель очереди 
 Инвариант PR-B «ошибка PATCH → строка становится следующей» позицией не
 выражается: commitFailed пиннит оператора на текущей строке, и её committed
 перезапишет позицию на «после себя», уронив откатившуюся в хвост. Поэтому у
-неё отдельный приоритетный слот, гаснущий сам при выходе строки из pending.
+откатов отдельный список, проверяемый перед позицией.
+
+Именно список, а не слот: два PATCH-а бывают in-flight и падают оба — слот
+затёр бы первую откатившуюся строку, тогда как прежний order держал обе. И
+skip снимает строку с приоритета, иначе N возвращал бы её тем же рендером
+(приоритет идёт раньше позиции) и оператор залипал бы.
+
+skip на ad-hoc строке двигает позицию только при origin=flow: из грида выход
+возвращает в таблицу, undo — отступление, там позиция потока ни при чём.
 
 Пин-тест на «уход в хвост после N» переписан на проверку эффекта (какая
 строка стала активной), а не внутреннего порядка массива."
