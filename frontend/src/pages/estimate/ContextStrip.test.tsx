@@ -463,4 +463,22 @@ describe("ContextStrip: навигация по клику", () => {
     const other = screen.getByText("Строка 2").closest("[data-row]")!
     expect(other.tagName).toBe("DIV")
   })
+
+  it("Enter на сфокусированной строке зовёт onNavigate (F2): нативная активация кнопки не глушится", async () => {
+    const onNavigate = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <ContextStrip
+        state={initReview("x", ROWS)}
+        activeRowNumber={3}
+        onNavigate={onNavigate}
+      />
+    )
+    const row2 = screen
+      .getByText("Строка 2")
+      .closest("[data-row]") as HTMLElement
+    row2.focus()
+    await user.keyboard("{Enter}")
+    expect(onNavigate).toHaveBeenCalledWith(2)
+  })
 })

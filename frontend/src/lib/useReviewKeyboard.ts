@@ -3,7 +3,7 @@ import { useEffect } from "react"
 interface Options {
   enabled: boolean
   candidateCount: number
-  /** Enter активен ⇔ рекомендация отрисована (правило карточки: клавиша ⇔ элемент). Default true. */
+  /** Enter активен ⇔ рекомендация отрисована И строка не решена (второй множитель — та же поправка, что в ReviewCard.tsx). Default true. */
   canConfirm?: boolean
   onPick: (index: number) => void
   onConfirm: () => void

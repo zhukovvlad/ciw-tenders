@@ -165,6 +165,16 @@ export function ContextStrip({
                 data-row
                 data-opener={openers[g] || undefined}
                 onClick={() => onNavigate(r.row_number)}
+                onKeyDown={(e) => {
+                  // Глушим Enter ДО window: useReviewKeyboard вешает
+                  // глобальный keydown, который отличает только editable-таргеты
+                  // (input/textarea/…), не кнопки — Enter здесь долетел бы до
+                  // хэндлера, тот preventDefault()-нул бы нативную активацию
+                  // кнопки и вместо навигации закоммитил бы рекомендацию АКТИВНОЙ
+                  // карточки (не этой строки). stopPropagation даёт нативному
+                  // click (→ onNavigate) отработать как обычно.
+                  if (e.key === "Enter") e.stopPropagation()
+                }}
                 className={rowClass}
               >
                 {inner}
