@@ -172,7 +172,7 @@ class FundPrecedent:
 @dataclass(frozen=True, slots=True)
 class SectionMatchRequest:
     nodes: list[TreeNode]
-    ancestors: list[tuple[TreeNode, str | None]]
+    ancestors: list[tuple[TreeNode, tuple[str, bool] | None]]  # (код, trusted) из hint_for; None — прозрачный предок
     hints: dict[int, tuple[str, bool]]
     targets: frozenset[int]
     catalog: list[CatalogArticle]
@@ -445,7 +445,7 @@ def test_split_single_oversized_child_recurses_and_terminates() -> None:
 
 def test_split_token_budget_and_row_too_large() -> None:
     nodes = _chain([1, 2, 2])
-    big = {1: 50}
+    big = {2: 50}  # _chain: id = индекс + 1 → второй узел (индекс 1)
     chunks = split_sections(nodes, resolve_parents(nodes), max_rows=10, budget_tokens=20,
                             row_tokens=lambda n: big.get(n.id, 1))
     assert chunks[0].indices == [0] and chunks[1].oversized == [1] and chunks[1].indices == [1]
@@ -544,7 +544,8 @@ git commit -m "feat(tree): рекурсивное деление сметы на
 
 **Interfaces:**
 - Produces:
-  - `build_hints(chunk: Chunk, nodes, contexts_fn) -> dict[int, tuple[str, bool]]` — для не-целей: `(final_code | matched_code, trusted)`; целям подсказок нет. Сигнатура: `build_hints(chunk_indices: Sequence[int], nodes: Sequence[TreeNode], targets: Collection[int]) -> dict[int, tuple[str, bool]]` (ключ — `node.id`).
+  - `hint_for(node: TreeNode) -> tuple[str, bool] | None` — **единственное** место, где статус строки превращается в подсказку промпта: `confirmed/overridden` → `(final_code, True)`; `confident/matched_fund` **и** `review_status == "unreviewed"` → `(matched_code, True)`; `needs_review` и `unreviewed` → `(matched_code, False)`; `rejected`, `excluded`, `no_match`, `error`, `pending` → `None`. Те же правила доверия, что в `effective_ancestor_context`.
+  - `build_hints(chunk_indices: Sequence[int], nodes: Sequence[TreeNode], targets: Collection[int]) -> dict[int, tuple[str, bool]]` — `hint_for` по не-целям с непустым результатом (ключ — `node.id`); целям подсказок нет.
   - `Validated = tuple[NodeVerdict | None, tuple[str, ...]]`; флаги-константы `F_MALFORMED="malformed"`, `F_INCONSISTENT="inconsistent"`, `F_UNKNOWN_CODE="unknown_code"`, `F_OUTSIDE_PARENT="outside_parent"`, `F_MISSING="missing"`.
   - `validate_verdicts(raw: Sequence[object], targets: Collection[int], catalog_codes: Collection[str], ctx_of: Callable[[int], AncestorContext]) -> dict[int, Validated]` — `raw` — список словарей из парсера (`{"i","code","sure","alt"}`) **или** `NodeVerdict`; на выходе — по каждой цели.
   - `validate_one(item: object | None, node_id: int, catalog_codes, ctx: AncestorContext) -> Validated` — то же для одной цели (используется сервисом при обходе сверху вниз).
@@ -572,10 +573,23 @@ ROOT = AncestorContext(None, False)
 BARRIER = AncestorContext("4.2", True)
 
 
+def test_hint_for_trust_rules() -> None:
+    from app.domain.tree_matching import hint_for
+    assert hint_for(_tn(1, 1, "4", status="confident", matched_code="4")) == ("4", True)
+    assert hint_for(_tn(1, 1, "4", status="needs_review", matched_code="4", review_status="overridden",
+                        final_code="5", final_article_id=5)) == ("5", True)
+    assert hint_for(_tn(1, 1, "4", status="needs_review", matched_code="4")) == ("4", False)
+    # confident, но оператор отверг → старый код НЕ показывать как [уже: …]
+    assert hint_for(_tn(1, 1, "4", status="confident", matched_code="4", review_status="rejected")) is None
+    for st in ("excluded", "no_match", "error", "pending"):
+        assert hint_for(_tn(1, 1, "4", status=st, matched_code="4")) is None
+
+
 def test_build_hints_only_for_non_targets() -> None:
     nodes = [_tn(1, 1, "4", status="confident", matched_code="4"),
-             _tn(2, 2, "4.1", status="needs_review", matched_code="4.2"), _tn(3, 3, "4.1.1")]
-    assert build_hints([0, 1, 2], nodes, targets={3}) == {1: ("4", True), 2: ("4.2", False)}
+             _tn(2, 2, "4.1", status="needs_review", matched_code="4.2"),
+             _tn(3, 3, "4.1.1", status="excluded"), _tn(4, 3, "4.1.2")]
+    assert build_hints([0, 1, 2, 3], nodes, targets={4}) == {1: ("4", True), 2: ("4.2", False)}
 
 
 def test_validate_flags() -> None:
@@ -644,6 +658,19 @@ def in_subtree(code: str, anc: str) -> bool:
     return code == anc or code.startswith(anc + ".")
 
 
+def hint_for(node: TreeNode) -> tuple[str, bool] | None:
+    """Подсказка промпта по строке: (код, trusted). Правила доверия = effective_ancestor_context."""
+    if node.review_status in REVIEWED_STATUSES and node.final_code:
+        return (node.final_code, True)
+    if node.review_status != "unreviewed":
+        return None  # rejected: старый AI-код не показываем
+    if node.status in TRUSTED_STATUSES and node.matched_code:
+        return (node.matched_code, True)
+    if node.status in UNCERTAIN_STATUSES and node.matched_code:
+        return (node.matched_code, False)
+    return None
+
+
 def build_hints(
     chunk_indices: Sequence[int], nodes: Sequence[TreeNode], targets: Collection[int]
 ) -> dict[int, tuple[str, bool]]:
@@ -652,12 +679,9 @@ def build_hints(
         n = nodes[i]
         if n.id in targets:
             continue
-        if n.review_status in REVIEWED_STATUSES and n.final_code:
-            hints[n.id] = (n.final_code, True)
-        elif n.status in TRUSTED_STATUSES and n.matched_code:
-            hints[n.id] = (n.matched_code, True)
-        elif n.status in UNCERTAIN_STATUSES and n.matched_code:
-            hints[n.id] = (n.matched_code, False)
+        h = hint_for(n)
+        if h is not None:
+            hints[n.id] = h
     return hints
 
 
@@ -935,31 +959,44 @@ def test_fetch_tree_and_refresh() -> None:
 
 - [ ] **Step 4: SQLAlchemy**
 
-`estimate_repository.py`:
+`estimate_repository.py` — выбирать **только нужные колонки** (полная модель тянет `embedding`: ~3 КБ на строку, на 3 000 строк ~9 МБ):
 ```python
+_TREE_COLUMNS = (
+    EstimateRowModel.id, EstimateRowModel.source_index, EstimateRowModel.depth,
+    EstimateRowModel.code, EstimateRowModel.name, EstimateRowModel.status,
+    EstimateRowModel.review_status, EstimateRowModel.matched_code,
+    EstimateRowModel.matched_article_id, EstimateRowModel.final_code,
+    EstimateRowModel.final_article_id,
+)
+
+
+def _row_to_tree_node(r) -> TreeNode:  # r — sqlalchemy Row с колонками _TREE_COLUMNS
+    return TreeNode(
+        id=r.id, source_index=r.source_index, depth=r.depth, code=r.code, name=r.name,
+        status=r.status, review_status=r.review_status, matched_code=r.matched_code,
+        matched_article_id=r.matched_article_id, final_code=r.final_code,
+        final_article_id=r.final_article_id,
+    )
+
+
+class SqlAlchemyEstimateRepository(EstimateRepository):
+    ...
     def fetch_tree(self, estimate_id: int) -> list[TreeNode]:
         stmt = (
-            select(EstimateRowModel)
+            select(*_TREE_COLUMNS)
             .where(EstimateRowModel.estimate_id == estimate_id)
             .order_by(EstimateRowModel.source_index)
         )
-        return [self._to_tree_node(m) for m in self._session.scalars(stmt)]
+        return [_row_to_tree_node(r) for r in self._session.execute(stmt)]
 
     def refresh_tree_node(self, node_id: int) -> TreeNode:
-        self._session.expire_all()  # после чужого коммита — читать свежее
-        m = self._session.get(EstimateRowModel, node_id)
-        if m is None:
+        # чужой коммит (ревью оператора) — SELECT идёт в БД, кэш сессии не участвует (колонки, не ORM)
+        r = self._session.execute(
+            select(*_TREE_COLUMNS).where(EstimateRowModel.id == node_id)
+        ).one_or_none()
+        if r is None:
             raise KeyError(node_id)
-        return self._to_tree_node(m)
-
-    @staticmethod
-    def _to_tree_node(m: EstimateRowModel) -> TreeNode:
-        return TreeNode(
-            id=m.id, source_index=m.source_index, depth=m.depth, code=m.code, name=m.name,
-            status=m.status, review_status=m.review_status, matched_code=m.matched_code,
-            matched_article_id=m.matched_article_id, final_code=m.final_code,
-            final_article_id=m.final_article_id,
-        )
+        return _row_to_tree_node(r)
 
     def save_node_match_cas(
         self, node_id: int, result: NodeMatch, expected_statuses: Sequence[str]
@@ -976,8 +1013,6 @@ def test_fetch_tree_and_refresh() -> None:
         self._session.commit()
         return res.rowcount > 0
 ```
-`fetch_tree` через `select(EstimateRowModel)` тянет и `embedding` — для 3000 строк это ~9 МБ; выбрать только нужные колонки (`select(EstimateRowModel.id, .source_index, .depth, .code, .name, .status, .review_status, .matched_code, .matched_article_id, .final_code, .final_article_id)`) и собирать `TreeNode` из `Row`. Аналогично `refresh_tree_node`.
-
 `article_repository.py`:
 ```python
     def list_catalog(self) -> list[CatalogArticle]:
@@ -1029,19 +1064,32 @@ def test_render_catalog_indents_by_depth() -> None:
     assert render_catalog(cat) == "(4) Конструктив\n  (4.2) Надземная"
 
 
-def test_user_prompt_has_sections_and_hints() -> None:
-    nodes = [_tn(1, 1, "6", name="Фасады"), _tn(2, 2, "6.1", name="1 Этап"), _tn(3, 3, "6.1.1", name="Прочее")]
+def test_user_prompt_has_sections_hints_and_explicit_targets() -> None:
+    nodes = [_tn(1, 1, "6", name="Фасады"), _tn(2, 2, "6.1", name="1 Этап"),
+             _tn(3, 3, "6.1.1", name="Прочее"), _tn(4, 3, "6.1.2", name="Каркас", status="excluded"),
+             _tn(5, 3, "6.1.3", name="Снято", status="confident", matched_code="6", review_status="rejected")]
     req = SectionMatchRequest(nodes=nodes, ancestors=[], hints={2: ("6", True), 3: ("6.99", False)},
                               targets=frozenset({1}), catalog=[CatalogArticle(1, "6", "Фасады", None)],
                               precedents=[])
     p = build_user_prompt(req)
     assert "СПРАВОЧНИК:" in p and "ФРАГМЕНТ" in p and "ПРЕЦЕДЕНТЫ" not in p and "КОНТЕКСТ" not in p
-    assert "1 | 6 | Фасады" in p and "  2 | 6.1 | 1 Этап  [уже: 6]" in p
+    assert "[цель] 1 | 6 | Фасады" in p and "  2 | 6.1 | 1 Этап  [уже: 6]" in p
     assert "[предположительно: 6.99]" in p
+    # не-цели без кода (excluded, rejected) помечены как контекст — модель по ним не отвечает
+    assert "[контекст] 4 | 6.1.2 | Каркас" in p and "[контекст] 5 | 6.1.3 | Снято" in p
+    assert "ЦЕЛИ (ответить только по ним): 1" in p
+    assert "СПРАВОЧНИК" not in build_user_prompt(req, include_catalog=False)
+
+
+def test_render_ancestors_shows_trust() -> None:
+    from app.infrastructure.ai.tree_prompt import render_ancestors
+    a = _tn(1, 1, "4", name="Конструктив"); b = _tn(2, 2, "4.1", name="Этап"); c = _tn(3, 3, "4.1.1", name="Плиты")
+    out = render_ancestors([(a, ("4", True)), (b, None), (c, ("4.2", False))])
+    assert "4 | Конструктив -> 4" in out and "4.1 | Этап -> ?" in out and "4.1.1 | Плиты -> 4.2 (предположительно)" in out
 
 
 def test_system_prompt_pins_format_rules() -> None:
-    for token in ('"sure"', '"alt"', "org", "none", "X.99", "[уже:"):
+    for token in ('"sure"', '"alt"', "org", "none", "X.99", "[уже:", "[цель]", "[контекст]"):
         assert token in SYSTEM_PROMPT
 
 
@@ -1051,6 +1099,9 @@ def test_parse_verdicts() -> None:
     assert parse_verdicts("нет массива") is None
     assert parse_verdicts('[{"i": 1, "code": "4.2", "sure": true') is None   # обрезан
     assert parse_verdicts('{"a": 1}') is None                                # не массив
+    # две пары скобок в тексте: берётся первый ДЕКОДИРУЕМЫЙ массив, а не жадный срез
+    assert parse_verdicts('Список [см. раздел 4] ниже: [{"i": 1, "code": "4", "sure": false, "alt": null}] конец') == [
+        {"i": 1, "code": "4", "sure": False, "alt": None}]
 ```
 
 - [ ] **Step 2: Падение.**
@@ -1087,7 +1138,8 @@ SYSTEM_PROMPT = (
     "ближайший подходящий предок (роллап).\n"
     "4. Если работа реальная, но статьи для неё в справочнике нет — \"none\". "
     "Не выбирай 'Прочее' лишь потому, что не уверен.\n"
-    "5. Строки с пометкой [уже: код] сопоставлены — используй их как опору и не отвечай по ним. "
+    "5. Отвечай ТОЛЬКО по строкам с пометкой [цель] (их id перечислены в блоке ЦЕЛИ). "
+    "Строки [контекст] и строки с [уже: код] — только опора: по ним не отвечать. "
     "Пометка [предположительно: код] — неподтверждённая догадка, опирайся на неё осторожно.\n"
     "6. Блок ПРЕЦЕДЕНТЫ (если есть) — как операторы решали такие же строки раньше; "
     "при совпадении контекста следуй им.\n"
@@ -1095,7 +1147,7 @@ SYSTEM_PROMPT = (
     "второй по вероятности код (или null).\n"
     "Ответ — СТРОГО JSON-массив объектов "
     "{\"i\": <номер строки>, \"code\": \"<код|org|none>\", \"sure\": true|false, \"alt\": \"<код>\"|null} "
-    "для КАЖДОЙ строки-цели (строки без пометки [уже: ...]), без преамбулы и markdown."
+    "для КАЖДОЙ строки [цель], без преамбулы и markdown."
 )
 
 
@@ -1113,10 +1165,17 @@ def render_precedents(precedents: Sequence[FundPrecedent]) -> str:
     return "ПРЕЦЕДЕНТЫ (решения операторов по таким же строкам):\n" + "\n".join(lines) + "\n\n"
 
 
-def render_ancestors(ancestors: Sequence[tuple[TreeNode, str | None]]) -> str:
+def render_ancestors(ancestors: Sequence[tuple[TreeNode, tuple[str, bool] | None]]) -> str:
     if not ancestors:
         return ""
-    lines = [f"  {n.code} | {n.name} -> {code or '?'}" for n, code in ancestors]
+    lines = []
+    for n, hint in ancestors:
+        if hint is None:
+            shown = "?"
+        else:
+            code, trusted = hint
+            shown = code if trusted else f"{code} (предположительно)"
+        lines.append(f"  {n.code} | {n.name} -> {shown}")
     return "КОНТЕКСТ (предки фрагмента и их статьи):\n" + "\n".join(lines) + "\n\n"
 
 
@@ -1124,37 +1183,46 @@ def render_fragment(req: SectionMatchRequest) -> str:
     base = req.nodes[0].depth
     lines = []
     for n in req.nodes:
-        tag = ""
+        indent = "  " * (n.depth - base)
+        if n.id in req.targets:
+            lines.append(f"{indent}[цель] {n.id} | {n.code} | {n.name}")
+            continue
         hint = req.hints.get(n.id)
-        if hint is not None:
+        if hint is None:
+            lines.append(f"{indent}[контекст] {n.id} | {n.code} | {n.name}")
+        else:
             code, trusted = hint
-            tag = f"  [уже: {code}]" if trusted else f"  [предположительно: {code}]"
-        lines.append(f"{'  ' * (n.depth - base)}{n.id} | {n.code} | {n.name}{tag}")
+            tag = f"[уже: {code}]" if trusted else f"[предположительно: {code}]"
+            lines.append(f"{indent}{n.id} | {n.code} | {n.name}  {tag}")
     return "\n".join(lines)
 
 
-def build_user_prompt(req: SectionMatchRequest) -> str:
+def build_user_prompt(req: SectionMatchRequest, *, include_catalog: bool = True) -> str:
+    catalog = f"СПРАВОЧНИК:\n{render_catalog(req.catalog)}\n\n" if include_catalog else ""
+    targets = ", ".join(str(n.id) for n in req.nodes if n.id in req.targets)
     return (
-        f"СПРАВОЧНИК:\n{render_catalog(req.catalog)}\n\n"
-        f"{render_precedents(req.precedents)}{render_ancestors(req.ancestors)}"
-        f"ФРАГМЕНТ СМЕТЫ (номер | код раздела | наименование):\n{render_fragment(req)}"
+        f"{catalog}{render_precedents(req.precedents)}{render_ancestors(req.ancestors)}"
+        f"ФРАГМЕНТ СМЕТЫ (номер | код раздела | наименование):\n{render_fragment(req)}\n\n"
+        f"ЦЕЛИ (ответить только по ним): {targets}"
     )
 
 
-_ARRAY = re.compile(r"\[.*\]", re.S)
+_DECODER = json.JSONDecoder()
 
 
 def parse_verdicts(text: str) -> list[dict] | None:
-    m = _ARRAY.search(text)
-    if m is None:
-        return None
-    try:
-        data = json.loads(m.group(0))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, list) or not all(isinstance(x, dict) for x in data):
-        return None
-    return data
+    """Первый ДЕКОДИРУЕМЫЙ JSON-массив словарей в тексте (не жадный срез: «[см. раздел 4]» пропускается)."""
+    pos = text.find("[")
+    while pos != -1:
+        try:
+            data, _ = _DECODER.raw_decode(text, pos)
+        except json.JSONDecodeError:
+            pos = text.find("[", pos + 1)
+            continue
+        if isinstance(data, list) and all(isinstance(x, dict) for x in data):
+            return data
+        pos = text.find("[", pos + 1)
+    return None
 ```
 
 - [ ] **Step 4: Прогнать, ruff, commit**
@@ -1280,7 +1348,7 @@ class OpenRouterTreeMatcher(TreeMatcher):
     def match_section(self, req: SectionMatchRequest) -> SectionMatchResponse:
         # справочник — в system-блоке с cache_control: одинаков для всех чанков сметы
         system_text = f"{SYSTEM_PROMPT}\n\nСПРАВОЧНИК:\n{render_catalog(req.catalog)}"
-        user_text = build_user_prompt(req).split("СПРАВОЧНИК:", 1)[-1]  # см. примечание ниже
+        user_text = build_user_prompt(req, include_catalog=False)
         max_tokens = len(req.targets) * self._reserve + _OUTPUT_MARGIN
         return instrumented_call(
             provider="openrouter", model=self._model,
@@ -1288,8 +1356,6 @@ class OpenRouterTreeMatcher(TreeMatcher):
             budget=self._budget, classify=_is_transient,
         )
 ```
-Примечание к `user_text`: чтобы не дублировать справочник, добавить в `tree_prompt.py` функцию `build_user_prompt(req, *, include_catalog: bool = True)` и здесь звать с `include_catalog=False` — правка Task 7 (тест на `include_catalog=False` не содержит «СПРАВОЧНИК»). Не резать строкой.
-
 ```python
     def _call(self, system_text: str, user_text: str, max_tokens: int) -> SectionMatchResponse:
         resp = self._client.post(
@@ -1370,6 +1436,7 @@ class CatalogEmptyError(DomainError)     # code="catalog_empty"
 from collections import Counter
 from app.domain.entities import CatalogArticle, EstimateNode, NewEstimate, SectionMatchResponse
 from app.domain.errors import TransientError
+from app.domain.tree_matching import estimate_tokens
 from app.services.tree_matching_service import CatalogEmptyError, TreeMatchingRunner
 from tests.fakes import FakeArticleRepository, FakeEstimateRepository, FakeTreeMatcher
 
@@ -1380,7 +1447,7 @@ CAT = [("4", "Конструктив"), ("4.2", "Надземная"), ("4.2.1",
 def _articles() -> FakeArticleRepository:
     art = FakeArticleRepository()
     for i, (code, name) in enumerate(CAT, start=1):
-        art.add_article(...)  # по сигнатуре фейка: id=i, code, name
+        art.add_article(id=i, code=code, name=name)  # parent_id для list_catalog фейка не нужен: parent_code выводится из кода
     return art
 
 
@@ -1442,7 +1509,7 @@ def test_parent_chunk_verdict_feeds_child_chunk_context() -> None:
                                                   "Верт 1-й": {"code": "9", "sure": True, "alt": None}}))
     _runner(repo, art, matcher, chunk_rows=2).run(est.id)
     assert len(matcher.requests) == 2
-    assert matcher.requests[1].ancestors[0][1] == "4"                     # эффективный код предка — из чанка 1
+    assert matcher.requests[1].ancestors[0][1] == ("4", True)             # предок — из чанка 1, доверенный
     assert repo.nodes[est.rows[2].id]["status"] == "needs_review"        # 9 вне поддерева 4 → флаг
 
 
@@ -1470,10 +1537,12 @@ def test_truncated_response_splits_chunk_then_errors_below_min() -> None:
     trunc = SectionMatchResponse(items=[], truncated=True)
     r0, r1, r2 = (r.id for r in est.rows)
     matcher = FakeTreeMatcher(responses=[trunc, ok([r0, r1]), ok([r2])])
-    runner = TreeMatchingRunner(matcher=matcher, estimates=repo, articles=art, chunk_rows=10, min_chunk_rows=2,
+    # chunk_rows=4: первый вызов — все 3 строки; обрезка → half=2 → чанки [корень+первый ребёнок], [второй]
+    runner = TreeMatchingRunner(matcher=matcher, estimates=repo, articles=art, chunk_rows=4, min_chunk_rows=2,
                                 context_window=200_000, output_reserve_per_row=48)
     runner.run(est.id)
     assert len(matcher.requests) == 3 and all(n["status"] == "confident" for n in repo.nodes.values())
+    assert [sorted(n.id for n in r.nodes) for r in matcher.requests] == [[r0, r1, r2], [r0, r1], [r2]]
     # ниже минимума → error
     repo2, matcher2 = FakeEstimateRepository(), FakeTreeMatcher(responses=[trunc])
     est2 = repo2.create(NewEstimate(1, "a.xlsx", "k"), [_node("4", "Конструктив", 0)])
@@ -1494,6 +1563,31 @@ def test_lost_cas_refreshes_parent_before_children() -> None:
     _runner(repo, art, FakeTreeMatcher(verdict_fn=fn)).run(est.id)
     assert repo.nodes[root]["final_code"] == "9"                          # ревью не затёрто
     assert repo.nodes[child]["status"] == "needs_review"                  # 4.2.1 вне поддерева свежего 9
+
+
+def test_budget_respects_window_and_shrinks_with_output_reserve() -> None:
+    # 10 узлов-сиблингов под корнем, имена по 30 символов (~10 токенов + 8 формат + reserve).
+    repo, art = FakeEstimateRepository(), _articles()
+    nodes = [_node("4", "Конструктив", 0)] + [_node(f"4.{k}", "x" * 30, k) for k in range(1, 11)]
+    est = repo.create(NewEstimate(1, "a.xlsx", "k"), nodes)
+    fn = lambda req: [{"i": n.id, "code": "4", "sure": True, "alt": None} for n in req.nodes if n.id in req.targets]
+    # каталог ~7 статей (~60 токенов); окно подобрано так, что бюджет строк ≈ 300 токенов
+    window = int((1_500 + 60 + 600 + 512 + 300) / 0.8)
+    m1 = FakeTreeMatcher(verdict_fn=fn)
+    TreeMatchingRunner(matcher=m1, estimates=repo, articles=art, chunk_rows=120, min_chunk_rows=1,
+                       context_window=window, output_reserve_per_row=1).run(est.id)
+    est2 = repo.create(NewEstimate(1, "b.xlsx", "k"), nodes)
+    m2 = FakeTreeMatcher(verdict_fn=fn)
+    TreeMatchingRunner(matcher=m2, estimates=repo, articles=art, chunk_rows=120, min_chunk_rows=1,
+                       context_window=window, output_reserve_per_row=40).run(est2.id)
+    # инвариант: каждый чанк укладывается в бюджет с учётом резерва ответа
+    for m, reserve in ((m1, 1), (m2, 40)):
+        for req in m.requests:
+            cost = sum(estimate_tokens(f"{n.id} | {n.code} | {n.name}") + 8 + reserve for n in req.nodes)
+            assert cost <= 300
+    # больший резерв ответа → чанки мельче → вызовов больше
+    assert len(m2.requests) > len(m1.requests) >= 1
+    assert all(n["status"] == "confident" for n in repo.nodes.values())
 
 
 def test_empty_catalog_raises() -> None:
@@ -1548,10 +1642,9 @@ from app.domain.entities import (
 from app.domain.errors import DomainError, TransientError
 from app.domain.ports import ArticleRepository, EstimateRepository, TreeMatcher
 from app.domain.tree_matching import (
-    Chunk, build_hints, effective_ancestor_context, estimate_tokens, resolve_parents,
+    Chunk, build_hints, effective_ancestor_context, estimate_tokens, hint_for, resolve_parents,
     split_sections, to_node_match, validate_one,
 )
-from app.infrastructure.ai.tree_prompt import SYSTEM_PROMPT, render_catalog  # см. примечание
 
 logger = logging.getLogger(__name__)
 
@@ -1562,8 +1655,17 @@ ERR_TRUNCATED = "tree_output_truncated"
 ERR_ROW_TOO_LARGE = "tree_row_too_large"
 _CATALOG_SHARE = 0.25
 _CONTEXT_SHARE = 0.80
+_SYSTEM_PROMPT_RESERVE = 1_500   # системный промпт + заголовки блоков (факт спайка ~900)
+_ANCESTORS_RESERVE = 600         # путь предков чанка (глубина ≤ 6 × ~100 токенов)
+_OUTPUT_MARGIN = 512             # = запас адаптера в max_tokens
+_ROW_FORMAT_TOKENS = 8           # «[цель] id | код | » + перенос
 ```
-**Примечание о зависимости:** сервис не должен импортировать `infrastructure`. Оценка токенов промпта нужна для бюджета чанка → вынести `render_catalog` и `SYSTEM_PROMPT` в домен? Промпт — деталь адаптера. Решение: сервис оценивает бюджет по **данным**, не по промпту: `catalog_tokens = Σ estimate_tokens(f"({a.code}) {a.name}")`, `system_reserve = 1_500` (константа `_SYSTEM_PROMPT_RESERVE`), строка = `estimate_tokens(f"{id} | {code} | {name}") + 8`. Импорт `tree_prompt` в сервисе **убрать**.
+**Примечание о зависимости:** сервис не должен импортировать `infrastructure` — импорт `tree_prompt` выше **убрать**. Бюджет оценивается по **данным**, не по тексту промпта, консервативно (инвариант спеки §5.2):
+
+```text
+_SYSTEM_PROMPT_RESERVE + catalog_tokens + _ANCESTORS_RESERVE + Σ_rows(row_text + _ROW_FORMAT_TOKENS + output_reserve_per_row) + _OUTPUT_MARGIN ≤ 0.8 × window
+```
+где `catalog_tokens = Σ estimate_tokens("  "·depth + f"({code}) {name}")` (с отступами), а `output_reserve_per_row` входит в стоимость **каждой** строки чанка (любая может быть целью → оценка сверху; `max_tokens` адаптера = targets × reserve + margin ≤ этой оценки).
 
 ```python
 class CatalogEmptyError(DomainError):
@@ -1600,7 +1702,16 @@ class TreeMatchingRunner:
         parents = resolve_parents(tree)
         counts: Counter[EstimateRowStatus] = Counter()
         failed_roots: set[int] = set()
-        row_budget = int(_CONTEXT_SHARE * self._window) - catalog_tokens - _SYSTEM_PROMPT_RESERVE
+        # Бюджет чанка (спека §5.2, консервативно): system + catalog + ancestors + rows + targets×reserve
+        # + margin ≤ 0.8×window. Каждая строка чанка учитывается как ПОТЕНЦИАЛЬНАЯ цель (reserve
+        # входит в её стоимость) — реальное число целей ≤ числа строк, оценка сверху.
+        row_budget = (
+            int(_CONTEXT_SHARE * self._window)
+            - _SYSTEM_PROMPT_RESERVE - catalog_tokens - _ANCESTORS_RESERVE - _OUTPUT_MARGIN
+        )
+        if row_budget <= 0:
+            raise CatalogTooLargeError(f"после справочника (~{catalog_tokens}) на смету не остаётся бюджета")
+        row_tokens = self._row_cost  # estimate_tokens(строка) + формат + output_reserve_per_row
 
         def is_target(i: int) -> bool:
             return tree[i].status in EXPECTED and tree[i].review_status == "unreviewed"
@@ -1656,7 +1767,7 @@ class TreeMatchingRunner:
                         commit(i, NodeMatch(EstimateRowStatus.ERROR, match_error=ERR_TRUNCATED))
                     return
                 sub = split_sections([tree[i] for i in chunk.indices], _reindex(parents, chunk.indices),
-                                     max_rows=half, budget_tokens=row_budget, row_tokens=_row_tokens)
+                                     max_rows=half, budget_tokens=row_budget, row_tokens=row_tokens)
                 for c in sub:
                     process(_map_back(c, chunk.indices), half)
                 return
@@ -1673,24 +1784,25 @@ class TreeMatchingRunner:
                 commit(i, to_node_match(v, c, catalog))
 
         for chunk in split_sections(tree, parents, max_rows=self._chunk_rows, budget_tokens=row_budget,
-                                    row_tokens=_row_tokens):
+                                    row_tokens=row_tokens):
             process(chunk, self._chunk_rows)
         return counts
 
     @staticmethod
-    def _ancestors(root: int, tree: Sequence[TreeNode], parents: Sequence[int | None]) -> list[tuple[TreeNode, str | None]]:
-        path: list[tuple[TreeNode, str | None]] = []
+    def _ancestors(
+        root: int, tree: Sequence[TreeNode], parents: Sequence[int | None]
+    ) -> list[tuple[TreeNode, tuple[str, bool] | None]]:
+        """Путь предков чанка с подсказками hint_for — те же правила доверия, что у контекста."""
+        path: list[tuple[TreeNode, tuple[str, bool] | None]] = []
         p = parents[root]
         while p is not None:
-            n = tree[p]
-            code = n.final_code if n.review_status in ("confirmed", "overridden") else n.matched_code
-            path.append((n, code))
+            path.append((tree[p], hint_for(tree[p])))
             p = parents[p]
         return list(reversed(path))
 
-
-def _row_tokens(n: TreeNode) -> int:
-    return estimate_tokens(f"{n.id} | {n.code} | {n.name}") + 8
+    def _row_cost(self, n: TreeNode) -> int:
+        """Стоимость строки в бюджете чанка: текст + формат + резерв ответа (строка = потенциальная цель)."""
+        return estimate_tokens(f"{n.id} | {n.code} | {n.name}") + _ROW_FORMAT_TOKENS + self._reserve
 
 
 def _reindex(parents: Sequence[int | None], indices: Sequence[int]) -> list[int | None]:
@@ -1701,7 +1813,7 @@ def _reindex(parents: Sequence[int | None], indices: Sequence[int]) -> list[int 
 def _map_back(c: Chunk, indices: Sequence[int]) -> Chunk:
     return Chunk(root=indices[c.root], indices=[indices[k] for k in c.indices], oversized=[indices[k] for k in c.oversized])
 ```
-`_SYSTEM_PROMPT_RESERVE = 1_500`. `validate_one` использует дубликаты — здесь дедуп сделан до вызова (в `by_id`), поэтому `validate_verdicts` из Task 4 сервису не нужна (остаётся для харнесса/тестов). `catalog.keys()` — `Collection[str]`.
+`catalog_tokens` считать как `sum(estimate_tokens("  " * a.code.count(".") + f"({a.code}) {a.name}") for a in catalog_list)`. Дедуп вердиктов сделан до вызова (в `by_id`), поэтому `validate_verdicts` из Task 4 сервису не нужна (остаётся для харнесса/тестов). `catalog.keys()` — `Collection[str]`.
 
 - [ ] **Step 5: Прогнать, ruff, commit**
 
@@ -1733,7 +1845,7 @@ def test_tree_engine_bypasses_classifier_embedder_and_gate() -> None:
     repo = FakeEstimateRepository()
     est = repo.create(NewEstimate(1, "a.xlsx", "k"), [_node("1")])
     art = FakeArticleRepository()
-    art.add_article(...)  # одна статья "1"
+    art.add_article(id=1, code="1", name="Раздел 1")
     classifier = FakeWorkTypeClassifier(default=WorkClass.WORK)
     embedder = _Embedder()
     matcher = FakeTreeMatcher(verdict_fn=lambda req: [{"i": n.id, "code": "1", "sure": True, "alt": None} for n in req.nodes])
@@ -1839,14 +1951,22 @@ git commit -m "feat(tree): ветка matching_engine=tree в EstimateMatchingSe
 - [ ] **Step 1: Тест**
 
 ```tsx
-it("не рендерит score, когда он null (tree-движок)", () => {
-  const row = makeRow({
-    score: null,
-    candidates: [{ id: 5, article_code: "4.2.1", name: "Гориз", score: null, breadcrumb: [] }],
+// хелперы row(...) и renderCard(...) уже объявлены в начале ReviewCard.test.tsx
+describe("ReviewCard: score null (tree-движок)", () => {
+  it("не рендерит score строки и кандидата, когда он null", () => {
+    const r = row(7, 3, "needs_review", {
+      score: null,
+      matched_code: "4.2.1",
+      candidates: [
+        { id: 5, article_code: "4.2.1", name: "Гориз", score: null, breadcrumb: [] },
+        { id: 6, article_code: "4.2.3", name: "Гориз проч", score: null, breadcrumb: [] },
+      ],
+    })
+    renderCard(r)
+    expect(screen.queryByText("0.00")).toBeNull()
+    expect(screen.getByText("Гориз")).toBeInTheDocument()
+    expect(screen.getByText("Гориз проч")).toBeInTheDocument()
   })
-  render(<ReviewCard row={row} ... />)   // по образцу соседних тестов файла
-  expect(screen.queryByText("0.00")).toBeNull()
-  expect(screen.getByText("Гориз")).toBeInTheDocument()
 })
 ```
 
@@ -1898,4 +2018,6 @@ git commit -m "docs: tree matching PR 1 — devlog, PIPELINE, TECH_DEBT"
 
 **Type consistency:** `TreeMatcher.match_section -> SectionMatchResponse` объявлен в T1 и используется T8/T9 без изменений; `save_node_match_cas(node_id, result, expected_statuses) -> bool` одинаково в T1/T6/T9; `Chunk(root, indices, oversized)` T3/T9; `validate_one(item, node_id, catalog_codes, ctx)` T4/T9; `AncestorContext(trusted_code, has_uncertain_barrier)` везде через конструктор.
 
-**Placeholders:** `art.add_article(...)` в T9/T10 — исполнителю подставить фактическую сигнатуру `FakeArticleRepository.add_article` из `tests/fakes.py:125`; `render(<ReviewCard row={row} ... />)` в T11 — по образцу соседних тестов файла (пропсы уже есть в `ReviewCard.test.tsx`). Иных незаполненных мест нет.
+**Placeholders:** нет. Сигнатуры `FakeArticleRepository.add_article(*, id, code, name, parent_id=None)` и хелперы `row()/renderCard()` из `ReviewCard.test.tsx` подставлены фактические.
+
+**Ревью плана (Codex, 2026-08-28) — учтено:** бюджет чанка включает резерв ответа на каждую строку, путь предков и margin (T9, инвариант §5.2, тест `test_budget_respects_window_and_shrinks_with_output_reserve`); цели помечены `[цель]`, не-цели без кода — `[контекст]`, блок `ЦЕЛИ` (T7); единый `hint_for` для подсказок и пути предков с правилами доверия, `rejected` не показывается как `[уже: …]` (T4, T9); тесты oversized (`big={2:50}`) и обрезки (`chunk_rows=4`) исправлены; `select` только по колонкам (T6); `parse_verdicts` через `JSONDecoder.raw_decode` (T7).
