@@ -229,6 +229,13 @@ def test_to_node_match_matrix() -> None:
     assert to_node_match(ok, BARRIER, CAT).status == "needs_review"  # барьер гасит sure
     unsure = validate_one({"i": 1, "code": "4.2.1", "sure": False, "alt": None}, 1, codes, TRUSTED)
     assert to_node_match(unsure, TRUSTED, CAT).status == "needs_review"
+    # sure=True, код в каталоге, но вне доверенного поддерева (outside_parent) —
+    # флаг всё равно должен погасить confident: geometry-нарушение не должно уходить
+    # оператору как подтверждённое, код при этом сохраняется для ревью.
+    outside = validate_one({"i": 1, "code": "9", "sure": True, "alt": None}, 1, codes, TRUSTED)
+    assert outside[1] == (F_OUTSIDE_PARENT,)
+    m_outside = to_node_match(outside, TRUSTED, CAT)
+    assert m_outside.status == "needs_review" and m_outside.matched_code == "9"
     org = validate_one({"i": 1, "code": "org", "sure": True, "alt": None}, 1, codes, TRUSTED)
     assert to_node_match(org, TRUSTED, CAT).status == "excluded"
     none = validate_one({"i": 1, "code": "none", "sure": True, "alt": None}, 1, codes, TRUSTED)
