@@ -1,0 +1,356 @@
+# Дизайн: структурное ядро сопоставления (tree matching) вместо построчного RAG
+
+**Дата:** 2026-08-27 (спайк), 2026-08-28 (спека)
+**Статус:** дизайн согласован в диалоге; три круга внешнего ревью (Codex) — все блокеры закрыты, правки внесены в текст.
+**Заменяет (после гейта §9):** ядро фаз 2–3 [PIPELINE.md](../../PIPELINE.md) — классификацию оргзаголовков, эмбеддинг узлов, порог 0.90, LLM-арбитр по top-K.
+**Не трогает:** парсер и позиционный резолв предков, таблицы `estimates`/`estimate_rows`, ревью-решения (`review_status`/`final_*`), экспорт, Celery-обёртку, авторизацию, эмбеддинги **справочника** (нужны поиску на карточке).
+
+---
+
+## 1. Диагноз и данные
+
+Пайплайн сопоставляет каждую строку сметы независимо: крошка → эмбеддинг → top-5 по косинусу → порог → арбитр, который видит голые имена кандидатов без кодов, предков и соседей ([llm_matching_common.py:29](../../../backend/app/infrastructure/ai/llm_matching_common.py#L29)). Самый сильный сигнал — структура — выбрасывается до решения. Все кейсы A/B/C из [TECH_DEBT.md](../../TECH_DEBT.md) — симптомы этого.
+
+Замеры по золотой смете (бенчмарк id=1, 809 узлов, 783 gold-метки) и `Шаблон.xlsx` (362 статьи, ~6k токенов):
+
+| Факт | Значение |
+|---|---|
+| Имя строки дословно равно имени статьи | 337 / 783 (43%) |
+| Метка внутри поддерева метки ближайшего размеченного предка | 687 / 758 (91%) |
+| Имён, встречающихся с разными статьями (разводятся только родителем) | 69 |
+| Раздел 6 сметы | буквальная копия раздела 6 справочника под «1 Этап ЖК» / «2 Этап БЦ» |
+| Текущий RAG (`eval-run.log` 2026-06-27, devlog 2026-06-30) | top-1 74.1→77.0%; 372 confident / 388 needs_review; ~15 мин на смету |
+
+Смета — производная справочника с вставленными орг-уровнями и дополнительным дроблением. Задача — разметка дерева, не поиск.
+
+### Спайк (2026-08-27, одноразовый скрипт, в репо не входит)
+
+LLM по разделу целиком, полный справочник в промпте, 20 вызовов, без эмбеддингов и оргфильтра:
+
+| Модель | top-1 | Каркас (26 org-строк) | Время LLM | Токены in/out | Цена |
+|---|---|---|---|---|---|
+| RAG (прод) | 77.0% | 26/26, FP 0 | ~15 мин | — | — |
+| Sonnet 4.6 | 94.9% (743/783) | 26/26, FP 0 | 149 с | 226k / 14k | $0.89 |
+| Sonnet 5 | 95.1% (745/783) | 25/26, FP 1 | 423 с (reasoning) | 228k / 43k | $0.88 |
+| Haiku 4.5 | 88.3% | 26/26, FP 4 | 72 с | 226k / 14k | $0.30 |
+
+Детерминированный exact-match слой перед LLM оказался лишним и вредным (голое «Прочее» → корневое `99`); в дизайн не входит. Остаток ошибок — в основном регламентные сёстры (`8.1.4/8.1.5`, `9.1/9.2`, «ЗИП» → `99` vs `13.99`) — закрываются фондом решений.
+
+---
+
+## 2. Решения (что и почему)
+
+| Решение | Обоснование |
+|---|---|
+| Новый движок за флагом `matching_engine = "tree" \| "rag"`, default `rag` до гейта §9; RAG-путь вырезается отдельным PR | Откат конфигом; харнесс гоняет оба движка на одном бенчмарке |
+| Единица работы — **чанк раздела** (корень + потомки, ≤ N строк и ≤ бюджета токенов), не строка | Модель видит родителя, соседей, повтор имён; 18–40 вызовов на смету вместо ~1200 обращений |
+| Полный справочник в каждом вызове, префикс кэшируется (prompt caching) | 362 статьи = 6k токенов; retrieval не нужен |
+| Уверенность — самооценка модели `sure` + структурная валидация, без косинуса | Один проход; калибровка меряется харнессом (§9, группа C) |
+| Кандидаты на карточке — структурные соседи + альтернатива модели; `score` становится nullable | 27 из 40 оставшихся ошибок спайка — сёстры выбранной статьи |
+| Фонд решений: ключ v3 `(имя, доверенная статья предка)`, вычисляется **в обходе**; прецеденты фонда — в промпт | Регламент («ЗИП → 99») обобщается на похожие строки; ключ v2 (вся крошка) ломался от правки любого предка |
+| Fail-closed: ошибка формата никогда не даёт `confident` или `no_match` | Асимметрия ошибок пайплайна сохраняется |
+
+---
+
+## 3. Домен
+
+### 3.1. Сущности и DTO (`domain/entities.py`)
+
+```python
+@dataclass(frozen=True, slots=True)
+class TreeNode:
+    """Строка сметы для движка: контекст + цель. Читается fetch_tree в порядке source_index."""
+    id: int
+    source_index: int
+    depth: int                 # число сегментов кода (как в парсере)
+    code: str
+    name: str
+    status: str                # EstimateRowStatus
+    review_status: str         # ReviewStatus
+    matched_code: str | None   # AI-снимок
+    final_code: str | None     # решение оператора
+
+@dataclass(frozen=True, slots=True)
+class CatalogArticle:
+    id: int
+    code: str
+    name: str
+    parent_code: str | None
+
+@dataclass(frozen=True, slots=True)
+class FundPrecedent:
+    name: str
+    parent_article_code: str   # "" для корня
+    article_code: str
+    article_name: str
+    votes: int
+
+@dataclass(frozen=True, slots=True)
+class SectionMatchRequest:
+    nodes: list[TreeNode]                  # чанк в порядке документа
+    ancestors: list[tuple[TreeNode, str | None]]   # путь предков чанка с эффективными кодами (для не-корневых чанков)
+    hints: dict[int, tuple[str, bool]]     # node_id → (код, trusted): [уже: код] / [предположительно: код]
+    targets: frozenset[int]                # node_id, по которым нужен вердикт
+    catalog: list[CatalogArticle]
+    precedents: list[FundPrecedent]
+
+@dataclass(frozen=True, slots=True)
+class NodeVerdict:
+    node_id: int
+    kind: Literal["article", "org", "none"]
+    article_code: str | None
+    sure: bool
+    alt_code: str | None
+
+@dataclass(frozen=True, slots=True)
+class AncestorContext:
+    trusted_code: str | None       # код ближайшего ДОВЕРЕННОГО предка; None у корня
+    has_uncertain_barrier: bool    # между узлом и trusted_code есть предок с недоверенным вердиктом
+```
+
+`MatchCandidate.score: float | None` (было `float`) — **осознанное изменение контракта**, см. §7.
+
+### 3.2. Порт (`domain/ports.py`)
+
+```python
+class TreeMatcher(ABC):
+    @abstractmethod
+    def match_section(self, req: SectionMatchRequest) -> list[NodeVerdict]: ...
+```
+
+Единственный новый внешний порт. `TransientError` — тот же, что у существующих адаптеров.
+
+Расширения `EstimateRepository`:
+- `fetch_tree(estimate_id) -> list[TreeNode]` — все строки, `ORDER BY source_index`.
+- `save_node_match_cas(node_id, result, expected_statuses) -> bool` — `UPDATE … WHERE id=… AND status IN (:expected) AND review_status='unreviewed'`; `False` = проиграли гонку (ревью или конкурент).
+- `count_dependents(estimate_id, source_index_from, source_index_to) -> int` — число строк в позиционном диапазоне с `status ∈ {confident, matched_fund}` и `review_status='unreviewed'` (§7.3).
+
+`ArticleRepository.list_catalog() -> list[CatalogArticle]` — весь справочник (id, code, name, parent_code).
+
+`DecisionFundRepository.precedents_for(keys: Sequence[tuple[str, str]]) -> list[FundPrecedent]` — §6.3.
+
+### 3.3. Чистые функции (`domain/tree_matching.py`, без I/O)
+
+**`resolve_parents(nodes) -> list[int | None]`** — индексы родителей через существующую `resolve_ancestor_indices(depths)` из [classification.py](../../../backend/app/domain/classification.py) (позиционный стек по `depth`; скачок глубины → ближайший открытый предок; `parent_code` **не** используется — коды повторяются между этапами).
+
+**`effective_ancestor_context(idx, nodes, parents) -> AncestorContext`** — единственная функция и для движка, и для фонда, и для промоушена. Подъём по предкам:
+
+| Предок | Действие |
+|---|---|
+| `review_status ∈ {confirmed, overridden}` | **доверенный**: `trusted_code = final_code`, стоп |
+| `status ∈ {confident, matched_fund}` и `unreviewed` | **доверенный**: `trusted_code = matched_code`, стоп |
+| `status = needs_review` | недоверенный: `has_uncertain_barrier = True`, подниматься дальше |
+| `rejected`, `excluded`, `no_match`, `error`, `pending` | прозрачный: подниматься дальше |
+| предков не осталось | `trusted_code = None`, барьер как накоплен — **корень доверенная база** |
+
+Пример: `confident A → needs_review B → C` ⇒ `AncestorContext("A", True)`.
+
+**`split_sections(nodes, parents, *, max_rows, budget) -> list[Chunk]`** — по каждому корню (`parent is None`): если поддерево укладывается в `max_rows` и токен-бюджет — один чанк; иначе первый чанк = корень + первые дети целыми поддеревьями до лимита, далее — по детям корня, каждый со ссылкой на путь предков. Чанки одного раздела упорядочены по документу: **родительский чанк всегда раньше дочернего**.
+
+**`estimate_tokens(text) -> int`** = `ceil(len(text) / 3)` — консервативно для кириллицы (на спайке оценка 6.0k против факта 5.6k у справочника).
+
+**`build_hints(chunk, contexts)`** — для не-целей: доверенные → `[уже: код]`, `needs_review` → `[предположительно: код]`; для целей подсказок нет.
+
+**`validate_verdicts(verdicts, req, catalog, contexts) -> dict[int, Validated]`**, где `Validated = (verdict | None, flags)`. Проверки по порядку:
+1. `node_id ∉ targets` → игнор (лог debug);
+2. дубликат `node_id` → берётся первый, остальные лог warning;
+3. типы полей (`kind` из множества, `sure` bool, коды str|None) — иначе флаг `malformed`;
+4. согласованность: `article` без кода или `org`/`none` с кодом → `inconsistent`;
+5. `article_code ∉ catalog` → `unknown_code`; `alt_code ∉ catalog` или `== article_code` → `alt_code = None` (без флага);
+6. `outside_parent`: код не в поддереве `trusted_code` и `trusted_code` не в поддереве кода (роллап вверх допустим) — **только при доверенном контексте** (`trusted_code is not None`);
+7. цель без вердикта → `missing`.
+
+**`to_node_match(validated, ctx, catalog) -> NodeMatch`**:
+
+| Вход | Статус | Примечание |
+|---|---|---|
+| `org`, без флагов | `excluded` | как оргфильтр сейчас; обратимо |
+| `article`, `sure`, без флагов, `not ctx.has_uncertain_barrier` | `confident` | единственный путь в `confident` |
+| `article`, `sure`, `ctx.has_uncertain_barrier` | `needs_review` | уверенность на сомнительной опоре не наследуется |
+| `article`, `not sure` или `outside_parent` | `needs_review` | |
+| `none`, без флагов | `no_match` | легитимный отказ |
+| `unknown_code`, `inconsistent`, `malformed` | `needs_review`, `matched_* = NULL` | кандидаты — дети `trusted_code` (+ сама статья); fail-closed |
+| `missing` | `error`, `match_error="tree_missing_verdict"` | ре-триггер доберёт |
+
+`candidates` снимка (`neighbors(catalog, code, alt_code, limit=5)`): выбранная статья, `alt_code`, сёстры выбранной, её родитель — `score=None`. Для `unknown_code`/`inconsistent` — дети `trusted_code` и сама `trusted_code`.
+
+**`fund_key_v3(node, ctx) -> str | None`** — `normalize(name) + "" + (ctx.trusted_code or "")`; `None`, если `ctx.has_uncertain_barrier` (exact-hit при барьере не применяется, §6.1). Хэш — `cache_key_hash` как сейчас. Константа `FUND_KEY_VERSION = 3` в `domain/decision_fund.py`, **отдельно** от `CRUMB_DERIVATION_VERSION` (та уходит вместе с RAG).
+
+---
+
+## 4. Сервис (`services/estimate_matching_service.py`)
+
+При `engine == "tree"` метод `match_estimate` сохраняет каркас (advisory-lock, `running`, финализация `ready`/`partial_error`, summary-лог, `finally: release`), но тело стадий другое:
+
+```
+lock → running
+catalog = articles.list_catalog();  пусто → status=blocked, code="catalog_empty"
+catalog_tokens > 25% окна → status=blocked, code="catalog_too_large"
+tree = estimates.fetch_tree(id);  parents = resolve_parents(tree)
+targets = {n.id : n.status ∈ {pending, error, no_match} ∧ review_status == unreviewed}
+for chunk in split_sections(...):                       # порядок документа
+    if chunk.section_failed: continue                   # предковый чанк упал → пропуск (остаётся pending)
+    contexts = {i: effective_ancestor_context(i, tree, parents) for i in chunk}
+    # 4.1 фонд: exact-hit
+    for target in chunk.targets:
+        key = fund_key_v3(node, contexts[i]);  key None → skip
+        hit = fund.lookup([key], FUND_KEY_VERSION)     # ровно одна живая статья → hit
+        if hit: ok = save_node_match_cas(id, matched_fund(...), expected); refresh_node_if(not ok)
+    # 4.2 LLM
+    req = SectionMatchRequest(nodes, ancestors, hints, remaining_targets, catalog,
+                              precedents=fund.precedents_for(keys, budget))
+    try: verdicts = matcher.match_section(req)
+    except TransientError: mark section_failed; строки остаются pending; continue
+    for id, v in validate_verdicts(...):
+        ok = save_node_match_cas(id, to_node_match(...), expected)
+        if not ok: tree[i] = estimates.refresh_node(id)   # проиграли гонку ревью → перечитать final_code до потомков
+finalize: errors/unfinished → partial_error иначе ready
+```
+
+Инварианты:
+- **Контекст ≠ цели.** Все строки чанка идут в промпт; вердикт запрашивается и записывается только по целям. Повторный запуск не перепишет `confident`/`needs_review`/`matched_fund`/`excluded` — CAS по `status IN (pending, error, no_match)`.
+- **Порядок.** Чанки последовательны (дочерние зависят от эффективного контекста предков). Параллелизм между независимыми разделами — TECH_DEBT.
+- `_classify_nodes`, `_apply_fund` (стадия до LLM), `_embed_nodes`, гейт `matching_readiness` при `tree` **не вызываются**.
+- Сбой одного чанка не валит смету: строки остаются `pending` → `partial_error` → ре-триггер продолжает с них в том же порядке.
+
+`build_estimate_matching_service` ([deps.py:181](../../../backend/app/api/deps.py#L181)) выбирает ветку по `settings.matching_engine`; `apply_fund=False` (харнесс) отключает и exact-hit, и прецеденты.
+
+---
+
+## 5. Инфраструктура
+
+### 5.1. `OpenRouterTreeMatcher(TreeMatcher)` (`infrastructure/ai/openrouter_tree_matcher.py`)
+
+`httpx` + `instrumented_call` + `retry_transient` — как у существующих адаптеров. Транзиенты: сеть, 429, 5xx, пустой `choices`. Промпт — из спайка, с полями `sure` и `alt`:
+
+- **system:** роль, правила (структура; org только для чистого каркаса; корпуса внутри работы → статья родителя; роллап при дроблении; `none` для реальной работы без статьи; «Прочее» раздела — `X.99`, не корневое; строки `[уже: …]` не менять; формат ответа).
+- **user:** `СПРАВОЧНИК` (иерархический список `(код) имя` с отступами) → `ПРЕЦЕДЕНТЫ` (§6.3, опционально) → `КОНТЕКСТ` (путь предков чанка с эффективными кодами; только для не-корневых чанков) → `ФРАГМЕНТ` (`id | код | имя` с отступами и подсказками).
+- Ответ: JSON-массив `{"i": id, "code": "<код|org|none>", "sure": bool, "alt": "<код>|null}`; парсинг — первый `[...]`-блок, `json.loads`; невалидный JSON → все цели `missing`.
+- `cache_control: {"type": "ephemeral"}` на блоке system+справочник (Anthropic prompt caching через OpenRouter) — справочник одинаков во всех вызовах сметы.
+- Параметры: `temperature=0`, `reasoning={"effort": settings.tree_reasoning_effort}` (default `low`), `max_tokens = rows × tree_output_reserve_per_row + 512`.
+- `finish_reason == "length"` или необрезаемый JSON → чанк делится пополам (по детям корня, минимум `tree_min_chunk_rows=10`) и повторяется; ниже минимума → цели чанка `error` (`tree_output_truncated`).
+
+### 5.2. Бюджет контекста
+
+Все оценки — `estimate_tokens`. Инварианты проверяются **в начале каждого прогона** (каталог меняется в рантайме), не при старте приложения:
+
+| Ограничение | Значение / действие |
+|---|---|
+| `catalog_tokens ≤ 0.25 × tree_context_window` | иначе `blocked`, `catalog_too_large` |
+| `system + catalog + precedents + chunk + reserve ≤ 0.80 × window` | чанк режется по строкам **и** по токенам |
+| `precedents_tokens ≤ tree_precedents_budget` | лишние прецеденты отбрасываются (по `votes`) |
+
+Startup-валидация только конфигурации: слаг непустой, `tree_context_window > 0`, `0 < tree_chunk_rows`, без сетевых вызовов.
+
+### 5.3. Конфиг (`core/config.py`)
+
+| Ключ | Default | Смысл |
+|---|---|---|
+| `matching_engine` | `rag` (→ `tree` после гейта) | выбор ядра |
+| `openrouter_tree_model` | `anthropic/claude-sonnet-5` | слаг модели |
+| `tree_reasoning_effort` | `low` | рассуждение модели (на спайке без ограничения — ×3 output-токенов) |
+| `tree_context_window` | `200000` | окно модели, задаётся явно |
+| `tree_chunk_rows` | `120` | верх строк в чанке |
+| `tree_min_chunk_rows` | `10` | низ при делении после обрезки |
+| `tree_output_reserve_per_row` | `48` | резерв ответа на строку |
+| `tree_precedents_budget` | `2000` | токены на прецеденты |
+
+Ожидаемая стоимость (Sonnet 5, effort low, кэш префикса): ~$0.25–0.40 на смету в 800 узлов, ~2.5 мин. Без кэша — $0.88 (замер спайка).
+
+---
+
+## 6. Фонд решений (v3)
+
+### 6.1. Lookup — в обходе, не до LLM
+
+Ключ `fund_key_v3(node, ctx)` вычисляется для каждой цели чанка после определения контекста предков (§4). При `has_uncertain_barrier` ключ `None` — exact-применение **пропускается**, а находка (если есть) уходит в прецеденты как подсказка. Хит с ровно одной живой статьёй (`resolve_fund_decision` как сейчас) → `matched_fund` через тот же CAS, снимок без кандидатов. Смешение с v2 исключено фильтром `crumb_version = FUND_KEY_VERSION` в `lookup`; старые записи v2 инертны, их чистит существующий `rebuild`.
+
+### 6.2. Promotion — то же дерево, та же функция
+
+`DecisionFundService.promote` читает **`fetch_tree`** (не плоский `PromotableRow` — он удаляется вместе с `fetch_promotable_rows`), считает `resolve_parents`, и для каждой строки с `review_status ∈ {confirmed, overridden}` и непустым `final_article_id` строит `fund_key_v3(node, effective_ancestor_context(...))`. Ключ `None` (барьер) → строка не промоутится. Анти-накрутка (`matched_fund` + `confirmed` не рекрутируется) сохраняется. Тест-инвариант: ключ промоушена строки эталона равен ключу lookup той же строки в свежей копии сметы, где предки в тех же статусах.
+
+### 6.3. Прецеденты в промпт
+
+`precedents_for(keys)` возвращает по ключам `(normalize(name), parent_code)` записи фонда версии 3, JOIN к живым статьям. Правила: ключ с **несколькими** статьями — конфликт, в промпт не идёт (счётчик в summary); дедуп по ключу; сортировка `votes desc`; отсечение по `tree_precedents_budget`. Формат блока: `имя | родитель → (код) статья — N решений`.
+
+### 6.4. Инвалидация
+
+Как в спеке фонда 2026-06-30 (гибрид C): переименование статьи — ключ жив; удаление — отсекается JOIN-ом; смена `FUND_KEY_VERSION` — старые ключи инертны. Правка имени **предка** в смете больше не рвёт ключи потомков (в ключе только код статьи предка).
+
+---
+
+## 7. API и фронтенд — явные отклонения от «не меняется»
+
+### 7.1. `MatchCandidateOut.score: float | None`
+
+Домен `MatchCandidate.score: float | None`, DTO, `frontend/src/lib/types.ts`. `ReviewCard` не рендерит бейдж score при `null` (одно условие + снимок-тест). Сортировка кандидатов на карточке — по порядку снимка (у RAG он уже отсортирован по score).
+
+### 7.2. Ответ `PATCH /estimates/{id}/rows/{row_id}/review`
+
+Добавляется поле `dependents_hint: int` — число строк в **позиционном поддереве** строки (`source_index` от следующей строки до первой с `depth ≤` текущей) со `status ∈ {confident, matched_fund}` и `review_status='unreviewed'`. Считает review-сервис через `count_dependents`; `save_review_decision` остаётся записью одной строки. Возвращается только при `action ∈ {pick, reject}` (override/reject), иначе `0`. Provenance в снимке нет, поэтому формулировка честная: «N дочерних строк **могут** зависеть от прежнего выбора» (точный учёт через `context_source_node_id` — TECH_DEBT).
+
+### 7.3. Фронт
+
+При `dependents_hint > 0` после коммита — toast с текстом подсказки и действием «Показать в таблице» → грид с фокусом на первой строке поддерева (`focusRowNumber`, механизм уже есть в `ReviewScreen`). Ключи i18n `review.dependentsHint`/`review.showDependents` в `ru`/`tr`. Тесты: рендер toast по ответу, переход в грид, отсутствие toast при `confirm`.
+
+Автоматический пересмотр потомков после override/reject **не делается**: снимок иммутабелен (как сейчас), решение оператора авторитетно.
+
+---
+
+## 8. Харнесс и метрики (`domain/benchmark.py`, `scripts/eval_matching.py`)
+
+- `just eval-matching --engine tree|rag [--benchmark …]`; RAG-baseline снимается один раз до PR 1 и замораживается сводкой в `docs/benchmarks/2026-08-rag-baseline.json` (без построчника).
+- **`top1_strict`** — знаменатель = все gold-`matchable`, `error` — промах (существующий `top1` с исключением `error` остаётся для сопоставимости с историей).
+- **Группа C — калибровка:**
+  - `precision_confident` = верных `confident` / **всех** `confident` (включая уверенные article-вердикты на gold `structural`/`no_article` — они ложные);
+  - `confident_coverage` = `confident` верных / gold-`matchable`;
+  - `confident_on_structural` — отдельной строкой;
+  - `review_rate` = (`needs_review` + `no_match` + `error`) / gold-`matchable`;
+  - `error_rate`, число вызовов, prompt/completion токены, секунды.
+- Гейт двойной: id=1 (шаблонная) и id=2 (**целая** нешаблонная смета, размечается специалистом и сидится тем же `benchmark-seed`).
+
+---
+
+## 9. Definition of Done и гейты
+
+**PR 1–3 (движок за флагом, default `rag`):** полный сьют зелёный; `ruff`/`tsc -b`/`eslint`/`vitest`; `just eval-matching --engine tree` проходит на id=1 без падений; спайковые цифры воспроизведены харнессом (top1_strict ≥ 93%).
+
+**Гейт смены default на `tree` и старта PR 4 (вырезание RAG)** — одновременно:
+
+| Бенчмарк | Условие |
+|---|---|
+| id=1 (шаблонная) | `top1_strict ≥ 93%`, `precision_confident ≥ 97%`, `confident_coverage ≥ 60%` (предварительно; калибруется в PR 2 по факту доли `sure`), `error_rate ≤ 1%` |
+| id=2 (нешаблонная, целая) | `top1_strict(tree) ≥ top1_strict(rag) − 2 п.п.`, `precision_confident ≥ 95%`, `error_rate ≤ 1%` |
+| оба | `confident_on_structural` не выше, чем у RAG-baseline; `review_rate` — отчётной строкой |
+
+Пока id=2 не размечен — default остаётся `rag`, вырезание не начинается.
+
+---
+
+## 10. Тесты
+
+- **Домен:** `resolve_parents` (дубли кодов между этапами, скачок глубины); `effective_ancestor_context` (вся таблица §3.3, пример A→B→C, корень); `split_sections` (раздел-одиночка, деление по детям, порядок «родитель раньше ребёнка», лимит по токенам); `validate_verdicts` (каждый флаг, дубликат, чужой `node_id`, `alt == code`); `to_node_match` (полная матрица kind × sure × барьер × флаги — единственный путь в `confident`); `neighbors`; `fund_key_v3` (барьер → `None`); `estimate_tokens`.
+- **Сервис** (фейк `TreeMatcher` в `tests/fakes.py`): happy path; контекст ≠ цели (не-цели не перезаписываются); транзиент одного чанка → `partial_error`, ре-триггер доматчивает только его; дочерние чанки пропускаются при падении родительского; CAS `False` на предке → перечитан `final_code` до потомков; exact-hit фонда пропущен при барьере.
+- **Адаптер** (стаб httpx): валидный JSON; битый JSON → все цели `missing`; `finish_reason=length` → деление чанка; ниже минимума → `error`; `cache_control` присутствует в теле запроса.
+- **Репозиторий/фонд:** `save_node_match_cas` по обоим предикатам (интеграционный, `TEST_DATABASE_URL`); `precedents_for` — конфликт исключён, `votes` сортировка; инвариант «ключ промоушена = ключ lookup».
+- **Харнесс:** `top1_strict`, группа C на синтетических исходах (в т.ч. уверенный матч на `structural` снижает precision).
+- **API/фронт:** `score: null` сериализуется и не рендерится; `dependents_hint` считается по позиционному поддереву и равен `0` при `confirm`; toast и переход в грид.
+
+---
+
+## 11. План PR
+
+1. **Ядро за флагом.** Домен (§3.3) + порт + фейк + `fetch_tree`/`save_node_match_cas`/`list_catalog` + сервис (§4) + адаптер (§5) + конфиг + `score` nullable сквозь стек (§7.1). Default `rag`.
+2. **Харнесс.** `--engine`, `top1_strict`, группа C, замороженный RAG-baseline, сид бенчмарка id=2 (нужен специалист-разметчик — запрос отдельно).
+3. **Фонд v3.** `FUND_KEY_VERSION`, lookup в обходе, promotion по дереву, `precedents_for`, промпт-блок; `dependents_hint` + фронт-подсказка (§7.2–7.3).
+4. **Гейт → default `tree` → вырезание RAG:** `_classify_nodes`/`WorkTypeClassifier`/`openrouter_classifier`, `_embed_nodes` узлов, `MatchingService.match_one`/`LLMMatcher`/арбитр-адаптеры, порог/`top_k`, гейт `matching_readiness` в матчинге, `CRUMB_DERIVATION_VERSION`, `PromotableRow`; миграция — `DROP COLUMN estimate_rows.embedding`; PIPELINE.md переписывается.
+
+---
+
+## 12. Вне области / TECH_DEBT
+
+- Параллельная обработка независимых разделов (сейчас строго последовательно).
+- Точный provenance контекста в снимке (`context_source_node_id`) и автоматический пересмотр потомков после override/reject.
+- Удаление эмбеддингов справочника (их использует поиск по каталогу на карточке).
+- Пересмотр разметки gold там, где спайк показал регламентную неоднозначность (`8.1.4/8.1.5`, `9.1/9.2`, «ЗИП»), и `article_renamed=73` — освежить снимки имён.
+- Автоматическая калибровка порога `confident_coverage` по накопленным ревью.
