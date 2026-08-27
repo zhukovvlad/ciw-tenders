@@ -164,6 +164,21 @@ describe("useReviewQueue: открытие из грида", () => {
     act(() => result.current.undo())
     expect(result.current.activeRow?.row_number).toBe(30)
   })
+
+  it("committed из грида не двигает позицию потока (FIX-1)", () => {
+    const { result } = setup()
+    // до захода в грид поток стоит на самой ранней спорной — 20 (si=1)
+    expect(result.current.activeRow?.row_number).toBe(20)
+    // решаем ИЗ ГРИДА другую спорную строку (50, si=4) — она не текущая
+    // строка потока, поэтому её позиция не должна стать новой точкой отсчёта
+    act(() => result.current.openFromGrid(50))
+    act(() => void result.current.committed(50))
+    act(() => result.current.deselect())
+    // поток обязан вернуться туда, где был ДО захода в грид (20), а не
+    // «прыгнуть» вперёд на sourceIndex решённой в гриде строки (иначе была
+    // бы 10 — первая нерешённая строго после si=4)
+    expect(result.current.activeRow?.row_number).toBe(20)
+  })
 })
 
 describe("useReviewQueue: ошибка PATCH", () => {
@@ -284,8 +299,18 @@ describe("useReviewQueue: скраббер-навигация", () => {
     expect(result.current.activeRow?.row_number).toBe(10)
   })
 
-  it("два конкурентных отката: первый не потерян", () => {
-    const { result } = setup()
+  it("два конкурентных отката: первый не потерян (FIX-2)", () => {
+    // Локальная фикстура: добавлена спорная 60 (si=6) — ПОСЛЕ si=4, до
+    // которого доходит поток к финальному ассерту. Без неё обёртка к
+    // pending[0] «спасала» бы финальный ассерт и на одиночном слоте: слот
+    // потерял бы первый откат (20), но wrap-around после committed(50) с
+    // пустым pending-хвостом всё равно вернул бы pending[0]=20 — тест
+    // проходил бы и на неправильной реализации (см. RED-трассировку в
+    // фикс-отчёте). С 60 в хвосте слот и список расходятся: слот после
+    // committed(50) продолжит поток вперёд к 60, а список — вернёт
+    // приоритетную 20.
+    const rows = [...ROWS, row(60, 6)]
+    const { result } = setup(rows)
     act(() => void result.current.committed(20))
     act(() => void result.current.committed(50))
     // оба PATCH-а падают; активной остаётся 10 (оператора не выдёргиваем)
@@ -295,7 +320,8 @@ describe("useReviewQueue: скраббер-навигация", () => {
     // решаем текущую: всплывает ПОСЛЕДНИЙ откат
     act(() => void result.current.committed(10))
     expect(result.current.activeRow?.row_number).toBe(50)
-    // и только теперь — первый, который одиночный слот бы затёр
+    // и только теперь — первый, который одиночный слот бы затёр (и увёл бы
+    // поток вперёд на 60 вместо возврата к 20)
     act(() => void result.current.committed(50))
     expect(result.current.activeRow?.row_number).toBe(20)
   })

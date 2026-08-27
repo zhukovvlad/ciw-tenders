@@ -214,7 +214,15 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     if (exit.kind === "row")
       setSelection({ row: exit.rowNumber, origin: { kind: "flow" } })
     else {
-      advanceFrom(rowNumber)
+      // Позицию двигаем ТОЛЬКО при origin=flow — тот же гейт, что и в skip.
+      // exit.kind тут "next" или "grid"; "grid" бывает исключительно при
+      // origin=grid и уже отсекается условием, но exit.kind==="next" также
+      // достижим из origin=undo (returnTo===null) — а undo это отступление,
+      // не проход по документу, и позицию потока трогать нельзя: иначе после
+      // решения строки из грида (или после отступления) оператор при
+      // возврате в поток «прыгнет» на sourceIndex этой строки вместо того,
+      // чтобы продолжить с места, где был до захода туда.
+      if (origin.kind === "flow") advanceFrom(rowNumber)
       setSelection(null)
     }
     return exit
