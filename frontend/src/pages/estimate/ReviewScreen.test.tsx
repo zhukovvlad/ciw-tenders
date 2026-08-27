@@ -318,4 +318,27 @@ describe("скраббер: навигация по полосе окружен�
     await userEvent.click(screen.getByText("Уверенная"))
     expect(workText("Уверенная")).toBeInTheDocument()
   })
+
+  // Регрессия: useReviewKeyboard вешает ГЛОБАЛЬНЫЙ keydown на window и
+  // отличает только editable-таргеты (input/textarea/…), не кнопки. Табом
+  // на строку полосы и Enter — тот же keydown долетал бы до window-хэндлера,
+  // тот preventDefault()-ил бы нативную активацию кнопки и вместо навигации
+  // коммитил бы рекомендацию АКТИВНОЙ карточки («Спорная А»), а не строки под
+  // фокусом («Спорная Б»). Изолированный тест ContextStrip.test.tsx эту дыру
+  // не ловит: он рендерит полосу отдельно, useReviewKeyboard там не
+  // смонтирован — глобального хэндлера, с которым сталкивается Enter, просто
+  // нет, поэтому тот тест зелёный и с фиксом, и без него. Фикс — stopPropagation
+  // на Enter в ContextStrip.tsx (см. её onKeyDown) — виден только здесь, в
+  // композиции экрана, где оба хэндлера смонтированы вместе.
+  it("Enter на сфокусированной строке полосы не коммитит активную карточку, а переходит на строку под фокусом", async () => {
+    const onReview = vi.fn().mockResolvedValue(true)
+    render(<Wrap rows={ROWS} onReview={onReview} />)
+    expect(workText("Спорная А")).toBeInTheDocument()
+    const neighbourButton = screen.getByText("Спорная Б").closest("button")
+    expect(neighbourButton).not.toBeNull()
+    neighbourButton?.focus()
+    await userEvent.keyboard("{Enter}")
+    expect(onReview).not.toHaveBeenCalled()
+    expect(workText("Спорная Б")).toBeInTheDocument()
+  })
 })
