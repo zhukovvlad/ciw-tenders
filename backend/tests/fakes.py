@@ -10,6 +10,7 @@ from app.domain import catalog_tree
 from app.domain.decision_fund import AppliedFundHit, FundEntry, FundHit
 from app.domain.entities import (
     ArticleCandidate,
+    CatalogArticle,
     ClassifiableNode,
     Estimate,
     EstimateNode,
@@ -29,6 +30,7 @@ from app.domain.entities import (
     StoredEstimateRow,
     TemplateArticle,
     TokenPayload,
+    TreeNode,
     User,
     WorkClass,
 )
@@ -47,6 +49,18 @@ from app.domain.ports import (
     UserRepository,
     WorkTypeClassifier,
 )
+
+
+def make_tree_node(
+    i: int, depth: int, code: str, name: str = "", status: str = "pending", **kw
+) -> TreeNode:
+    """Хелпер для построения TreeNode в тестах tree-матчинга."""
+    return TreeNode(
+        id=i, source_index=i, depth=depth, code=code, name=name or f"n{code}", status=status,
+        review_status=kw.get("review_status", "unreviewed"),
+        matched_code=kw.get("matched_code"), matched_article_id=kw.get("matched_article_id"),
+        final_code=kw.get("final_code"), final_article_id=kw.get("final_article_id"),
+    )
 
 
 class FakeEmbedder(Embedder):
@@ -114,6 +128,15 @@ class FakeRepository(ArticleRepository):
     def ancestor_names_by_ids(self, article_ids: Sequence[int]) -> dict[int, list[str]]:
         nodes = {a.id: (a.name, a.parent_id) for a in self._store if a.id is not None}
         return catalog_tree.ancestor_names_by_ids(nodes, article_ids)
+
+    def list_catalog(self) -> list[CatalogArticle]:
+        return [
+            CatalogArticle(
+                id=a.id or 0, code=a.article_code, name=a.name,
+                parent_code=".".join(a.article_code.split(".")[:-1]) or None,
+            )
+            for a in self._store
+        ]
 
 
 class FakeArticleRepository(ArticleRepository):
@@ -191,6 +214,15 @@ class FakeArticleRepository(ArticleRepository):
             if a.id is not None
         }
         return catalog_tree.ancestor_names_by_ids(nodes, article_ids)
+
+    def list_catalog(self) -> list[CatalogArticle]:
+        return [
+            CatalogArticle(
+                id=a.id or 0, code=a.article_code, name=a.name,
+                parent_code=".".join(a.article_code.split(".")[:-1]) or None,
+            )
+            for a in self.rows.values()
+        ]
 
 
 class FakeLLMMatcher(LLMMatcher):
@@ -615,6 +647,20 @@ class FakeEstimateRepository(EstimateRepository):
             {"id": c.id, "code": c.code, "name": c.name, "score": c.score}
             for c in result.candidates
         ]
+
+    def fetch_tree(self, estimate_id: int) -> list[TreeNode]:
+        # заполняется в Task 6
+        return []
+
+    def refresh_tree_node(self, node_id: int) -> TreeNode:
+        # заполняется в Task 6
+        raise KeyError(node_id)
+
+    def save_node_match_cas(
+        self, node_id: int, result: NodeMatch, expected_statuses: Sequence[str]
+    ) -> bool:
+        # заполняется в Task 6
+        return False
 
     def count_node_errors(self, estimate_id: int) -> int:
         return sum(

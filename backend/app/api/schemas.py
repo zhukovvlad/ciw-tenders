@@ -170,7 +170,7 @@ class MatchCandidateOut(BaseModel):
     id: int | None
     code: str
     name: str
-    score: float
+    score: float | None
     breadcrumb: list[str] = []
 
 

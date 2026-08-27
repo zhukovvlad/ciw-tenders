@@ -27,6 +27,7 @@ from app.domain.entities import (
     PromotableRow,
     StoredEstimateRow,
     StructuralAnomaly,
+    TreeNode,
 )
 from app.domain.errors import EstimateNotCompletableError
 from app.domain.ports import EstimateRepository
@@ -344,6 +345,51 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             .values(**self._match_values(result))
         )
         self._session.commit()
+
+    def fetch_tree(self, estimate_id: int) -> list[TreeNode]:
+        # заполняется в Task 6
+        stmt = (
+            select(EstimateRowModel)
+            .where(EstimateRowModel.estimate_id == estimate_id)
+            .order_by(EstimateRowModel.source_index)
+        )
+        return [
+            TreeNode(
+                id=r.id, source_index=r.source_index, depth=r.depth, code=r.code,
+                name=r.name, status=r.status, review_status=r.review_status,
+                matched_code=r.matched_code, matched_article_id=r.matched_article_id,
+                final_code=r.final_code, final_article_id=r.final_article_id,
+            )
+            for r in self._session.execute(stmt)
+        ]
+
+    def refresh_tree_node(self, node_id: int) -> TreeNode:
+        # заполняется в Task 6
+        row = self._session.get(EstimateRowModel, node_id)
+        if row is None:
+            raise KeyError(node_id)
+        return TreeNode(
+            id=row.id, source_index=row.source_index, depth=row.depth, code=row.code,
+            name=row.name, status=row.status, review_status=row.review_status,
+            matched_code=row.matched_code, matched_article_id=row.matched_article_id,
+            final_code=row.final_code, final_article_id=row.final_article_id,
+        )
+
+    def save_node_match_cas(
+        self, node_id: int, result: NodeMatch, expected_statuses: Sequence[str]
+    ) -> bool:
+        # заполняется в Task 6
+        res = self._session.execute(
+            update(EstimateRowModel)
+            .where(
+                EstimateRowModel.id == node_id,
+                EstimateRowModel.status.in_(expected_statuses),
+                EstimateRowModel.review_status == "unreviewed",
+            )
+            .values(**self._match_values(result))
+        )
+        self._session.commit()
+        return bool(res.rowcount)
 
     @staticmethod
     def _match_values(result: NodeMatch) -> dict:
