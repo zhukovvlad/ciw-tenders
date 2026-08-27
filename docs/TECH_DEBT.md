@@ -860,3 +860,38 @@ LLM-арбитра, который такую строку и так призн�
 **Связано:** [classification.py](../backend/app/domain/classification.py),
 [test_classification.py](../backend/tests/test_classification.py),
 [devlog 2026-08-24](devlog/2026-08-24-org-filter-urban-block-phrase.md).
+
+## 🟡 Скраббер: `Enter` на кнопках — фикс без постоянного стража + предсуществующая коллизия кандидатов
+
+Полоса окружения ([ContextStrip.tsx](../frontend/src/pages/estimate/ContextStrip.tsx)) рендерит решаемые
+строки настоящими `<button>`, а хоткеи ревью живут в window-listener'е
+([useReviewKeyboard.ts](../frontend/src/lib/useReviewKeyboard.ts)), который игнорирует только editable-цели.
+Отсюда два пункта.
+
+**1. Фикс полосы не защищён регресс-тестом.** `Enter` на сфокусированной строке полосы перехватывался
+глобальным хоткеем: тот делал `preventDefault()` (гася нативную активацию кнопки) и коммитил рекомендацию
+АКТИВНОЙ строки — жест навигации отправлял PATCH по другой строке. Закрыто `onKeyDown` +
+`stopPropagation()` на кнопке полосы. Но постоянный тест лежит в `ContextStrip.test.tsx`, где
+`useReviewKeyboard` не смонтирован, поэтому он зелен и без фикса — сторожит не то. Реальная коллизия была
+проверена временным composed-тестом (RED→GREEN) и удалена.
+
+Нужен постоянный composed-тест в
+[ReviewScreen.test.tsx](../frontend/src/pages/estimate/ReviewScreen.test.tsx): `Enter` на сфокусированной
+строке полосы НЕ зовёт `onReview` при живом `useReviewKeyboard`. Это единственный тест, способный упасть
+при регрессе.
+
+**2. Та же коллизия у кандидатных кнопок карточки — предсуществующая.** При фокусе на кандидате `Enter`
+коммитит рекомендацию, а не выбирает сфокусированного кандидата. Это было до ветки со скраббером и покрыто
+её пинами. Системное лечение — учить `useReviewKeyboard` уступать `Enter` любому сфокусированному `button`
+(`e.target.closest("button")`) — чинит оба случая сразу, но меняет запинованное поведение, поэтому требует
+своего решения и своих тестов.
+
+**Почему отложено:** пункт 1 — пробел покрытия, а не поведения (механизм фикса проверен независимо: React
+`stopPropagation()` дёргает `nativeEvent.stopPropagation()`, до window-listener'а событие не доходит;
+`preventDefault` не вызывается, нативная активация цела; это единственный `onKeyDown` в `pages/estimate/`).
+Пункт 2 — не регресс, а давний перекос, лечить его в рамках скраббер-ветки значило бы расширить область и
+рискнуть чужими пинами.
+
+**Связано:** [ContextStrip.tsx](../frontend/src/pages/estimate/ContextStrip.tsx),
+[useReviewKeyboard.ts](../frontend/src/lib/useReviewKeyboard.ts),
+[devlog 2026-08-27](devlog/2026-08-27-review-card-choice-and-scrubber.md).
