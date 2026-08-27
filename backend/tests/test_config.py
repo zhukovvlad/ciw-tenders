@@ -121,10 +121,21 @@ def test_deprecated_llm_model_fails(monkeypatch) -> None:
     assert "LLM_MODEL устарел" in str(exc.value)
 
 
-def test_tree_engine_defaults() -> None:
+def test_tree_engine_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.core.config import Settings
 
-    s = Settings()  # env из conftest
+    # Изолируемся от .env-файла И от переменных окружения, чтобы проверять именно
+    # дефолты класса — регресс-гард на опечатку в дефолте, как test_jwt_defaults.
+    # Во время ручной проверки разработчик может временно добавить MATCHING_ENGINE=tree в .env.
+    monkeypatch.delenv("MATCHING_ENGINE", raising=False)
+    monkeypatch.delenv("OPENROUTER_TREE_MODEL", raising=False)
+    monkeypatch.delenv("TREE_REASONING_EFFORT", raising=False)
+    monkeypatch.delenv("TREE_CONTEXT_WINDOW", raising=False)
+    monkeypatch.delenv("TREE_CHUNK_ROWS", raising=False)
+    monkeypatch.delenv("TREE_MIN_CHUNK_ROWS", raising=False)
+    monkeypatch.delenv("TREE_OUTPUT_RESERVE_PER_ROW", raising=False)
+    monkeypatch.delenv("TREE_PRECEDENTS_BUDGET", raising=False)
+    s = Settings(_env_file=None)  # type: ignore[call-arg]
     assert s.matching_engine == "rag"
     assert s.openrouter_tree_model == "anthropic/claude-sonnet-5"
     assert s.tree_reasoning_effort == "low"
