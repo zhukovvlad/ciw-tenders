@@ -293,7 +293,15 @@ export function ReviewScreen({
             decision={decisionFor(state, active)}
             canUndo={queue.canUndo}
             contextStrip={
-              <ContextStrip state={state} activeRowNumber={active.row_number} />
+              // onNavigate вешается ЗДЕСЬ, а не пробрасывается через
+              // ReviewCard: полоса инстанцируется в этом файле и попадает в
+              // карточку готовым узлом. Карточка о навигации ревью не знает —
+              // её инвариант (см. проп contextStrip в ReviewCard) цел.
+              <ContextStrip
+                state={state}
+                activeRowNumber={active.row_number}
+                onNavigate={queue.navigateTo}
+              />
             }
             onConfirmRecommendation={() =>
               commit(

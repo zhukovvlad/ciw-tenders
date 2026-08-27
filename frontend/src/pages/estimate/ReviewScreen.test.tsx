@@ -297,3 +297,25 @@ describe("Enter на решённой строке инертен", () => {
     expect(onReview).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("скраббер: навигация по полосе окружения", () => {
+  it("клик по соседу делает его активной строкой карточки", async () => {
+    render(<Wrap rows={ROWS} />)
+    expect(workText("Спорная А")).toBeInTheDocument()
+    // «Спорная Б» пока присутствует ТОЛЬКО в полосе окружения
+    await userEvent.click(screen.getByText("Спорная Б"))
+    expect(workText("Спорная Б")).toBeInTheDocument()
+  })
+
+  it("клик по excluded-строке полосы активную не меняет", async () => {
+    render(<Wrap rows={ROWS} />)
+    await userEvent.click(screen.getByText("Орг-заголовок"))
+    expect(workText("Спорная А")).toBeInTheDocument()
+  })
+
+  it("ad-hoc сосед (confident) открывается из полосы", async () => {
+    render(<Wrap rows={ROWS} />)
+    await userEvent.click(screen.getByText("Уверенная"))
+    expect(workText("Уверенная")).toBeInTheDocument()
+  })
+})
