@@ -458,4 +458,28 @@ describe("ReviewCard: блок «Ваш выбор»", () => {
     })
     expect(screen.getByText("Рекомендация системы")).toBeInTheDocument()
   })
+
+  it("рекомендация ВНУТРИ candidates: блок есть, подписи над списком нет", () => {
+    // matched_code входит в candidates ⇒ рекомендация это подсвеченный
+    // кандидат внутри списка (syntheticRecommendation === false), а не
+    // отдельная секция. Подпись «Рекомендация системы» здесь заголовком
+    // всего списка из пяти произвольных кандидатов была бы враньём — она
+    // обязана существовать ровно тогда, когда есть отдельная секция
+    // рекомендации, которую подписывать.
+    const r = row(5, 2, "needs_review", {
+      matched_code: "01.01",
+      matched_name: "Статья",
+      candidates: [{ ...CAND, article_code: "01.01" }, CAND2],
+    })
+    renderCard(r, {
+      decision: {
+        kind: "confirmed",
+        code: CAND2.article_code,
+        name: CAND2.name,
+        manual: false,
+      },
+    })
+    expect(screen.getByTestId("your-choice")).toBeInTheDocument()
+    expect(screen.queryByText("Рекомендация системы")).toBeNull()
+  })
 })
