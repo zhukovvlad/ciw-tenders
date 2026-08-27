@@ -8,7 +8,6 @@ from app.domain.entities import (
     MatchCandidate,
     NodeVerdict,
     SectionMatchRequest,
-    TreeNode,
 )
 from tests.fakes import make_tree_node as _tn
 

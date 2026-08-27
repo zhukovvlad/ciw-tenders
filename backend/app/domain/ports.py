@@ -12,7 +12,6 @@ from datetime import datetime
 
 from app.domain.decision_fund import AppliedFundHit, FundEntry, FundHit
 from app.domain.entities import (
-    AncestorContext,
     ArticleCandidate,
     BenchmarkNodeSeed,
     CatalogArticle,

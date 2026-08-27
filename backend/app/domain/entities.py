@@ -377,7 +377,8 @@ class FundPrecedent:
 @dataclass(frozen=True, slots=True)
 class SectionMatchRequest:
     nodes: list[TreeNode]
-    ancestors: list[tuple[TreeNode, tuple[str, bool] | None]]  # (код, trusted) из hint_for; None — прозрачный предок
+    # (код, trusted) из hint_for; None — прозрачный предок
+    ancestors: list[tuple[TreeNode, tuple[str, bool] | None]]
     hints: dict[int, tuple[str, bool]]
     targets: frozenset[int]
     catalog: list[CatalogArticle]
