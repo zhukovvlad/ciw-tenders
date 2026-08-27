@@ -121,7 +121,12 @@ export function ReviewScreen({
   useReviewKeyboard({
     enabled: view === "queue" && !readOnly && active !== null,
     candidateCount: active?.candidates.length ?? 0,
-    canConfirm: active ? hasRecommendation(active) : false,
+    // Enter активен только пока строка не решена: на решённой (её открыли из
+    // грида или полосы) он перезаписал бы выбор оператора одним нажатием.
+    canConfirm: active
+      ? hasRecommendation(active) &&
+        decisionFor(state, active).kind === "pending"
+      : false,
     onPick: (i) => {
       const c = active?.candidates[i]
       if (active && c)

@@ -30,7 +30,9 @@ interface ReviewCardProps {
   contextStrip?: ReactNode // полоса окружения (спека 3.5 §3 п.2): карточка не знает о ревью-стейте
 }
 
-/** Enter активен ⇔ блок рекомендации отрисован (правило: клавиша ⇔ элемент) */
+/** Рекомендация отрисована? Enter активен ⇔ она отрисована И строка не решена
+ *  (второй множитель — гейт canConfirm в ReviewScreen: на решённой строке
+ *  клавиша инертна, и бейджа Enter нет ни у одной из двух отрисовок) */
 // eslint-disable-next-line react-refresh/only-export-components -- hasRecommendation — гейт-хелпер, используемый экраном ревью (Task 9)
 export function hasRecommendation(row: MatchRow): boolean {
   return (
@@ -237,9 +239,14 @@ export function ReviewCard({
                     t("review.aiRecommendation")
                   )}
                 </span>
-                <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
-                  Enter
-                </kbd>
+                {/* Инвариант «клавиша ⇔ элемент»: на решённой строке Enter
+                    инертен (защита выбора оператора от перезаписи одним
+                    нажатием), поэтому и бейджа нет. Клик остаётся. */}
+                {decision.kind === "pending" && (
+                  <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
+                    Enter
+                  </kbd>
+                )}
               </button>
             )}
 
@@ -294,9 +301,13 @@ export function ReviewCard({
                           t("review.aiRecommendation")
                         )}
                       </span>
-                      <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
-                        Enter
-                      </kbd>
+                      {/* тот же инвариант, второе место отрисовки
+                          рекомендации: matched_code входит в candidates */}
+                      {decision.kind === "pending" && (
+                        <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
+                          Enter
+                        </kbd>
+                      )}
                     </>
                   )}
                 </button>
@@ -369,7 +380,7 @@ export function ReviewCard({
           <LegendItem
             keyLabel="Enter"
             text={t("review.hintConfirm")}
-            muted={!recommended}
+            muted={!recommended || decision.kind !== "pending"}
           />
           <LegendItem keyLabel="N" text={t("review.hintSkip")} muted={false} />
           <LegendItem

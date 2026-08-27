@@ -279,3 +279,21 @@ describe("кнопка «Завершить»", () => {
     expect(btn.className).toContain("bg-primary")
   })
 })
+
+describe("Enter на решённой строке инертен", () => {
+  it("← открывает решённую строку, повторный Enter ничего не коммитит", async () => {
+    const onReview = vi.fn().mockResolvedValue(true)
+    render(<Wrap rows={ROWS} onReview={onReview} />)
+    // решаем «Спорная А»
+    await userEvent.keyboard("{Enter}")
+    expect(onReview).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(workText("Спорная Б")).toBeInTheDocument())
+    // ← возвращает к уже решённой «Спорная А»
+    await userEvent.keyboard("{ArrowLeft}")
+    expect(workText("Спорная А")).toBeInTheDocument()
+    // Enter здесь обязан быть инертным: иначе одно нажатие перезаписало бы
+    // решение оператора
+    await userEvent.keyboard("{Enter}")
+    expect(onReview).toHaveBeenCalledTimes(1)
+  })
+})

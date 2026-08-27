@@ -483,3 +483,80 @@ describe("ReviewCard: блок «Ваш выбор»", () => {
     expect(screen.queryByText("Рекомендация системы")).toBeNull()
   })
 })
+
+describe("ReviewCard: Enter гаснет на решённых строках", () => {
+  const r = row(5, 2, "needs_review", {
+    matched_code: "01.01",
+    matched_name: "Статья",
+    candidates: [],
+  })
+
+  it("на pending-строке бейдж Enter внутри рекомендации есть", () => {
+    renderCard(r)
+    const rec = screen.getByText("Статья").closest("button")!
+    expect(within(rec).getByText("Enter")).toBeInTheDocument()
+  })
+
+  it("на решённой строке бейджа Enter у рекомендации нет", () => {
+    renderCard(r, {
+      decision: {
+        kind: "confirmed",
+        code: "07.01",
+        name: "Кровельные работы",
+        manual: false,
+      },
+    })
+    // легенда клавиш содержит слово Enter всегда — проверяем именно бейдж
+    // внутри кнопки рекомендации
+    const rec = screen.getByText("Статья").closest("button")!
+    expect(within(rec).queryByText("Enter")).toBeNull()
+  })
+
+  it("клик по рекомендации на решённой строке по-прежнему работает", async () => {
+    const props = renderCard(r, {
+      decision: {
+        kind: "confirmed",
+        code: "07.01",
+        name: "Кровельные работы",
+        manual: false,
+      },
+    })
+    const rec = screen.getByText("Статья").closest("button")!
+    await userEvent.click(rec)
+    expect(props.onConfirmRecommendation).toHaveBeenCalledTimes(1)
+  })
+
+  // ВТОРОЙ бейдж: когда matched_code входит в candidates, рекомендация — это
+  // кандидатная строка с веткой isRecommendation и собственным kbd Enter.
+  const recAsCandidate: Candidate = {
+    id: 1,
+    article_code: "01.01",
+    name: "Статья",
+    score: 0.9,
+    breadcrumb: ["01 Раздел"],
+  }
+  const rc = row(6, 3, "needs_review", {
+    matched_code: "01.01",
+    matched_name: "Статья",
+    candidates: [recAsCandidate],
+  })
+
+  it("рекомендация ВНУТРИ candidates: на pending бейдж Enter есть", () => {
+    renderCard(rc)
+    const cand = screen.getByText("Статья").closest("button")!
+    expect(within(cand).getByText("Enter")).toBeInTheDocument()
+  })
+
+  it("рекомендация ВНУТРИ candidates: на решённой строке бейджа Enter нет", () => {
+    renderCard(rc, {
+      decision: {
+        kind: "confirmed",
+        code: "07.01",
+        name: "Кровельные работы",
+        manual: false,
+      },
+    })
+    const cand = screen.getByText("Статья").closest("button")!
+    expect(within(cand).queryByText("Enter")).toBeNull()
+  })
+})
