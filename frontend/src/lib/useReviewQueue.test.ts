@@ -69,15 +69,23 @@ describe("useReviewQueue: порядок и активная", () => {
 })
 
 describe("useReviewQueue: skip (N)", () => {
-  it("активная уходит в хвост, следующей встаёт очередная нерешённая", () => {
+  it("N: очередь НЕ переупорядочивается, активной встаёт следующая по документу", () => {
     const { result } = setup()
-    let exit
-    act(() => {
-      exit = result.current.skip()
-    })
-    expect(exit).toEqual({ kind: "next" })
+    // порядок документа: 20 (si=1), 50 (si=4), 10 (si=5)
+    expect(result.current.activeRow?.row_number).toBe(20)
+    act(() => void result.current.skip())
+    // пропущенная 20 осталась на месте — «следующую» задаёт позиция, не порядок
+    expect(result.current.queue.map((r) => r.row_number)).toEqual([20, 50, 10])
     expect(result.current.activeRow?.row_number).toBe(50)
-    expect(result.current.queue.map((r) => r.row_number)).toEqual([50, 10, 20])
+  })
+
+  it("обёртка: после последней нерешённой поток возвращается к самой ранней", () => {
+    const { result } = setup()
+    act(() => void result.current.skip()) // с 20 → 50
+    act(() => void result.current.skip()) // с 50 → 10
+    expect(result.current.activeRow?.row_number).toBe(10)
+    act(() => void result.current.skip()) // дальше нет → обёртка к ранней
+    expect(result.current.activeRow?.row_number).toBe(20)
   })
 
   it("N на ad-hoc строке из грида (не в порядке спорных): порядок цел, выход в грид", () => {
@@ -200,5 +208,103 @@ describe("useReviewQueue: ошибка PATCH", () => {
     act(() => result.current.commitFailed(20)) // undoStack=[20]; Set={}
     act(() => result.current.deselect()) // снять пин, вернуться к потоку
     expect(result.current.activeRow?.row_number).toBe(20) // упавшее решение снова в работе
+  })
+})
+
+describe("useReviewQueue: скраббер-навигация", () => {
+  it("navigateTo делает произвольную строку активной с origin=flow", () => {
+    const { result } = setup()
+    act(() => result.current.navigateTo(10))
+    expect(result.current.activeRow?.row_number).toBe(10)
+    expect(result.current.origin).toEqual({ kind: "flow" })
+  })
+
+  it("navigateTo не пишется в undo-стек (навигация ≠ решение)", () => {
+    const { result } = setup()
+    act(() => result.current.navigateTo(10))
+    expect(result.current.canUndo).toBe(false)
+  })
+
+  it("после решения строки из полосы поток идёт от её позиции вперёд", () => {
+    const { result } = setup()
+    act(() => result.current.navigateTo(20)) // si=1, самая ранняя
+    let exit: ReturnType<typeof result.current.committed> | undefined
+    act(() => {
+      exit = result.current.committed(20)
+    })
+    expect(exit).toEqual({ kind: "next" })
+    // следующая нерешённая строго после si=1 — это 50 (si=4)
+    expect(result.current.activeRow?.row_number).toBe(50)
+  })
+
+  it("ad-hoc строка из полосы (confident) решается, поток идёт от её позиции", () => {
+    const { result } = setup()
+    act(() => result.current.navigateTo(30)) // confident, si=2, не в очереди
+    expect(result.current.activeRow?.row_number).toBe(30)
+    act(() => void result.current.committed(30))
+    // первая нерешённая строго после si=2 — 50 (si=4)
+    expect(result.current.activeRow?.row_number).toBe(50)
+  })
+
+  it("линейный проход сверху вниз не изменился (пин обратной совместимости)", () => {
+    const { result } = setup()
+    const seen: number[] = []
+    for (let k = 0; k < 3; k++) {
+      const n = result.current.activeRow?.row_number
+      if (n === undefined) break
+      seen.push(n)
+      act(() => void result.current.committed(n))
+    }
+    expect(seen).toEqual([20, 50, 10])
+    expect(result.current.activeRow).toBeNull()
+  })
+
+  it("commitFailed: откатившаяся строка следующая ПОСЛЕ текущей (пин PR-B)", () => {
+    const { result } = setup()
+    // решаем 20 (si=1) — активной становится 50
+    act(() => void result.current.committed(20))
+    expect(result.current.activeRow?.row_number).toBe(50)
+    // PATCH по 20 падает: оператора не выдёргиваем, но 20 должна стать следующей
+    act(() => result.current.commitFailed(20))
+    expect(result.current.activeRow?.row_number).toBe(50)
+    // решаем текущую 50 — и вот теперь всплывает откатившаяся 20,
+    // хотя по документу она ПОЗАДИ позиции (si=1 < si=4)
+    act(() => void result.current.committed(50))
+    expect(result.current.activeRow?.row_number).toBe(20)
+  })
+
+  it("N на откатившейся строке действительно её пропускает (без залипания)", () => {
+    const { result } = setup()
+    act(() => void result.current.committed(20))
+    act(() => result.current.commitFailed(20))
+    act(() => void result.current.committed(50))
+    expect(result.current.activeRow?.row_number).toBe(20) // приоритет поднял
+    // приоритет проверяется раньше позиции — без снятия N вернул бы ту же 20
+    act(() => void result.current.skip())
+    expect(result.current.activeRow?.row_number).toBe(10)
+  })
+
+  it("два конкурентных отката: первый не потерян", () => {
+    const { result } = setup()
+    act(() => void result.current.committed(20))
+    act(() => void result.current.committed(50))
+    // оба PATCH-а падают; активной остаётся 10 (оператора не выдёргиваем)
+    act(() => result.current.commitFailed(20))
+    act(() => result.current.commitFailed(50))
+    expect(result.current.activeRow?.row_number).toBe(10)
+    // решаем текущую: всплывает ПОСЛЕДНИЙ откат
+    act(() => void result.current.committed(10))
+    expect(result.current.activeRow?.row_number).toBe(50)
+    // и только теперь — первый, который одиночный слот бы затёр
+    act(() => void result.current.committed(50))
+    expect(result.current.activeRow?.row_number).toBe(20)
+  })
+
+  it("N на ad-hoc строке из полосы двигает позицию вперёд", () => {
+    const { result } = setup()
+    act(() => result.current.navigateTo(30)) // confident, si=2, не в очереди
+    act(() => void result.current.skip())
+    // поток продолжается ПОСЛЕ si=2 → 50 (si=4), а не с начала документа
+    expect(result.current.activeRow?.row_number).toBe(50)
   })
 })
