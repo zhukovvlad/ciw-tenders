@@ -39,7 +39,9 @@
 
 `committed` тоже убирает строку из списка (решена — приоритет не нужен), а фильтр по `pending` в `autoActive` страхует от любых остатков.
 
-Это единственное отступление от спеки; остальное реализуется как написано.
+Это единственное **поведенческое** отступление от спеки. Второе, чисто
+структурное, зафиксировано в Task 5: прямое подключение `onNavigate` в
+`ReviewScreen` вместо проброса через `ReviewCard`. Остальное — как в спеке.
 
 ---
 
@@ -640,7 +642,7 @@ hasRecommendation поправлен: эквивалентности «Enter ⇔
 
 **Files:**
 
-- Modify: `frontend/src/lib/useReviewQueue.ts` (переписываются `order`→`queue`, `skip`, `committed`, `commitFailed`; добавляются `position`, `priority`, `navigateTo`)
+- Modify: `frontend/src/lib/useReviewQueue.ts` (переписываются `order`→`queue`, `skip`, `committed`, `commitFailed`; добавляются `position`, `priorities`, `navigateTo`)
 - Test: `frontend/src/lib/useReviewQueue.test.ts`
 
 **Interfaces:**
@@ -856,7 +858,7 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
 ```ts
   // Очередь спорных в порядке документа. НЕИЗМЕНЯЕМА: в позиционной модели ни
   // skip, ни commitFailed её не переупорядочивают — «следующую» задают
-  // position/priority, а не порядок массива.
+  // position/priorities, а не порядок массива.
   const queue = useMemo(
     () =>
       state.rows
@@ -970,7 +972,7 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
   }
 ```
 
-Заменить `commitFailed` на (ушла мутация `order`, добавился `setPriority`):
+Заменить `commitFailed` на (ушла мутация `order`, добавился `setPriorities`):
 
 ```ts
   const commitFailed = (rowNumber: number) => {
@@ -1011,7 +1013,7 @@ Run: `cd frontend && npx vitest run src/lib/useReviewQueue.test.ts`
 
 Expected: PASS — все тесты файла, включая нетронутые пины `origin=grid`, `undo`/`returnTo`, `STALE CLOSURE`, «двойной коммит».
 
-Если упал пин «STALE CLOSURE» или «commitFailed … активная не прыгает» — НЕ правь тест: смотри порядок `setPriority`/`setSelection` в `commitFailed`, инвариант «оператора не выдёргивает» должен сохраниться.
+Если упал пин «STALE CLOSURE» или «commitFailed … активная не прыгает» — НЕ правь тест: смотри порядок `setPriorities`/`setSelection` в `commitFailed`, инвариант «оператора не выдёргивает» должен сохраниться.
 
 - [ ] **Step 8: Прогнать typecheck и весь фронт**
 
@@ -1403,5 +1405,5 @@ ContextStrip получает queue.navigateTo прямо в ReviewScreen, гд�
 - [ ] `cd frontend && npx tsc -b` — чисто
 - [ ] `cd frontend && npx vitest run` — все зелёные
 - [ ] `just lint` из корня — ruff + eslint + prettier `--check`
-- [ ] Devlog по конвенции проекта: `docs/devlog/YYYY-MM-DD-review-card-choice-and-scrubber.md` — что сделано, затронутые файлы, решения и нюансы, что осталось. Обязательно зафиксировать два отхода от спеки: приоритетный слот вместо «позиции перед строкой» в `commitFailed` и отказ от проброса `onNavigate` через `ReviewCard`.
+- [ ] Devlog по конвенции проекта: `docs/devlog/YYYY-MM-DD-review-card-choice-and-scrubber.md` — что сделано, затронутые файлы, решения и нюансы, что осталось. Обязательно зафиксировать два отхода от спеки: список приоритетов вместо «позиции перед строкой» в `commitFailed` (и почему список, а не одиночный слот — потеря конкурентного отката и залипание на `N`) и отказ от проброса `onNavigate` через `ReviewCard`.
 - [ ] Ручная проверка в браузере (`just dev-back` + `just dev-front`): override-строка, открытая из грида, показывает блок «Ваш выбор»; `Enter` на ней ничего не перезаписывает; клик по соседу в полосе переносит карточку; после решения поток идёт вперёд от новой позиции; пропущенная через `N` строка возвращается в конце прохода
