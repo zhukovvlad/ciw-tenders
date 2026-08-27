@@ -9,13 +9,24 @@ from app.domain.entities import (
     MatchCandidate,
     NodeVerdict,
     SectionMatchRequest,
+    TreeNode,
 )
 from app.domain.tree_matching import (
+    Chunk,
     effective_ancestor_context,
     estimate_tokens,
     resolve_parents,
+    split_sections,
 )
 from tests.fakes import make_tree_node as _tn
+
+
+def _tok(n: TreeNode) -> int:
+    return 1
+
+
+def _chain(depths: list[int]) -> list[TreeNode]:
+    return [_tn(i + 1, d, ".".join(["1"] * d)) for i, d in enumerate(depths)]
 
 
 def test_tree_entities_construct() -> None:
@@ -94,3 +105,44 @@ def test_fund_key_v3_uses_trusted_code_and_none_on_barrier() -> None:
 
 def test_estimate_tokens_ceil_div_3() -> None:
     assert estimate_tokens("") == 0 and estimate_tokens("ab") == 1 and estimate_tokens("abcd") == 2
+
+
+def test_split_small_section_is_one_chunk() -> None:
+    nodes = _chain([1, 2, 2, 3])
+    chunks = split_sections(
+        nodes, resolve_parents(nodes), max_rows=10, budget_tokens=100, row_tokens=_tok
+    )
+    assert chunks == [Chunk(root=0, indices=[0, 1, 2, 3], oversized=[])]
+
+
+def test_split_by_children_keeps_parent_chunk_first() -> None:
+    # корень + два ребёнка по 3 узла; лимит 4 → шапка = корень + первый ребёнок, второй — отдельно
+    nodes = _chain([1, 2, 3, 3, 2, 3, 3])
+    chunks = split_sections(
+        nodes, resolve_parents(nodes), max_rows=4, budget_tokens=100, row_tokens=_tok
+    )
+    assert [c.indices for c in chunks] == [[0, 1, 2, 3], [4, 5, 6]]
+    assert chunks[1].root == 4
+
+
+def test_split_single_oversized_child_recurses_and_terminates() -> None:
+    # цепочка без сиблингов глубже лимита: каждый уровень становится чанком-звеном
+    nodes = _chain([1, 2, 3, 4, 5])
+    chunks = split_sections(
+        nodes, resolve_parents(nodes), max_rows=2, budget_tokens=100, row_tokens=_tok
+    )
+    assert [c.indices for c in chunks] == [[0], [1], [2], [3, 4]]
+
+
+def test_split_token_budget_and_row_too_large() -> None:
+    nodes = _chain([1, 2, 2])
+    big = {2: 50}  # _chain: id = индекс + 1 → второй узел (индекс 1)
+    chunks = split_sections(
+        nodes,
+        resolve_parents(nodes),
+        max_rows=10,
+        budget_tokens=20,
+        row_tokens=lambda n: big.get(n.id, 1),
+    )
+    assert chunks[0].indices == [0] and chunks[1].oversized == [1] and chunks[1].indices == [1]
+    assert chunks[2].indices == [2]
