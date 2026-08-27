@@ -119,3 +119,26 @@ def test_deprecated_llm_model_fails(monkeypatch) -> None:
     with pytest.raises(ValidationError) as exc:
         Settings(jwt_secret="x", _env_file=None)  # type: ignore[call-arg]
     assert "LLM_MODEL устарел" in str(exc.value)
+
+
+def test_tree_engine_defaults() -> None:
+    from app.core.config import Settings
+
+    s = Settings()  # env из conftest
+    assert s.matching_engine == "rag"
+    assert s.openrouter_tree_model == "anthropic/claude-sonnet-5"
+    assert s.tree_reasoning_effort == "low"
+    assert (s.tree_context_window, s.tree_chunk_rows, s.tree_min_chunk_rows) == (200_000, 120, 10)
+    assert (s.tree_output_reserve_per_row, s.tree_precedents_budget) == (48, 2_000)
+
+
+@pytest.mark.parametrize("env,value", [
+    ("MATCHING_ENGINE", "vector"), ("TREE_CONTEXT_WINDOW", "0"), ("TREE_CHUNK_ROWS", "0"),
+    ("TREE_MIN_CHUNK_ROWS", "500"), ("OPENROUTER_TREE_MODEL", "  "),
+])
+def test_tree_engine_validation(monkeypatch: pytest.MonkeyPatch, env: str, value: str) -> None:
+    from app.core.config import Settings
+
+    monkeypatch.setenv(env, value)
+    with pytest.raises(ValueError):
+        Settings(_env_file=None)  # type: ignore[call-arg]

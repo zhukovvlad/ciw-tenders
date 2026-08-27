@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     # Сколько кандидатов pgvector отдаёт арбитру. 5 (не 3): в тесных кластерах сестёр-статей
     # правильная статья выпадает из топ-3 на доли score (TECH_DEBT «Качество матчинга», Кейс C).
     match_top_k: int = 5
+    # Движок сопоставления (спека tree matching 2026-08-27): "rag" (текущий) | "tree".
+    matching_engine: str = "rag"
+    openrouter_tree_model: str = "anthropic/claude-sonnet-5"
+    tree_reasoning_effort: str = "low"     # без ограничения Sonnet 5 давал ×3 completion-токенов
+    tree_context_window: int = 200_000     # окно модели, задаётся явно
+    tree_chunk_rows: int = 120
+    tree_min_chunk_rows: int = 10
+    tree_output_reserve_per_row: int = 48
+    tree_precedents_budget: int = 2_000
     embedding_base_url: str = "https://openrouter.ai/api/v1"
     embedding_model: str = "google/gemini-embedding-2"
     # LLM-арбитр матчинга — переключаемый провайдер.
@@ -106,6 +115,16 @@ class Settings(BaseSettings):
             raise ValueError("CLASSIFIER_BATCH_SIZE должен быть > 0")
         if self.match_top_k <= 0:
             raise ValueError("MATCH_TOP_K должен быть > 0 (иначе арбитр не получит кандидатов)")
+        if self.matching_engine not in ("rag", "tree"):
+            raise ValueError("MATCHING_ENGINE должен быть 'rag' или 'tree'")
+        if not self.openrouter_tree_model.strip():
+            raise ValueError("OPENROUTER_TREE_MODEL не может быть пустым")
+        if self.tree_context_window <= 0 or self.tree_chunk_rows <= 0:
+            raise ValueError("TREE_CONTEXT_WINDOW и TREE_CHUNK_ROWS должны быть > 0")
+        if not 1 <= self.tree_min_chunk_rows <= self.tree_chunk_rows:
+            raise ValueError("TREE_MIN_CHUNK_ROWS должен быть в [1, TREE_CHUNK_ROWS]")
+        if self.tree_output_reserve_per_row <= 0 or self.tree_precedents_budget < 0:
+            raise ValueError("TREE_OUTPUT_RESERVE_PER_ROW > 0, TREE_PRECEDENTS_BUDGET >= 0")
         return self
 
 
