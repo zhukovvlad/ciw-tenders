@@ -86,6 +86,8 @@ class FundPrecedent:
     article_code: str
     article_name: str
     votes: int
+    article_id: int            # якорь фонда
+    key: str                   # полный ключ v3 (имя + parent_article_code)
 
 @dataclass(frozen=True, slots=True)
 class SectionMatchRequest:
