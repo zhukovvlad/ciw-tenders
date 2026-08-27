@@ -109,6 +109,8 @@
     "pendingRows_other": "Без решения — {{count}} спорных строк. Завершить всё равно? Возобновить можно в любой момент.",
     "errorProcessing": "Ошибка обработки",
     "aiRecommendation": "Рекомендация AI",
+    "yourChoice": "Ваш выбор",
+    "systemRecommendationLabel": "Рекомендация системы",
     "searchPlaceholder": "Нет верного — искать в справочнике…",
     "nothingFound": "Ничего не найдено",
     "leaveNoPair": "Оставить без пары",

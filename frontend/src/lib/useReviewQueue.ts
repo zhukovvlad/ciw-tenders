@@ -21,6 +21,7 @@ export interface ReviewQueue {
   origin: CardOrigin
   canUndo: boolean
   openFromGrid: (rowNumber: number) => void
+  navigateTo: (rowNumber: number) => void
   skip: () => CommitExit
   undo: () => void
   committed: (rowNumber: number) => CommitExit
@@ -34,15 +35,23 @@ interface Selection {
 }
 
 export function useReviewQueue(state: ReviewState): ReviewQueue {
-  const initialOrder = () =>
-    state.rows
-      .filter(requiresDecision)
-      .sort((a, b) => a.sourceIndex - b.sourceIndex)
-      .map((r) => r.row_number)
-
-  const [order, setOrder] = useState<number[]>(initialOrder)
   const [undoStack, setUndoStack] = useState<number[]>([])
   const [selection, setSelection] = useState<Selection | null>(null)
+  // Позиция скраббера: sourceIndex последней обработанной строки. Следующая
+  // активная — первая нерешённая СТРОГО ПОСЛЕ неё по порядку документа, с
+  // обёрткой к самой ранней. null — сессия только началась, ищем с начала.
+  // Заменяет прежнее переупорядочивание order: оператор движется в одном
+  // направлении по смете, а полоса лишь переставляет точку продолжения.
+  const [position, setPosition] = useState<number | null>(null)
+  // Инвариант PR-B «ошибка PATCH → строка становится следующей». Позиции для
+  // этого мало: commitFailed пиннит оператора на строке, которую он решает
+  // сейчас, а её committed перезапишет позицию на «после себя» — откатившаяся
+  // (она обычно раньше по документу) снова уехала бы в хвост. Поэтому
+  // отдельный список, проверяемый ПЕРЕД позицией.
+  // Именно СПИСОК, не одиночный слот: два PATCH-а бывают in-flight и падают
+  // оба — слот затёр бы первую откатившуюся строку, а прежний order держал
+  // обе. Порядок «последний откат первым», как делало [rowNumber, ...rest].
+  const [priorities, setPriorities] = useState<number[]>([])
   // Решённые В ЭТОЙ СЕССИИ (оптимистично, до/независимо от ответа PATCH):
   // decisionFor обновится только после dispatch снаружи — хук не ждёт этого.
   // Именно МНОЖЕСТВО, не undoStack: стек — мультисет (повторный коммит той же
@@ -64,9 +73,10 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
   const [prevIdsKey, setPrevIdsKey] = useState(idsKey)
   if (prevIdsKey !== idsKey) {
     setPrevIdsKey(idsKey)
-    setOrder(initialOrder())
     setUndoStack([])
     setSelection(null)
+    setPosition(null)
+    setPriorities([])
     // Сброс сессии — мутировать ref во время рендера здесь безопасно: ветка
     // выполняется однократно на смену набора и не участвует в выводе JSX.
     // eslint-disable-next-line react-hooks/refs
@@ -78,12 +88,15 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     [state.rows]
   )
 
+  // Очередь спорных в порядке документа. НЕИЗМЕНЯЕМА: в позиционной модели ни
+  // skip, ни commitFailed её не переупорядочивают — «следующую» задают
+  // position/priorities, а не порядок массива.
   const queue = useMemo(
     () =>
-      order
-        .map((n) => byNum.get(n))
-        .filter((r): r is MatchRow => r !== undefined),
-    [order, byNum]
+      state.rows
+        .filter(requiresDecision)
+        .sort((a, b) => a.sourceIndex - b.sourceIndex),
+    [state.rows]
   )
 
   // Чтение sessionDecided во время рендера сознательно: набор меняется только
@@ -95,7 +108,26 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     !sessionDecided.current.has(r.row_number)
 
   // eslint-disable-next-line react-hooks/refs -- см. комментарий у sessionDecided/isPending
-  const autoActive = queue.find(isPending) ?? null
+  const pending = queue.filter(isPending)
+
+  const nextByPosition = (): MatchRow | null => {
+    if (pending.length === 0) return null
+    if (position === null) return pending[0]
+    // Обёртка к самой ранней нерешённой, если впереди по документу пусто.
+    return pending.find((r) => r.sourceIndex > position) ?? pending[0]
+  }
+
+  // Откаты PATCH идут ПЕРЕД позицией. Берём первый ещё нерешённый: список
+  // упорядочен «последний откат первым», а не-pending элементы просто
+  // пропускаются, поэтому чистить его обязательно не нужно.
+  const priorityRow =
+    priorities
+      .map((n) => byNum.get(n))
+      .find((r): r is MatchRow => r !== undefined && pending.includes(r)) ??
+    null
+
+  const autoActive = priorityRow ?? nextByPosition()
+
   const activeRow = selection ? (byNum.get(selection.row) ?? null) : autoActive
   const origin: CardOrigin = selection?.origin ?? { kind: "flow" }
 
@@ -120,21 +152,51 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
   const openFromGrid = (rowNumber: number) =>
     setSelection({ row: rowNumber, origin: { kind: "grid" } })
 
+  // Скраббер: клик по строке окружения. От openFromGrid отличается только
+  // origin — после решения оператор продолжает поток от этой позиции, а не
+  // возвращается в грид. В undo-стек не пишется: навигация ≠ решение.
+  const navigateTo = (rowNumber: number) =>
+    setSelection({ row: rowNumber, origin: { kind: "flow" } })
+
+  // Позиция = sourceIndex обработанной строки; следующая ищется строго после.
+  const advanceFrom = (rowNumber: number) => {
+    const si = byNum.get(rowNumber)?.sourceIndex
+    if (si !== undefined) setPosition(si)
+  }
+
   const deselect = () => setSelection(null)
 
   const skip = (): CommitExit => {
     const n = activeRow?.row_number
     if (n === undefined) return { kind: "next" }
-    if (!order.includes(n)) {
-      // Ad-hoc строка (confident/фонд из грида): «пропустить» = передумал —
-      // порядок спорных НЕ загрязняем, уходим туда, откуда пришли
+    // N = «пропустить», поэтому строка выходит из приоритетов: иначе приоритет
+    // (он проверяется раньше позиции) вернул бы её тем же рендером и оператор
+    // залип бы на ней. Строка остаётся нерешённой и подхватится обёрткой.
+    setPriorities((p) => p.filter((x) => x !== n))
+    if (!queue.some((r) => r.row_number === n)) {
+      // Ad-hoc строка (confident/фонд): «пропустить» = передумал — уходим
+      // туда, откуда пришли.
       const exit = exitFor(origin)
       if (exit.kind === "row")
         setSelection({ row: exit.rowNumber, origin: { kind: "flow" } })
       else setSelection(null)
+      // Позицию двигаем ТОЛЬКО если пришли потоком/полосой: тогда оператор
+      // движется по документу и ждёт продолжения после этой строки. Из грида
+      // (origin=grid) выход возвращает в таблицу, а undo — это отступление;
+      // в обоих случаях трогать позицию потока нельзя.
+      if (origin.kind === "flow") advanceFrom(n)
       return exit
     }
-    setOrder((o) => [...o.filter((x) => x !== n), n])
+    // Пропущенная строка остаётся нерешённой на своём месте в порядке
+    // документа и подхватится обёрткой в конце прохода — переупорядочивать
+    // очередь больше не нужно.
+    // Позицию двигаем ТОЛЬКО при origin=flow — тот же гейт, что и в
+    // ad-hoc-ветке четырьмя строками выше и в committed: спорная строка
+    // может быть открыта ИЗ ГРИДА точечно (это не проход потока), и тогда
+    // трогать позицию потока нельзя — скраббер заменяет только
+    // flow-переходы, а выход из грида/undo он не поглощает (спека «Границы:
+    // что скраббер НЕ поглощает»).
+    if (origin.kind === "flow") advanceFrom(n)
     setSelection(null)
     return { kind: "next" }
   }
@@ -151,10 +213,24 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
   const committed = (rowNumber: number): CommitExit => {
     setUndoStack((s) => [...s, rowNumber])
     sessionDecided.current.add(rowNumber)
+    // Решена — приоритет больше не нужен (фильтр по pending в autoActive и так
+    // бы её пропустил, но не копим мусор в списке).
+    setPriorities((p) => p.filter((x) => x !== rowNumber))
     const exit = exitFor(origin)
     if (exit.kind === "row")
       setSelection({ row: exit.rowNumber, origin: { kind: "flow" } })
-    else setSelection(null)
+    else {
+      // Позицию двигаем ТОЛЬКО при origin=flow — тот же гейт, что и в skip.
+      // exit.kind тут "next" или "grid"; "grid" бывает исключительно при
+      // origin=grid и уже отсекается условием, но exit.kind==="next" также
+      // достижим из origin=undo (returnTo===null) — а undo это отступление,
+      // не проход по документу, и позицию потока трогать нельзя: иначе после
+      // решения строки из грида (или после отступления) оператор при
+      // возврате в поток «прыгнет» на sourceIndex этой строки вместо того,
+      // чтобы продолжить с места, где был до захода туда.
+      if (origin.kind === "flow") advanceFrom(rowNumber)
+      setSelection(null)
+    }
     return exit
   }
 
@@ -164,13 +240,21 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
       return i === -1 ? s : [...s.slice(0, i), ...s.slice(i + 1)]
     })
     sessionDecided.current.delete(rowNumber)
-    setOrder((o) =>
-      o.includes(rowNumber)
-        ? [rowNumber, ...o.filter((x) => x !== rowNumber)]
-        : o
+    // Откатившаяся строка — следующая, как только оператор закончит текущую.
+    // Добавляем В ГОЛОВУ и НЕ затираем прежние: два in-flight PATCH-а могут
+    // упасть оба, и терять первую откатившуюся строку нельзя.
+    // Пушим ТОЛЬКО строку из очереди спорных — ad-hoc (confident/фонд) туда
+    // не годится: она не найдётся автоматической выборкой и осталась бы в
+    // priorities навечно (skip чистит только активную, committed — только
+    // решённую). Сегодня безобидно (autoActive фильтрует по pending, а
+    // pending ⊆ queue), но список не должен копить мусорные записи.
+    setPriorities((p) =>
+      queue.some((r) => r.row_number === rowNumber)
+        ? [rowNumber, ...p.filter((x) => x !== rowNumber)]
+        : p.filter((x) => x !== rowNumber)
     )
     // Не выдёргивать оператора из текущей строки: пиннуть её, если явного
-    // выбора не было — вернувшаяся строка станет СЛЕДУЮЩЕЙ (голова очереди).
+    // выбора не было.
     // ВАЖНО: активная — из ref-а, НЕ из замыкания: commitFailed зовётся из
     // .then PATCH-а, а замыкание захвачено рендером ДО committed(), где
     // активной была сама упавшая строка (пин-тест «STALE CLOSURE»)
@@ -189,6 +273,7 @@ export function useReviewQueue(state: ReviewState): ReviewQueue {
     origin,
     canUndo: undoStack.length > 0,
     openFromGrid,
+    navigateTo,
     skip,
     undo,
     committed,

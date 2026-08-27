@@ -30,7 +30,9 @@ interface ReviewCardProps {
   contextStrip?: ReactNode // полоса окружения (спека 3.5 §3 п.2): карточка не знает о ревью-стейте
 }
 
-/** Enter активен ⇔ блок рекомендации отрисован (правило: клавиша ⇔ элемент) */
+/** Рекомендация отрисована? Enter активен ⇔ она отрисована И строка не решена
+ *  (второй множитель — гейт canConfirm в ReviewScreen: на решённой строке
+ *  клавиша инертна, и бейджа Enter нет ни у одной из двух отрисовок) */
 // eslint-disable-next-line react-refresh/only-export-components -- hasRecommendation — гейт-хелпер, используемый экраном ревью (Task 9)
 export function hasRecommendation(row: MatchRow): boolean {
   return (
@@ -73,6 +75,30 @@ export function ReviewCard({
   const syntheticRecommendation =
     recommended &&
     !row.candidates.some((c) => c.article_code === row.matched_code)
+
+  // Блок «Ваш выбор» (спека фичи 1): решение оператора, отличающееся от
+  // рекомендации системы — override, выбор не-рекомендованного кандидата или
+  // выбор из поиска на строке без рекомендации (matched_code === null).
+  // Подтверждение самой рекомендации блок НЕ показывает: её подсветка и так
+  // верна. На нерешённых строках любых статусов блок не появляется по kind —
+  // отдельная ветка по row.status не нужна и вредна (убила бы полезный
+  // случай «решённая через поиск error-строка»).
+  const yourChoice =
+    decision.kind === "confirmed" && decision.code !== row.matched_code
+      ? {
+          code: decision.code,
+          name: decision.name,
+          // Крошка: кандидат по коду → finalBreadcrumb, но ТОЛЬКО если он про
+          // этот же код (в переходном окне до синка final_* могут отставать) →
+          // иначе крошки нет.
+          breadcrumb:
+            row.candidates.find((c) => c.article_code === decision.code)
+              ?.breadcrumb ??
+            (decision.code === row.final_code
+              ? row.finalBreadcrumb
+              : undefined),
+        }
+      : null
 
   // Дебаунс поиска (~250мс): не дёргаем /articles/search на каждый символ.
   // searchArticles сам отсекает запросы короче 2 символов (вернёт []), поэтому
@@ -119,6 +145,32 @@ export function ReviewCard({
         {/* 2b. Окружение (спека 3.5): крошка → строка → окружение → кандидаты */}
         {contextStrip}
 
+        {/* 2c. Блок «Ваш выбор» (спека фичи 1). Стоит ДО тернарника по status,
+            поэтому на error-строке автоматически оказывается над Alert-ом:
+            сначала выбор оператора, затем диагностика исходной ошибки. */}
+        {yourChoice && (
+          <div
+            data-testid="your-choice"
+            className="flex items-center gap-3 rounded-md border border-primary px-3 py-2 text-sm shadow-[var(--ds-glow-violet)]"
+          >
+            <span className="shrink-0 text-xs text-muted-foreground">
+              ★ {t("review.yourChoice")}
+            </span>
+            <span className="font-mono text-xs text-muted-foreground">
+              {yourChoice.code}
+            </span>
+            <span className="flex min-w-0 flex-1 items-baseline gap-2">
+              <span>{yourChoice.name}</span>
+              {yourChoice.breadcrumb?.length ? (
+                <CrumbTrail
+                  levels={yourChoice.breadcrumb}
+                  className="min-w-0 truncate"
+                />
+              ) : null}
+            </span>
+          </div>
+        )}
+
         {row.status === "error" ? (
           <Alert variant="destructive">
             <Badge variant="destructive" className="mb-1.5">
@@ -132,6 +184,23 @@ export function ReviewCard({
           </Alert>
         ) : (
           <>
+            {/* Демоушен рекомендации: подпись появляется только вместе с
+                блоком «Ваш выбор» — там она различает выбор оператора и
+                предложение системы. На обычной нерешённой строке подпись
+                избыточна, поэтому вид карточки в основном потоке не меняется.
+                Гейт — syntheticRecommendation, не recommended: подпись обязана
+                существовать ровно тогда, когда есть отдельная секция
+                рекомендации, которую она подписывает. Когда рекомендация
+                сидит внутри списка candidates (matched_code — один из них),
+                различие уже несёт чип «Рекомендация AI» на этой строке, а
+                подпись над всем списком произвольных кандидатов была бы
+                враньём. */}
+            {yourChoice && syntheticRecommendation && (
+              <div className="text-[11px] tracking-wide text-muted-foreground uppercase">
+                {t("review.systemRecommendationLabel")}
+              </div>
+            )}
+
             {/* 3. Рекомендация (гейт синтетической рекомендации) */}
             {syntheticRecommendation && (
               <button
@@ -170,9 +239,14 @@ export function ReviewCard({
                     t("review.aiRecommendation")
                   )}
                 </span>
-                <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
-                  Enter
-                </kbd>
+                {/* Инвариант «клавиша ⇔ элемент»: на решённой строке Enter
+                    инертен (защита выбора оператора от перезаписи одним
+                    нажатием), поэтому и бейджа нет. Клик остаётся. */}
+                {decision.kind === "pending" && (
+                  <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
+                    Enter
+                  </kbd>
+                )}
               </button>
             )}
 
@@ -227,9 +301,13 @@ export function ReviewCard({
                           t("review.aiRecommendation")
                         )}
                       </span>
-                      <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
-                        Enter
-                      </kbd>
+                      {/* тот же инвариант, второе место отрисовки
+                          рекомендации: matched_code входит в candidates */}
+                      {decision.kind === "pending" && (
+                        <kbd className="rounded bg-secondary px-1.5 text-xs text-[var(--ds-text-2)]">
+                          Enter
+                        </kbd>
+                      )}
                     </>
                   )}
                 </button>
@@ -302,7 +380,7 @@ export function ReviewCard({
           <LegendItem
             keyLabel="Enter"
             text={t("review.hintConfirm")}
-            muted={!recommended}
+            muted={!recommended || decision.kind !== "pending"}
           />
           <LegendItem keyLabel="N" text={t("review.hintSkip")} muted={false} />
           <LegendItem

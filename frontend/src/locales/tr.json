@@ -109,6 +109,8 @@
     "pendingRows_other": "Karar verilmedi — {{count}} tartışmalı satır. Yine de tamamlansın mı? İstediğiniz zaman devam edebilirsiniz.",
     "errorProcessing": "İşleme hatası",
     "aiRecommendation": "AI önerisi",
+    "yourChoice": "Seçiminiz",
+    "systemRecommendationLabel": "Sistem önerisi",
     "searchPlaceholder": "Doğrusu yok — sözlükte ara…",
     "nothingFound": "Hiçbir şey bulunamadı",
     "leaveNoPair": "Eşleşme olmadan bırak",

@@ -860,3 +860,26 @@ LLM-арбитра, который такую строку и так призн�
 **Связано:** [classification.py](../backend/app/domain/classification.py),
 [test_classification.py](../backend/tests/test_classification.py),
 [devlog 2026-08-24](devlog/2026-08-24-org-filter-urban-block-phrase.md).
+
+## 🟢 `Enter` на кандидатных кнопках карточки коммитит рекомендацию (предсуществующее)
+
+Хоткеи ревью живут в window-listener'е ([useReviewKeyboard.ts](../frontend/src/lib/useReviewKeyboard.ts)), который
+игнорирует только editable-цели, но не кнопки. Поэтому при фокусе на кандидатной кнопке карточки `Enter`
+коммитит РЕКОМЕНДАЦИЮ, а не выбирает сфокусированного кандидата.
+
+Это было до ветки со скраббером и покрыто её пинами. Аналогичную коллизию на строках полосы окружения
+закрыли точечно — `onKeyDown` + `stopPropagation()` на кнопке полосы, с регресс-стражем в
+[ReviewScreen.test.tsx](../frontend/src/pages/estimate/ReviewScreen.test.tsx) (composed-тест: `Enter` на
+сфокусированной строке полосы не зовёт `onReview` и уводит карточку на эту строку; проверено, что без
+`onKeyDown` он падает).
+
+Системное лечение — учить `useReviewKeyboard` уступать `Enter` любому сфокусированному `button`
+(`e.target.closest("button")`) — чинит и кандидатный случай, и снимает точечную заплату с полосы.
+
+**Почему отложено:** не регресс, а давний перекос; правка меняет запинованное поведение кандидатных кнопок,
+поэтому требует своего решения и своих тестов, а в рамках скраббер-ветки расширяла бы область и рисковала
+чужими пинами.
+
+**Связано:** [useReviewKeyboard.ts](../frontend/src/lib/useReviewKeyboard.ts),
+[ContextStrip.tsx](../frontend/src/pages/estimate/ContextStrip.tsx),
+[devlog 2026-08-27](devlog/2026-08-27-review-card-choice-and-scrubber.md).

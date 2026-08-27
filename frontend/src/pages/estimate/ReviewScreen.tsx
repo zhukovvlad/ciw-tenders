@@ -121,7 +121,12 @@ export function ReviewScreen({
   useReviewKeyboard({
     enabled: view === "queue" && !readOnly && active !== null,
     candidateCount: active?.candidates.length ?? 0,
-    canConfirm: active ? hasRecommendation(active) : false,
+    // Enter активен только пока строка не решена: на решённой (её открыли из
+    // грида или полосы) он перезаписал бы выбор оператора одним нажатием.
+    canConfirm: active
+      ? hasRecommendation(active) &&
+        decisionFor(state, active).kind === "pending"
+      : false,
     onPick: (i) => {
       const c = active?.candidates[i]
       if (active && c)
@@ -288,7 +293,15 @@ export function ReviewScreen({
             decision={decisionFor(state, active)}
             canUndo={queue.canUndo}
             contextStrip={
-              <ContextStrip state={state} activeRowNumber={active.row_number} />
+              // onNavigate вешается ЗДЕСЬ, а не пробрасывается через
+              // ReviewCard: полоса инстанцируется в этом файле и попадает в
+              // карточку готовым узлом. Карточка о навигации ревью не знает —
+              // её инвариант (см. проп contextStrip в ReviewCard) цел.
+              <ContextStrip
+                state={state}
+                activeRowNumber={active.row_number}
+                onNavigate={queue.navigateTo}
+              />
             }
             onConfirmRecommendation={() =>
               commit(

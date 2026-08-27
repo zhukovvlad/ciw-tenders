@@ -47,9 +47,13 @@ function rightSide(
 export function ContextStrip({
   state,
   activeRowNumber,
+  onNavigate,
 }: {
   state: ReviewState
   activeRowNumber: number
+  // Скраббер (спека фичи 2): клик по строке делает её активной. Проп
+  // опциональный — без него полоса остаётся чистой справкой, как была.
+  onNavigate?: (rowNumber: number) => void
 }) {
   const { t } = useTranslation()
   const ordered = [...state.rows].sort((a, b) => a.sourceIndex - b.sourceIndex)
@@ -85,6 +89,62 @@ export function ContextStrip({
         const label = paths[g][paths[g].length - 1]
         const muted = r.status === "excluded" || r.status === "pending"
         const rs = rightSide(state, r)
+        const isActive = r.row_number === activeRowNumber
+        // Кликабельны те же строки, что в гриде: excluded/pending — контекст,
+        // не решения. Активная не кликабельна: клик по себе — no-op.
+        const clickable = onNavigate !== undefined && !muted && !isActive
+        const rowClass = cn(
+          "flex w-full items-center gap-2 border-l-2 border-transparent px-3 py-1.5 text-left",
+          isActive &&
+            "border-primary bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]",
+          muted && "opacity-60",
+          openers[g] && "font-medium",
+          // Аффорданс — словарь ГРИДА, не рамка кандидата: в покое полоса
+          // остаётся утопленной справкой, интерактивность проявляется только
+          // на hover (иначе вернулась бы проблема «полоса читается как
+          // кандидаты», этап 3.6). focus-visible — по конвенции ui/button.
+          clickable &&
+            "cursor-pointer outline-none hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50"
+        )
+        const inner = (
+          <>
+            <span className="font-mono text-muted-foreground">
+              {r.section_code}
+            </span>
+            <span
+              className={cn(
+                "truncate",
+                // Вторая ось открывашки (спека §2 решение #6): опускаем фон —
+                // рядовой сосед (не активная, не открывашка) приглушается, а
+                // открывашка остаётся на полном тоне + font-medium. Её классы
+                // не трогаются, изгородь 3.5 цела.
+                // excluded/pending исключены (спека §2 решение #6 финал): у
+                // них своя ось «тихо» — opacity-60; тон был бы двойным
+                // кодированием и риском двойного затухания на sunken.
+                !openers[g] && !isActive && !muted && "text-[var(--ds-text-2)]"
+              )}
+            >
+              {r.source_name}
+            </span>
+            {isActive ? (
+              // статус активной дублировал бы решаемое прямо сейчас (спека 3.5 §2)
+              <ArrowLeft
+                aria-label={t("review.youAreHere")}
+                className="ml-auto size-3 shrink-0 text-primary"
+              />
+            ) : (
+              <span
+                title={rs.title}
+                className={cn(
+                  "ml-auto shrink-0 text-muted-foreground",
+                  rs.mono && "font-mono"
+                )}
+              >
+                → {t(rs.text)}
+              </span>
+            )}
+          </>
+        )
         return (
           <div key={r.row_number}>
             {divider && (
@@ -99,57 +159,36 @@ export function ContextStrip({
                 )}
               </div>
             )}
-            <div
-              data-row
-              data-opener={openers[g] || undefined}
-              data-active={r.row_number === activeRowNumber || undefined}
-              className={cn(
-                "flex items-center gap-2 border-l-2 border-transparent px-3 py-1.5",
-                r.row_number === activeRowNumber &&
-                  "border-primary bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]",
-                muted && "opacity-60",
-                openers[g] && "font-medium"
-              )}
-            >
-              <span className="font-mono text-muted-foreground">
-                {r.section_code}
-              </span>
-              <span
-                className={cn(
-                  "truncate",
-                  // Вторая ось открывашки (спека §2 решение #6): опускаем фон —
-                  // рядовой сосед (не активная, не открывашка) приглушается, а
-                  // открывашка остаётся на полном тоне + font-medium. Её классы
-                  // не трогаются, изгородь 3.5 цела.
-                  // excluded/pending исключены (спека §2 решение #6 финал): у
-                  // них своя ось «тихо» — opacity-60; тон был бы двойным
-                  // кодированием и риском двойного затухания на sunken.
-                  !openers[g] &&
-                    r.row_number !== activeRowNumber &&
-                    !muted &&
-                    "text-[var(--ds-text-2)]"
-                )}
+            {clickable ? (
+              <button
+                type="button"
+                data-row
+                data-opener={openers[g] || undefined}
+                onClick={() => onNavigate(r.row_number)}
+                onKeyDown={(e) => {
+                  // Глушим Enter ДО window: useReviewKeyboard вешает
+                  // глобальный keydown, который отличает только editable-таргеты
+                  // (input/textarea/…), не кнопки — Enter здесь долетел бы до
+                  // хэндлера, тот preventDefault()-нул бы нативную активацию
+                  // кнопки и вместо навигации закоммитил бы рекомендацию АКТИВНОЙ
+                  // карточки (не этой строки). stopPropagation даёт нативному
+                  // click (→ onNavigate) отработать как обычно.
+                  if (e.key === "Enter") e.stopPropagation()
+                }}
+                className={rowClass}
               >
-                {r.source_name}
-              </span>
-              {r.row_number === activeRowNumber ? (
-                // статус активной дублировал бы решаемое прямо сейчас (спека 3.5 §2)
-                <ArrowLeft
-                  aria-label={t("review.youAreHere")}
-                  className="ml-auto size-3 shrink-0 text-primary"
-                />
-              ) : (
-                <span
-                  title={rs.title}
-                  className={cn(
-                    "ml-auto shrink-0 text-muted-foreground",
-                    rs.mono && "font-mono"
-                  )}
-                >
-                  → {t(rs.text)}
-                </span>
-              )}
-            </div>
+                {inner}
+              </button>
+            ) : (
+              <div
+                data-row
+                data-opener={openers[g] || undefined}
+                data-active={isActive || undefined}
+                className={rowClass}
+              >
+                {inner}
+              </div>
+            )}
           </div>
         )
       })}
