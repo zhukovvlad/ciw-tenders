@@ -153,3 +153,32 @@ def test_tree_engine_validation(monkeypatch: pytest.MonkeyPatch, env: str, value
     monkeypatch.setenv(env, value)
     with pytest.raises(ValueError):
         Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+def test_tree_call_budget_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    # P1-2: собственный бюджет tree-вызова, отдельный от ai_call_timeout_s/transient_retry_budget —
+    # регресс-гард на дефолты, как test_tree_engine_defaults.
+    from app.core.config import Settings
+
+    monkeypatch.delenv("TREE_CALL_TIMEOUT_S", raising=False)
+    monkeypatch.delenv("TREE_RETRY_BUDGET", raising=False)
+    s = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert s.tree_call_timeout_s == 180.0
+    assert s.tree_retry_budget == 2
+    # инвариант из спеки должен выполняться на дефолтах с запасом
+    assert s.tree_call_timeout_s * s.tree_retry_budget < s.task_soft_time_limit_s
+
+
+@pytest.mark.parametrize("env,value", [
+    ("TREE_CALL_TIMEOUT_S", "0"),
+    ("TREE_CALL_TIMEOUT_S", "-1"),
+    ("TREE_RETRY_BUDGET", "0"),
+    # 400*2=800 >= task_soft_time_limit_s=600 → нарушение кросс-полевого инварианта
+    ("TREE_CALL_TIMEOUT_S", "400"),
+])
+def test_tree_call_budget_validation(monkeypatch: pytest.MonkeyPatch, env: str, value: str) -> None:
+    from app.core.config import Settings
+
+    monkeypatch.setenv(env, value)
+    with pytest.raises(ValueError):
+        Settings(_env_file=None)  # type: ignore[call-arg]

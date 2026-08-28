@@ -169,8 +169,8 @@ def get_tree_matcher() -> TreeMatcher:
         model=settings.openrouter_tree_model,
         reasoning_effort=settings.tree_reasoning_effort,
         output_reserve_per_row=settings.tree_output_reserve_per_row,
-        timeout_s=max(settings.ai_call_timeout_s, 300.0),
-        retry_budget=settings.transient_retry_budget,
+        timeout_s=settings.tree_call_timeout_s,
+        retry_budget=settings.tree_retry_budget,
     )
 
 

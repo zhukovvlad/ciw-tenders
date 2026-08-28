@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     ai_call_timeout_s: float = 30.0       # hard per-call timeout
     transient_retry_budget: int = 3       # попыток на один вызов до TransientError
 
+    # Отдельный бюджет tree-вызова (P1-2 codex round 2): один чанк не должен быть способен
+    # пережить бюджет всей Celery-задачи. С дефолтами 180×2=360 < task_soft_time_limit_s=600.
+    tree_call_timeout_s: float = 180.0    # hard per-call timeout для tree-матчера
+    tree_retry_budget: int = 2            # попыток на один tree-вызов до TransientError
+
     # Bounded gate-retry: ожидание готовности справочника (DictionaryNotReadyError → self.retry).
     gate_retry_max: int = 30
     gate_retry_backoff_s: float = 20.0
@@ -125,6 +130,15 @@ class Settings(BaseSettings):
             raise ValueError("TREE_MIN_CHUNK_ROWS должен быть в [1, TREE_CHUNK_ROWS]")
         if self.tree_output_reserve_per_row <= 0 or self.tree_precedents_budget < 0:
             raise ValueError("TREE_OUTPUT_RESERVE_PER_ROW > 0, TREE_PRECEDENTS_BUDGET >= 0")
+        if self.tree_call_timeout_s <= 0:
+            raise ValueError("TREE_CALL_TIMEOUT_S должен быть > 0")
+        if self.tree_retry_budget < 1:
+            raise ValueError("TREE_RETRY_BUDGET должен быть >= 1")
+        if self.tree_call_timeout_s * self.tree_retry_budget >= self.task_soft_time_limit_s:
+            raise ValueError(
+                "TREE_CALL_TIMEOUT_S * TREE_RETRY_BUDGET должен быть строго меньше "
+                "TASK_SOFT_TIME_LIMIT_S — иначе один чанк способен пережить бюджет всей задачи"
+            )
         return self
 
 
