@@ -86,6 +86,18 @@ def test_context_rejected_confident_ancestor_is_transparent() -> None:
     assert effective_ancestor_context(1, nodes, p) == AncestorContext(None, False)
 
 
+def test_context_rejected_needs_review_ancestor_is_transparent() -> None:
+    # needs_review-предок, но оператор его отклонил (review_status="rejected" — «статьи нет»,
+    # решение, а не неуверенность): барьер НЕ должен взводиться — rejected прозрачен, как
+    # excluded/no_match/error/pending (спека §3.3, таблица, строка 4), и как уже делает hint_for.
+    nodes = [
+        _tn(1, 1, "1", status="needs_review", review_status="rejected"),
+        _tn(2, 2, "1.1"),
+    ]
+    p = resolve_parents(nodes)
+    assert effective_ancestor_context(1, nodes, p) == AncestorContext(None, False)
+
+
 def test_context_barrier_with_no_trusted_ancestor() -> None:
     # needs_review-корень без доверенного предка выше: барьер взведён, код отсутствует —
     # именно это состояние гасит fund_key_v3 (спека §6.1) на самой частой форме сомнительной цепочки

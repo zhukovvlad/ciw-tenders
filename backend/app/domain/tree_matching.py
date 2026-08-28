@@ -49,7 +49,7 @@ def effective_ancestor_context(
             and anc.matched_code
         ):
             return AncestorContext(anc.matched_code, barrier)
-        if anc.status in UNCERTAIN_STATUSES:
+        if anc.status in UNCERTAIN_STATUSES and anc.review_status == "unreviewed":
             barrier = True
         p = parents[p]
     return AncestorContext(None, barrier)
