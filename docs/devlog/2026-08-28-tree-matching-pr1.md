@@ -129,12 +129,18 @@ match). `self._tree` — `TreeMatchingRunner | None`, `None` по умолчан
 - **`tree_call_timeout_s: float`** = `180.0` — hard per-call timeout для tree-матчера, отдельно от
   общего `ai_call_timeout_s` (P1-2 codex round 2); валидатор требует `> 0`.
 - **`tree_retry_budget: int`** = `2` — попыток на один tree-вызов до `TransientError`, отдельно от
-  общего `transient_retry_budget`; валидатор требует `>= 1`. Плюс кросс-полевой инвариант:
-  `tree_call_timeout_s * tree_retry_budget` должно быть строго меньше `task_soft_time_limit_s` —
-  иначе один чанк способен пережить бюджет всей Celery-задачи целиком (с дефолтами `180 × 2 = 360 <
-  600`). Это и есть причина, по которой tree-вызов не переиспользует `ai_call_timeout_s`/
-  `transient_retry_budget`: у RAG-движка (много мелких построчных вызовов) такого инварианта нет и
-  быть не должно, а у tree (один тяжёлый вызов на чанк) — обязан быть.
+  общего `transient_retry_budget`; валидатор требует `>= 1`. Плюс кросс-полевой инвариант (правки
+  round 3 code review): `tree_call_timeout_s * tree_retry_budget + backoff_total +
+  _TREE_BUDGET_MARGIN_S` должно быть `<= task_soft_time_limit_s`, где `backoff_total` — точный
+  худший случай `retry_transient` (`app/infrastructure/retry.py`, экспоненциальный бэкофф между
+  попытками, `_BACKOFF_BASE_S * (2**(tree_retry_budget - 1) - 1)`; `_BACKOFF_BASE_S` продублирован
+  в `config.py`, т.к. он не может импортировать `infrastructure/`, синхронизацию проверяет
+  `test_backoff_base_mirrors_retry_module`), а `_TREE_BUDGET_MARGIN_S = 30.0` — операционный запас
+  на то, что происходит вне таймаута одной попытки (соединение, собственная работа раннера на
+  чанк). Иначе один чанк способен пережить бюджет всей Celery-задачи целиком (с дефолтами
+  `180 × 2 + 0.5 + 30 = 390.5 <= 600`). Это и есть причина, по которой tree-вызов не переиспользует
+  `ai_call_timeout_s`/`transient_retry_budget`: у RAG-движка (много мелких построчных вызовов)
+  такого инварианта нет и быть не должно, а у tree (один тяжёлый вызов на чанк) — обязан быть.
 
 Две доли бюджета чанка — НЕ settings, а модульные константы в `app/services/tree_matching_service.py`
 (не настраиваются через `.env`, зашиты в коде):

@@ -182,3 +182,32 @@ def test_tree_call_budget_validation(monkeypatch: pytest.MonkeyPatch, env: str, 
     monkeypatch.setenv(env, value)
     with pytest.raises(ValueError):
         Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+def test_backoff_base_mirrors_retry_module() -> None:
+    # config.py не может импортировать infrastructure/ (направление зависимостей), поэтому
+    # `_BACKOFF_BASE_S` продублирован как отдельная константа — этот тест единственный, кто
+    # видит обе копии сразу и ловит расхождение, если кто-то поменяет шаг бэкоффа в одном
+    # месте и забудет про другое (тот же паттерн, что `_OUTPUT_MARGIN` в
+    # tree_matching_service.py / openrouter_tree_matcher.py, см.
+    # test_openrouter_tree_matcher.py).
+    from app.core.config import _BACKOFF_BASE_S as _CONFIG_BACKOFF_BASE_S
+    from app.infrastructure.retry import _BACKOFF_BASE_S as _RETRY_BACKOFF_BASE_S
+
+    assert _CONFIG_BACKOFF_BASE_S == _RETRY_BACKOFF_BASE_S
+
+
+def test_tree_call_budget_ignores_backoff_and_margin_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Round 3 P2: прежняя проверка сверяла только TREE_CALL_TIMEOUT_S * TREE_RETRY_BUDGET,
+    # игнорируя экспоненциальный бэкофф между попытками (retry.py::retry_transient) и
+    # операционный запас. 299.9 * 2 = 599.8 < 600 — старая проверка это пропускала, но
+    # истинный худший случай (599.8 + бэкофф 0.5 = 600.3, плюс операционный запас) уже
+    # превышает TASK_SOFT_TIME_LIMIT_S=600.
+    from app.core.config import Settings
+
+    monkeypatch.setenv("TREE_CALL_TIMEOUT_S", "299.9")
+    monkeypatch.setenv("TREE_RETRY_BUDGET", "2")
+    with pytest.raises(ValueError):
+        Settings(_env_file=None)  # type: ignore[call-arg]

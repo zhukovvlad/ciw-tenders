@@ -7,6 +7,21 @@ from functools import lru_cache
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Зеркало `app/infrastructure/retry.py::_BACKOFF_BASE_S` — `config.py` не может импортировать
+# `infrastructure/` (направление зависимостей api → services → domain ← infrastructure), поэтому
+# константа продублирована. Синхронизацию проверяет
+# `test_config.py::test_backoff_base_mirrors_retry_module`.
+_BACKOFF_BASE_S = 0.5
+
+# Операционный запас для инварианта бюджета tree-вызова (см. `_validate_llm` ниже): устанавливает
+# соединение (DNS/TLS-хендшейк до OpenRouter) и собственная работа раннера на чанк (сборка чанка,
+# CAS-запись, логирование) занимают время СНАРУЖИ таймаута одной попытки (`tree_call_timeout_s`
+# мерит только сам HTTP-вызов), но по-прежнему тратят soft time limit Celery-задачи. Число не
+# измерено профилированием — выбрано с явным запасом (десятки секунд) на медленный
+# DNS/TLS-хендшейк и GC-паузы под нагрузкой; дефолты (180×2=360 + 0.5 backoff + 30 margin = 390.5)
+# оставляют больше 200с запаса до `task_soft_time_limit_s=600`.
+_TREE_BUDGET_MARGIN_S = 30.0
+
 
 class Settings(BaseSettings):
     """Настройки читаются из переменных окружения / .env (см. .env.example)."""
@@ -134,10 +149,22 @@ class Settings(BaseSettings):
             raise ValueError("TREE_CALL_TIMEOUT_S должен быть > 0")
         if self.tree_retry_budget < 1:
             raise ValueError("TREE_RETRY_BUDGET должен быть >= 1")
-        if self.tree_call_timeout_s * self.tree_retry_budget >= self.task_soft_time_limit_s:
+        # Точный худший случай `retry_transient` (retry.py): между попытками 1..budget-1 —
+        # экспоненциальный бэкофф `_BACKOFF_BASE_S * 2**attempt`, поэтому суммарный бэкофф —
+        # не 0 (как в прежней проверке), а геометрическая прогрессия. Плюс операционный запас
+        # `_TREE_BUDGET_MARGIN_S` на то, что происходит вне таймаута самого вызова.
+        backoff_total = _BACKOFF_BASE_S * (2 ** (self.tree_retry_budget - 1) - 1)
+        worst_case = (
+            self.tree_call_timeout_s * self.tree_retry_budget
+            + backoff_total
+            + _TREE_BUDGET_MARGIN_S
+        )
+        if worst_case > self.task_soft_time_limit_s:
             raise ValueError(
-                "TREE_CALL_TIMEOUT_S * TREE_RETRY_BUDGET должен быть строго меньше "
-                "TASK_SOFT_TIME_LIMIT_S — иначе один чанк способен пережить бюджет всей задачи"
+                "TREE_CALL_TIMEOUT_S * TREE_RETRY_BUDGET + бэкофф между попытками "
+                f"(шаг {_BACKOFF_BASE_S}s, экспоненциальный, см. retry.py) + операционный "
+                f"запас {_TREE_BUDGET_MARGIN_S}s должны быть <= TASK_SOFT_TIME_LIMIT_S — "
+                "иначе один чанк способен пережить бюджет всей задачи"
             )
         return self
 
