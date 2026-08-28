@@ -785,8 +785,9 @@ turkish-speaking рецензенту на момент реализации.
 single-row чанки.
 
 **Предложенный фикс:** continuation chunk — оставшиеся дети одного родителя группируются под тот же контекст,
-вместо того чтобы плодить детей-корней. Изменяет семантику `Chunk.root` и рипл в `TreeMatchingRunner._ancestors`,
-`_failed_roots`, `_reindex`/`_map_back`.
+вместо того чтобы плодить детей-корней. Изменяет семантику `Chunk.root` и рипл в статик-методе
+`TreeMatchingRunner._ancestors`, локальной переменной `failed_roots` внутри `run()` и модульных функциях
+`_reindex`/`_map_back` (`tree_matching_service.py`), которые переиндексируют чанк при обрезке.
 
 **Когда:** PR 2 (калибровка на реальных сметах может выявить боль на широких разделах).
 
@@ -802,8 +803,9 @@ single-row чанки.
 `CAST` на всей таблице выбросит ошибку на ЛЮБОМ вызове `list_catalog`/`list_all`/`search` — не только на строке
 с плохим кодом, а на всех 362+ статьях.
 
-**Когда:** сейчас (интеграционные тесты типа `test_estimate_repository_fund_integration.py` выживают,
-потому что не зовут эти методы).
+**Когда:** сейчас (интеграционные тесты, вставляющие нечисловые коды — напр.
+`test_decision_fund_repository_integration.py` с кодами `it_fund_*` — выживают только потому, что
+не зовут `list_catalog`/`list_all`/`search`).
 
 **Как чинить:** `list_catalog` и друзья должны выбрасывать нечисловые коды (фильтр `WHERE article_code ~ '^[0-9.]+$'`)
 или сортировать по версионной компарации (напр. функция `version_le` из классификации).
@@ -812,11 +814,16 @@ single-row чанки.
 
 ## 🟡 `_coerce` не проверяет `kind` у входного `NodeVerdict`
 
-**Что:** `app/domain/tree_matching.py`, функция `_coerce` (линия 186–207, вызов из `validate_verdicts`).
-Для dict-входа (из парсера JSON) проверка `kind not in _KINDS` стоит на линии 201 — данные
+**Что:** `app/domain/tree_matching.py`, функция `_coerce` (линия 186–207, вызывается из `validate_one`).
+Для dict-входа (из JSON-парсера) проверка `kind not in _KINDS` стоит на линии 201 — данные
 валидируются. **Но для `isinstance(item, NodeVerdict)` (линия 188) ранний return возвращает объект
-как есть, без проверки его `kind`**. Если NodeVerdict с невалидным `kind` пройдёт, `to_node_match`
-упадёт с `KeyError` при обращении к `_VERDICT_TO_STATUS_MAP[v.kind]`. Нарушает контракт: валидация
+как есть, без проверки его `kind`**. Если такой `NodeVerdict` придёт с `kind` вне `{"article", "org",
+"none"}` и `article_code=None`, `validate_one` этого не заметит: проверка
+`(v.kind == "article") != (v.article_code is not None)` для `kind="что-то другое"` и `code=None`
+превращается в `False != False` — флаг `inconsistent` не ставится, а ветки `unknown_code`/
+`outside_parent` тоже пропускаются (они требуют `article_code is not None`). `to_node_match` получает
+формально валидный вердикт без флагов, `kind` не совпадает ни с `"org"`, ни с `"none"`, и падает на
+`catalog[verdict.article_code]` → `catalog[None]` → `KeyError`. Нарушает контракт: валидация
 обещает fail-closed, никогда не падать открыто.
 
 **Когда:** не достижимо в PR 1 (адаптер `OpenRouterTreeMatcher` гарантирует валидный JSON),
@@ -830,21 +837,25 @@ single-row чанки.
 
 ## 🟡 `OpenRouterTreeMatcher` не логирует ошибочные ответы
 
-**Что:** адаптер `app/infrastructure/ai/openrouter_tree_matcher.py` (копировалась с однопроходного матчера)
-не логирует сырой ответ сервера в случае ошибки, в отличие от прототипного адаптера `openrouter_matcher.py`,
-который:
-```python
-logger.warning("Unexpected response structure", extra={"raw_body": ...})
-logger.error("API error", extra={"provider_message": ...})
-```
-Вместо этого tree-адаптер отдаёт только `instrumented_call`'s generic `outcome=error` с provider-сообщением
-в строке исключения — теряется сырой контекст при дебаге (особенно при плохом model slug или ключе).
+**Что:** адаптер `app/infrastructure/ai/openrouter_tree_matcher.py` (структурно похож на однопроходный
+`openrouter_matcher.py`) НЕ полностью тих — он логирует `logger.warning(...)` на усечённый ответ
+(`finish_reason == "length"`, строка 124) и на нечитаемый JSON от `parse_verdicts` (строка 130). Но
+именно в ветке структурной ошибки ответа (`except (KeyError, IndexError, TypeError)` на
+`choices[0]["message"]["content"]`, строки 119–122) и в ветке ошибки в теле JSON (`error`-поле от
+OpenRouter, строки 106–112) сырой `data`/`raw_body` нигде не логируется — только текст исключения
+улетает в `_BodyError` и дальше в `instrumented_call`'s generic `outcome=error`. Прототип
+`openrouter_matcher.py` в аналогичном месте логирует явно: `:110 logger.error("OpenRouter:
+неожиданная структура ответа: %r", data)` перед тем как поднять `_BodyError`, и `:122/:124
+logger.warning/error(...)` с текстом ошибки на error-ветке тела. Разница узкая (два конкретных места),
+но именно они теряют сырой контекст при дебаге плохого model slug/ключа.
 
 **Когда:** сейчас (помешает дебагу на PR 2 при калибровке моделей).
 
-**Как чинить:** добавить логирование как прототип: при `JSONDecodeError` / `KeyError` в парсинге ответа —
-`logger.warning("Unexpected response structure", extra={"raw_body": ..., "error": ...})`;
-при ошибке в теле JSON (error-поле) → `logger.error(...)` с provider_message.
+**Как чинить:** добавить `logger.error("tree: неожиданная структура ответа: %r", data)` сразу после
+`except (KeyError, IndexError, TypeError) as exc:` (строка 119), перед `raise _BodyError(...)`; в ветке
+`error`-поля тела (строки 106–112) — `logger.warning`/`logger.error` по аналогии с
+`openrouter_matcher.py:116-125` (`_raise_body_error`: транзиент → warning, перманент → error), с
+текстом `error.get("message")`.
 
 ---
 
@@ -859,7 +870,7 @@ failed-statement в теле (скажем, уникальность при вс
 `test_tree_repository_integration.py` на этой ветке уже фиксирована (добавлен `session.rollback()` в
 `finally`); эти две тесты оставлены как вне скоупа PR 1.
 
-**Когда:** регулярно при интеграционных тестах (污染 БД, ложные дубли на второй запуск).
+**Когда:** регулярно при интеграционных тестах (порчу БД, ложные дубли на второй запуск).
 
 **Как чинить:** добавить `session.rollback()` перед `DELETE` в `finally` на обеих тестах, как на
 tree-тесте. Проще: вообще обернуть бэк тестовой сессии в транзакцию (rollback на вход, как SQLAlchemy
@@ -869,8 +880,9 @@ fixture). Это повторяющийся паттерн — кандидат 
 
 ## 🟡 `tree_reasoning_effort` не валидируется
 
-**Что:** `app/core/config.py`, поле `tree_reasoning_effort: Literal["low", "medium", "high"]` (для
-extended thinking в будущем). На отличие от `openrouter_tree_model` (гвард на empty-string в `validator`),
+**Что:** `app/core/config.py`, поле `tree_reasoning_effort: str = "low"` (обычная строка, не `Literal`;
+комментарий в коде — «без ограничения Sonnet 5 давал ×3 completion-токенов»). В отличие от
+`openrouter_tree_model` (гвард на empty-string в `@model_validator _validate_llm`),
 `tree_reasoning_effort` не проверяется вообще — даже на пустоту. Опечатка (`"lo"`, `"LOW"`) пройдёт
 валидацию конфига, потом OpenRouter-запрос выбросит 400 уже в рантайме после работы чанкинга.
 
@@ -884,11 +896,11 @@ startup, до первого вызова.
 
 ## 🟢 `validate_verdicts` без прод-потребителя
 
-**Что:** `app/domain/tree_matching.py`, функция `validate_verdicts(verdicts, req, ...)` реализована
-полностью, покрыта unit-тестами, но **не вызывается из prod-кода**. `TreeMatchingRunner.match_section`
-вызывает только `validate_one` per-target (дедуп inline, без полной валидации). `validate_verdicts`
-оставлена для PR 2 eval-харнесса (тот валидирует целый вектор вердиктов из синтетических источников),
-но в PR 1 мертва.
+**Что:** `app/domain/tree_matching.py`, функция `validate_verdicts(raw, targets, catalog_codes, ctx_of)`
+реализована полностью, покрыта unit-тестами, но **не вызывается из prod-кода**.
+`TreeMatchingRunner.run` (внутри вложенного `process()`) вызывает только `validate_one` per-target
+(дедуп по `node_id` инлайн, без полной пакетной валидации). `validate_verdicts` оставлена для PR 2
+eval-харнесса (тот валидирует целый вектор вердиктов из синтетических источников), но в PR 1 мертва.
 
 **Как чинить:** функция готова. Нет действия — она просто карв-аут для будущего.
 
@@ -896,7 +908,8 @@ startup, до первого вызова.
 
 ## 🟢 `articles.ts:46` жёстко ставит `score: 0` на ручной поиск
 
-**Что:** `frontend/src/lib/api/articles.ts`, функция `searchManual` (поиск справочника по запросу) маппит
+**Что:** `frontend/src/lib/api/articles.ts`, функция `searchArticles` (поиск справочника по запросу,
+`/articles/search`) маппит
 результаты в `Candidate` с `score: 0` — та же ошибка, что была везде раньше (ноль как false statement
 об отсутствии значения, вместо `null`). На бэжде это PR 1 чинит везде (`MatchCandidate.score: number | null`),
 но фронт-поиск остался.
@@ -911,27 +924,35 @@ startup, до первого вызова.
 
 ## 🟡 Параллельная обработка независимых разделов
 
-**Что:** спека §12 отмечает, что чанки одной сметы (независимые разделы) могут обрабатываться параллельно,
-но текущая реализация `TreeMatchingRunner._match_sections` — **строго последовательный цикл** по чанкам.
-На крупной смете с десятками чанков это может стать узким местом (как построчный ARG раньше, но
-предсказуемо медленнее: 18–40 чанков × 1–2 сек за вызов = 18–80 сек sequential).
+**Что:** спека §12 называет параллельную обработку независимых разделов пунктом вне области PR 1
+(«сейчас строго последовательно» — дословно всё, что говорит спека, без названия конкретного паттерна).
+Текущая реализация — цикл `for chunk in split_sections(tree, parents, ...): process(chunk, ...)` внутри
+`TreeMatchingRunner.run` (`tree_matching_service.py:189-193`); `process` — вложенное замыкание, метода
+`_match_sections` в коде нет. На крупной смете с десятками чанков это может стать узким местом (как
+построчный RAG раньше, но предсказуемо медленнее: 18–40 чанков × 1–2 сек за вызов = 18–80 сек
+последовательно). (См. также соседнюю запись «Матчинг сметы: последовательный арбитр» выше — тот же
+паттерн проблемы в RAG-пути, другой код.)
 
 **Когда:** PR 2 (калибровка покажет боль); PR 4 (при flip-дефолте может потребоваться optimization).
 
-**Как чинить:** спека §12 `bounded_concurrency` pattern (asyncio / aiokafka-style): пул воркеров
-(~8–16 concurrent) на чанки, сохранение результатов в очереди, финализация после всех. Требует
-перевода на async/await или интеграции с Celery (батч-поставка чанков отдельным таскам).
+**Как чинить:** спека не задаёт конкретный паттерн — придётся спроектировать отдельно. Кандидат: пул
+воркеров с bounded concurrency (~8–16) на чанки одного уровня, которые не зависят друг от друга по
+контексту (чанк ребёнка использует вердикт чанка родителя из `effective_ancestor_context`, поэтому
+параллелить можно только сиблингов, не родителя с детьми); либо перевод на async/await, либо
+batch-постановка независимых чанков отдельными Celery-тасками с барьером синхронизации перед
+обработкой следующего уровня.
 
 ---
 
 ## 🟡 Точный provenance контекста в снимке
 
-**Что:** спека §12 требует, чтобы узел в `NodeMatch` нёс `context_source_node_id` — какой именно
-предок дал доверенный контекст (effective_ancestor_context). Текущий снимок не сохраняет это, только
-finalized matched_code/article_id (мёртвый мусор для фонда v3 и зависимых кандидатов, если расхождение).
+**Что:** спека §12 называет пунктом вне области PR 1 точный provenance контекста в снимке — какой
+именно предок дал доверенный контекст (`effective_ancestor_context`), плюс автоматический пересмотр
+потомков после override/reject. Текущий снимок `NodeMatch` этого не хранит — только финальные
+`matched_code`/`matched_id`. Какой узел дал `ctx.trusted_code` для конкретного вердикта, теряется
+сразу после записи — не восстановить постфактум для фонда v3 или подсказки соседям (`dependents_hint`).
 
-**Когда:** PR 3 (фонд v3 + dependents_hint опирается на provenance для доверия). Сейчас информация
-переполняется.
+**Когда:** PR 3 (фонд v3 + `dependents_hint` опирается на provenance для доверия).
 
 **Как чинить:** `NodeMatch` расширить полем `context_source_node_id: int | None` (id узла, который
 дал trusted context). `to_node_match` заполняет из `AncestorContext` через `ctx.trusted_code` → find in tree.
