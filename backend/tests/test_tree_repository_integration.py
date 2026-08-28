@@ -93,12 +93,17 @@ def _seed_row(session: Session, estimate_id: int, source_index: int, **overrides
 
 
 def _cleanup_estimate(session: Session) -> None:
+    # rollback ПЕРВЫМ: если try упал на DB-уровне (напр. IntegrityError), сессия висит в
+    # aborted-транзакции — DELETE на ней сам поднимет "current transaction is aborted" и
+    # чистка не выполнится вообще (leak). rollback() возвращает сессию в рабочее состояние.
+    session.rollback()
     # estimates/estimate_rows уходят каскадом (ondelete=CASCADE от users → estimates → rows)
     session.execute(sa.delete(UserModel).where(UserModel.email == _SENTINEL_EMAIL))
     session.commit()
 
 
 def _cleanup_articles(session: Session) -> None:
+    session.rollback()  # см. _cleanup_estimate — та же защита от aborted-транзакции
     session.execute(
         sa.delete(TemplateArticleModel).where(
             TemplateArticleModel.article_code.like(f"{_SENTINEL_CODE_PREFIX}%")
