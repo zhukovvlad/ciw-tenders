@@ -162,7 +162,7 @@ class TreeMatchingRunner:
                     )
                 return
             if resp.truncated:
-                half = max_rows // 2
+                half = min(max_rows, len(chunk.indices)) // 2
                 if half < self._min_rows or len(chunk.indices) <= self._min_rows:
                     for i in targets:
                         commit(i, NodeMatch(EstimateRowStatus.ERROR, match_error=ERR_TRUNCATED))

@@ -18,6 +18,7 @@ from app.services.tree_matching_service import (
     _OUTPUT_MARGIN,
     _SYSTEM_PROMPT_RESERVE,
     CatalogEmptyError,
+    CatalogTooLargeError,
     TreeMatchingRunner,
 )
 from tests.fakes import FakeArticleRepository, FakeEstimateRepository, FakeTreeMatcher
@@ -145,6 +146,12 @@ def test_transient_marks_remaining_and_descendant_chunks_error() -> None:
 
 
 def test_truncated_response_splits_chunk_then_errors_below_min() -> None:
+    # Fix round 1 / finding 1: half считается от РЕАЛЬНОГО размера чанка
+    # (min(max_rows, len(chunk.indices)) // 2), а не от конфигурационного chunk_rows.
+    # Для чанка из 3 строк это ВСЕГДА даёт half=1 (3 // 2), независимо от chunk_rows —
+    # поэтому настоящий сплит здесь распадается на 3 отдельных однострочных чанка
+    # (не на «[корень+первый ребёнок], [второй]», как было при старой формуле
+    # `chunk_rows // 2`, — см. Fix round 1 в отчёте).
     repo, art = FakeEstimateRepository(), _articles()
     est = repo.create(NewEstimate(1, "a.xlsx", "k"), [
         _node("4", "Конструктив", 0), _node("4.1", "Гориз 1-й", 1), _node("4.2", "Верт 1-й", 2),
@@ -158,20 +165,19 @@ def test_truncated_response_splits_chunk_then_errors_below_min() -> None:
 
     trunc = SectionMatchResponse(items=[], truncated=True)
     r0, r1, r2 = (r.id for r in est.rows)
-    matcher = FakeTreeMatcher(responses=[trunc, ok([r0, r1]), ok([r2])])
-    # chunk_rows=4: первый вызов — все 3 строки; обрезка → half=2 →
-    # чанки [корень+первый ребёнок], [второй]
+    matcher = FakeTreeMatcher(responses=[trunc, ok([r0]), ok([r1]), ok([r2])])
+    # min_chunk_rows=1: half=3//2=1 не ниже минимума → реальный сплит на 3 листа
     runner = TreeMatchingRunner(
-        matcher=matcher, estimates=repo, articles=art, chunk_rows=4, min_chunk_rows=2,
+        matcher=matcher, estimates=repo, articles=art, chunk_rows=4, min_chunk_rows=1,
         context_window=200_000, output_reserve_per_row=48,
     )
     runner.run(est.id)
-    assert len(matcher.requests) == 3
+    assert len(matcher.requests) == 4
     assert all(n["status"] == "confident" for n in repo.nodes.values())
     assert [sorted(n.id for n in r.nodes) for r in matcher.requests] == [
-        [r0, r1, r2], [r0, r1], [r2],
+        [r0, r1, r2], [r0], [r1], [r2],
     ]
-    # ниже минимума → error
+    # ниже минимума → error (не затронуто фиксом: чанк уже из 1 строки при первой обрезке)
     repo2, matcher2 = FakeEstimateRepository(), FakeTreeMatcher(responses=[trunc])
     est2 = repo2.create(NewEstimate(1, "a.xlsx", "k"), [_node("4", "Конструктив", 0)])
     TreeMatchingRunner(
@@ -179,6 +185,123 @@ def test_truncated_response_splits_chunk_then_errors_below_min() -> None:
         context_window=200_000, output_reserve_per_row=48,
     ).run(est2.id)
     assert repo2.nodes[est2.rows[0].id]["match_error"] == "tree_output_truncated"
+
+
+def test_oversized_row_commits_row_too_large_without_calling_matcher() -> None:
+    # Finding 2: ветка chunk.oversized ничем не была закрыта. Узел, чья собственная
+    # стоимость строки превышает бюджет чанка, должен стать отдельным чанком с
+    # oversized=[себя], закоммититься error/tree_row_too_large и НЕ попасть в вызов
+    # матчера (иначе повторный commit по «отсутствующему» вердикту тихо перезаписал бы
+    # причину на tree_missing_verdict).
+    repo, art = FakeEstimateRepository(), _articles()
+    est = repo.create(NewEstimate(1, "a.xlsx", "k"), [
+        _node("4", "Конструктив", 0), _node("4.1", "x" * 260, 1),
+    ])
+    root_id, child_id = (r.id for r in est.rows)
+    matcher = FakeTreeMatcher(
+        verdict_fn=by_name({"Конструктив": {"code": "4", "sure": True, "alt": None}})
+    )
+    # окно подобрано так, что row_budget=100 (см. отчёт), а имя ребёнка в 260 символов
+    # даёт row_cost ~108 > 100 — узел "не влезает" сам по себе
+    runner = TreeMatchingRunner(
+        matcher=matcher, estimates=repo, articles=art, chunk_rows=120, min_chunk_rows=1,
+        context_window=3447, output_reserve_per_row=10,
+    )
+    runner.run(est.id)
+    assert repo.nodes[root_id]["status"] == "confident"
+    assert repo.nodes[child_id]["status"] == "error"
+    assert repo.nodes[child_id]["match_error"] == "tree_row_too_large"
+    # матчер вызван только для чанка корня — чанк переростка вернулся до вызова матчера
+    assert len(matcher.requests) == 1
+    assert matcher.requests[0].targets == {root_id}
+
+
+def test_nested_truncation_genuinely_shrinks_chunk_not_reissues() -> None:
+    # Finding 1/4: half считается от РЕАЛЬНОГО размера текущего чанка
+    # (min(max_rows, len(chunk.indices)) // 2), а не от конфигурационного chunk_rows.
+    # Дерево из 2 строк, chunk_rows=8 (много больше фактического размера чанка) —
+    # ровно тот перекос, из-за которого старая формула была бы «инертной».
+    repo, art = FakeEstimateRepository(), _articles()
+    est = repo.create(
+        NewEstimate(1, "a.xlsx", "k"),
+        [_node("4", "Конструктив", 0), _node("4.1", "Гориз 1-й", 1)],
+    )
+    r0, r1 = (r.id for r in est.rows)
+    trunc = SectionMatchResponse(items=[], truncated=True)
+
+    def ok(ids):
+        return SectionMatchResponse(
+            items=[{"i": i, "code": "4", "sure": True, "alt": None} for i in ids],
+            truncated=False,
+        )
+
+    matcher = FakeTreeMatcher(responses=[trunc, trunc, ok([r1])])
+    runner = TreeMatchingRunner(
+        matcher=matcher, estimates=repo, articles=art, chunk_rows=8, min_chunk_rows=1,
+        context_window=200_000, output_reserve_per_row=48,
+    )
+    runner.run(est.id)
+    seen = [frozenset(n.id for n in r.nodes) for r in matcher.requests]
+    # ровно 3 вызова, и НИ ОДИН не повторяет узловой набор предыдущего — половинка от
+    # РЕАЛЬНОГО размера (2 // 2 = 1) сразу даёт настоящий сплит на 2 листа, а не то же
+    # самое требование ещё раз (под старой формулой `chunk_rows // 2 = 8 // 2 = 4`
+    # split_sections(max_rows=4) вернул бы тот же неразделённый 2-узловый чанк, потому
+    # что 2 <= 4 — тождественный повторный запрос; см. Fix round 1 в отчёте).
+    assert len(matcher.requests) == 3
+    assert len(seen) == len(set(seen))
+    assert seen == [frozenset({r0, r1}), frozenset({r0}), frozenset({r1})]
+    # корень — однострочный чанк, обрезка на нём уже ниже пола (half=1//2=0) → error сразу
+    assert repo.nodes[r0]["status"] == "error"
+    assert repo.nodes[r0]["match_error"] == "tree_output_truncated"
+    assert repo.nodes[r1]["status"] == "confident"
+
+
+def test_catalog_over_quarter_of_window_raises_before_row_budget() -> None:
+    # Finding 5, первая точка raise (:90-93): справочник > 25% окна — режется до того,
+    # как вообще считается row_budget.
+    repo, art = FakeEstimateRepository(), _articles()
+    est = repo.create(NewEstimate(1, "a.xlsx", "k"), [_node("4", "Конструктив", 0)])
+    runner = TreeMatchingRunner(
+        matcher=FakeTreeMatcher(responses=[]), estimates=repo, articles=art,
+        chunk_rows=120, min_chunk_rows=1, context_window=100, output_reserve_per_row=48,
+    )
+    with pytest.raises(CatalogTooLargeError) as exc:
+        runner.run(est.id)
+    assert "25%" in str(exc.value)
+
+
+def test_row_budget_non_positive_after_reserves_raises() -> None:
+    # Finding 5, вторая точка raise (:107-110): справочник проходит первую проверку
+    # (<=25% окна), но после вычета системных резервов бюджет строк уходит в ноль/минус.
+    repo, art = FakeEstimateRepository(), _articles()
+    est = repo.create(NewEstimate(1, "a.xlsx", "k"), [_node("4", "Конструктив", 0)])
+    runner = TreeMatchingRunner(
+        matcher=FakeTreeMatcher(responses=[]), estimates=repo, articles=art,
+        chunk_rows=120, min_chunk_rows=1, context_window=1000, output_reserve_per_row=48,
+    )
+    with pytest.raises(CatalogTooLargeError) as exc:
+        runner.run(est.id)
+    assert "не остаётся бюджета" in str(exc.value)
+
+
+def test_ancestors_ordered_root_first_for_deep_chunk() -> None:
+    # Finding 6: `_ancestors` строит путь снизу вверх и разворачивает в конце —
+    # единственный существующий assert брал чанк с предком длины 1, где reversed —
+    # no-op. Трёхуровневая цепочка ловит инверсию, если её кто-то уберёт.
+    repo, art = FakeEstimateRepository(), _articles()
+    est = repo.create(NewEstimate(1, "a.xlsx", "k"), [
+        _node("4", "Root", 0), _node("4.1", "Mid", 1), _node("4.1.1", "Leaf", 2),
+    ])
+    matcher = FakeTreeMatcher(verdict_fn=by_name({
+        "Root": {"code": "4", "sure": True, "alt": None},
+        "Mid": {"code": "4", "sure": True, "alt": None},
+        "Leaf": {"code": "4", "sure": True, "alt": None},
+    }))
+    # chunk_rows=1: каждый узел — отдельный чанк, обрабатываются сверху вниз, так что к
+    # моменту чанка «Leaf» оба предка уже закоммичены и видны в req.ancestors
+    _runner(repo, art, matcher, chunk_rows=1).run(est.id)
+    leaf_req = matcher.requests[-1]
+    assert [n.code for n, _ in leaf_req.ancestors] == ["4", "4.1"]
 
 
 def test_lost_cas_refreshes_parent_before_children() -> None:
@@ -200,9 +323,13 @@ def test_lost_cas_refreshes_parent_before_children() -> None:
             {"i": child, "code": "4.2.1", "sure": True, "alt": None},
         ]
 
-    _runner(repo, art, FakeTreeMatcher(verdict_fn=fn)).run(est.id)
+    counts = _runner(repo, art, FakeTreeMatcher(verdict_fn=fn)).run(est.id)
     assert repo.nodes[root]["final_code"] == "9"  # ревью не затёрто
     assert repo.nodes[child]["status"] == "needs_review"  # 4.2.1 вне поддерева свежего 9
+    # Fix round 1 / finding 3: проигранный CAS корня не должен попасть в счётчики —
+    # засчитан только успешный CAS ребёнка.
+    assert sum(counts.values()) == 1
+    assert counts[EstimateRowStatus.NEEDS_REVIEW] == 1
 
 
 def test_budget_respects_window_and_shrinks_with_output_reserve() -> None:
