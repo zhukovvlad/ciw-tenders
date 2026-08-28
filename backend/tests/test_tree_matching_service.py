@@ -11,7 +11,7 @@ from app.domain.entities import (
     SectionMatchResponse,
 )
 from app.domain.errors import TransientError
-from app.domain.tree_matching import estimate_tokens, resolve_parents
+from app.domain.tree_matching import estimate_tokens, hint_for, resolve_parents
 from app.infrastructure.ai.tree_prompt import render_ancestors
 from app.services.tree_matching_service import (
     _CONTEXT_SHARE,
@@ -393,6 +393,34 @@ def test_ancestors_reserve_upper_bounds_actual_rendered_ancestors() -> None:
         (section, ("4.2", False)),    # недоверенный -> "... -> 4.2 (предположительно)"
         (stage, None),                 # без подсказки -> "... -> ?"
     ]
+    rendered = render_ancestors(ancestors)
+    actual_tokens = estimate_tokens(rendered)
+
+    reserve = _max_ancestors_reserve(tree, parents, catalog)
+    assert reserve >= actual_tokens
+
+
+def test_ancestors_reserve_accounts_for_stored_codes_longer_than_catalog() -> None:
+    # Round 3 P2: «показанный» код предка в render_ancestors — это hint_for(node), то есть
+    # matched_code/final_code, ДЕНОРМАЛИЗОВАННЫЕ снимки на estimate_rows (String(64), без FK
+    # на текущий каталог). Прежняя оценка брала максимум только по кодам каталога — сохранённый
+    # код от старой версии каталога (или просто длиннее самого длинного нынешнего) недооценивал
+    # резерв. Здесь у предка `matched_code` длиной 64 символа — намного длиннее любого кода
+    # каталога (макс. 5 символов, "4.2.1"/"4.2.2"), и это состояние НЕДОВЕРЕННОЕ (status
+    # needs_review), то есть в рендере добавляется ещё и суффикс "(предположительно)".
+    catalog = _articles().list_catalog()
+    long_code = "9" * 64
+    root = make_tree_node(1, 1, "4", "Конструктив")
+    stale = make_tree_node(
+        2, 2, "4.2", "Устаревший код из старой версии каталога",
+        status="needs_review", matched_code=long_code,
+    )
+    target = make_tree_node(3, 3, "4.2.1", "Цель")
+    tree = [root, stale, target]
+    parents = resolve_parents(tree)
+    assert parents == [None, 0, 1]
+
+    ancestors = [(root, hint_for(root)), (stale, hint_for(stale))]
     rendered = render_ancestors(ancestors)
     actual_tokens = estimate_tokens(rendered)
 

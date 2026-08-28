@@ -59,12 +59,22 @@ def _max_ancestors_reserve(
     Заменяет прежнюю фиксированную оценку `_ANCESTORS_RESERVE`: `split_sections` использует ЕДИНЫЙ
     `row_budget` на весь прогон, поэтому реальную (per-chunk) стоимость предков подставить нельзя —
     берём МАКСИМУМ по всем узлам дерева (самый длинный путь предков + самые длинные их имена), а
-    «показанный» код каждого предка оцениваем сверху самым длинным кодом справочника с суффиксом
-    "(предположительно)" — это длиннее, чем подтверждённый `[уже: код]` или пустое "?".
+    «показанный» код каждого предка оцениваем сверху самым длинным кодом среди: (а) текущего
+    каталога и (б) сохранённых `matched_code`/`final_code` по всему дереву — это ровно два поля,
+    которые может вернуть `hint_for` (см. `domain/tree_matching.py`). Оба — денормализованные
+    снимки на `estimate_rows` (`String(64)`, без FK на каталог), поэтому код может быть от старой
+    версии каталога или попросту длиннее самого длинного кода нынешнего — каталог сам по себе
+    верхнюю границу не даёт. К самому длинному коду добавляем суффикс "(предположительно)" — он
+    длиннее, чем подтверждённый `[уже: код]` или пустое "?".
     """
     if not tree or not catalog:
         return _ANCESTORS_HEADER_MARGIN
-    max_code_len = max(len(a.code) for a in catalog)
+    catalog_max = max(len(a.code) for a in catalog)
+    stored_max = max(
+        (len(code) for n in tree for code in (n.matched_code, n.final_code) if code),
+        default=0,
+    )
+    max_code_len = max(catalog_max, stored_max)
     shown = ("0" * max_code_len) + _UNTRUSTED_SUFFIX
     best = 0
     for i in range(len(tree)):
