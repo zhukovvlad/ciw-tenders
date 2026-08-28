@@ -981,7 +981,7 @@ batch-постановка независимых чанков отдельны�
 версия, которая по контракту утверждает, что крошка прошла классификаторный деривейшн. Для
 tree-строки это утверждение ложно.
 
-**Достижимо сегодня:** `MATCHING_ENGINE=tree` → ревью → `POST /estimates/{id}/reference`
+**Достижимо сегодня:** `MATCHING_ENGINE=tree` → ревью → `PATCH /estimates/{id}/reference`
 ([routes/estimates.py:267](../backend/app/api/routes/estimates.py#L267)) → `fund_service.promote`.
 Ничего в PR 1 это не блокирует — тумблер «в фонд» не проверяет, каким движком смета матчилась.
 
