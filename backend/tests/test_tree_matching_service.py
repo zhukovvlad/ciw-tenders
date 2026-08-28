@@ -12,6 +12,7 @@ from app.domain.entities import (
 )
 from app.domain.errors import TransientError
 from app.domain.tree_matching import estimate_tokens, resolve_parents
+from app.infrastructure.ai.tree_prompt import render_ancestors
 from app.services.tree_matching_service import (
     _CONTEXT_SHARE,
     _OUTPUT_MARGIN,
@@ -368,6 +369,35 @@ def test_ancestors_reserve_grows_with_deeper_or_longer_named_chain() -> None:
     # остаётся одной и той же константой (600) независимо от формы дерева
     assert deep_reserve > shallow_reserve
     assert deep_reserve - shallow_reserve > 100  # разница ощутима, не шум округления
+
+
+def test_ancestors_reserve_upper_bounds_actual_rendered_ancestors() -> None:
+    # P2-1 reintroduced в тонкой форме: `_max_ancestors_reserve` дублирует формат строки
+    # `tree_prompt.render_ancestors` (сервис не может импортировать `infrastructure`), но ничто
+    # не связывает эти два места — правка формата в рендерере молча сделает резерв заниженным.
+    # Пин: реальный рендер цепочки предков разной длины и во всех трёх состояниях подсказки
+    # (доверенный код, недоверенный код, без подсказки) не должен по токенам превышать резерв,
+    # посчитанный по тому же дереву.
+    catalog = _articles().list_catalog()
+    root = make_tree_node(1, 1, "4", "Конструктив")
+    section = make_tree_node(2, 2, "4.2", "Надземная часть здания")
+    stage = make_tree_node(3, 3, "4.2.1", "1 этап строительства, корпус 3")
+    target = make_tree_node(4, 4, "4.2.1.1", "Устройство монолитных перекрытий")
+    tree = [root, section, stage, target]
+    parents = resolve_parents(tree)
+    assert parents == [None, 0, 1, 2]
+
+    # ancestors цели — вся цепочка над ней, каждый предок в своём состоянии подсказки:
+    ancestors = [
+        (root, ("4", True)),          # доверенный  -> "4 | Конструктив -> 4"
+        (section, ("4.2", False)),    # недоверенный -> "... -> 4.2 (предположительно)"
+        (stage, None),                 # без подсказки -> "... -> ?"
+    ]
+    rendered = render_ancestors(ancestors)
+    actual_tokens = estimate_tokens(rendered)
+
+    reserve = _max_ancestors_reserve(tree, parents, catalog)
+    assert reserve >= actual_tokens
 
 
 def test_budget_respects_window_and_shrinks_with_output_reserve() -> None:

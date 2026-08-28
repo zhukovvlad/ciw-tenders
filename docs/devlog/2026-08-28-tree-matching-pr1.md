@@ -109,7 +109,7 @@ match). `self._tree` — `TreeMatchingRunner | None`, `None` по умолчан
 
 ### 5. Конфиг (`app/core/config.py`)
 
-8 новых settings (обычные поля `str`/`int`, без `Literal` — проверяются вручную в
+10 новых settings (обычные поля `str`/`int`/`float`, без `Literal` — проверяются вручную в
 `@model_validator _validate_llm`, кроме одного пропуска, см. TECH_DEBT):
 
 - **`matching_engine: str`** = `"rag"` — выбор движка; валидатор ограничивает `{"rag", "tree"}`.
@@ -126,6 +126,15 @@ match). `self._tree` — `TreeMatchingRunner | None`, `None` по умолчан
   потенциальную цель чанка (и в бюджет чанка, и в `max_tokens` запроса); валидатор требует `> 0`.
 - **`tree_precedents_budget: int`** = `2_000` — резерв токенов под блок ПРЕЦЕДЕНТЫ (не используется
   в PR 1 — фонд выключен); валидатор требует `>= 0`.
+- **`tree_call_timeout_s: float`** = `180.0` — hard per-call timeout для tree-матчера, отдельно от
+  общего `ai_call_timeout_s` (P1-2 codex round 2); валидатор требует `> 0`.
+- **`tree_retry_budget: int`** = `2` — попыток на один tree-вызов до `TransientError`, отдельно от
+  общего `transient_retry_budget`; валидатор требует `>= 1`. Плюс кросс-полевой инвариант:
+  `tree_call_timeout_s * tree_retry_budget` должно быть строго меньше `task_soft_time_limit_s` —
+  иначе один чанк способен пережить бюджет всей Celery-задачи целиком (с дефолтами `180 × 2 = 360 <
+  600`). Это и есть причина, по которой tree-вызов не переиспользует `ai_call_timeout_s`/
+  `transient_retry_budget`: у RAG-движка (много мелких построчных вызовов) такого инварианта нет и
+  быть не должно, а у tree (один тяжёлый вызов на чанк) — обязан быть.
 
 Две доли бюджета чанка — НЕ settings, а модульные константы в `app/services/tree_matching_service.py`
 (не настраиваются через `.env`, зашиты в коде):
@@ -215,7 +224,7 @@ match). `self._tree` — `TreeMatchingRunner | None`, `None` по умолчан
   `settings.matching_engine`, при `"tree"` собирает `TreeMatchingRunner` через новый `get_tree_matcher()`
   и передаёт его в `EstimateMatchingService(tree=...)`.
 - `app/api/schemas.py` — `MatchCandidateOut.score: float | None` (было `float`, спека §7.1).
-- `app/core/config.py` — 8 новых settings движка tree (см. раздел «Конфиг» выше).
+- `app/core/config.py` — 10 новых settings движка tree (см. раздел «Конфиг» выше).
 - `app/domain/decision_fund.py` — `FUND_KEY_VERSION = 3`, `fund_key_v3()` (готово для PR 3, в PR 1 не
   вызывается).
 - `app/domain/entities.py` — новые сущности: `TreeNode`, `CatalogArticle`, `FundPrecedent`,
@@ -265,9 +274,10 @@ match). `self._tree` — `TreeMatchingRunner | None`, `None` по умолчан
 - `backend/tests/fakes.py` — `+92` строки: фейки под tree-порты (`ArticleRepository.list_catalog`,
   `EstimateRepository.fetch_tree`/`save_node_match_cas`/`refresh_tree_node`, фейковый `TreeMatcher`).
 
-`.env.example` в PR 1 (код, заморожен на `d6fca58`) не менялся — все 8 `tree_*`/`matching_engine`
-settings имеют дефолты в `config.py` и не требуют записи в `.env`, пока не нужно переопределить
-значение. **Обновление после финального ревью ветки:** это делало флаг недисковеримым для оператора
+`.env.example` в PR 1 (код, заморожен на `d6fca58`) не менялся — все 10 `tree_*`/`matching_engine`
+settings (включая `tree_call_timeout_s`/`tree_retry_budget`, добавленные позже правкой P1-2) имеют
+дефолты в `config.py` и не требуют записи в `.env`, пока не нужно переопределить значение.
+**Обновление после финального ревью ветки:** это делало флаг недисковеримым для оператора
 (единственный способ увидеть, что переключатель вообще существует, — прочитать эту секцию devlog'а
 или сам `config.py`) — в `.env.example` добавлена одна закомментированная строка `MATCHING_ENGINE=tree`
 рядом с `CONFIDENCE_THRESHOLD`; остальные `TREE_*`-настройки калибровки по-прежнему не выносятся

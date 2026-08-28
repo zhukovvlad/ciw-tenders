@@ -144,7 +144,7 @@ class TreeMatcher(ABC):
 |---|---|
 | `review_status ∈ {confirmed, overridden}` | **доверенный**: `trusted_code = final_code`, стоп |
 | `status ∈ {confident, matched_fund}` и `unreviewed` | **доверенный**: `trusted_code = matched_code`, стоп |
-| `status = needs_review` | недоверенный: `has_uncertain_barrier = True`, подниматься дальше |
+| `status = needs_review` и `unreviewed` | недоверенный: `has_uncertain_barrier = True`, подниматься дальше |
 | `rejected`, `excluded`, `no_match`, `error`, `pending` | прозрачный: подниматься дальше |
 | предков не осталось | `trusted_code = None`, барьер как накоплен — **корень доверенная база** |
 
