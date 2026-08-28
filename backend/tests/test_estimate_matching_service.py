@@ -14,12 +14,15 @@ from app.domain.entities import (
 from app.domain.errors import DictionaryNotReadyError, TransientError
 from app.services.estimate_matching_service import EstimateMatchingService
 from app.services.matching_service import MatchingService
+from app.services.tree_matching_service import TreeMatchingRunner
 from tests.fakes import (
+    FakeArticleRepository,
     FakeDecisionFundRepository,
     FakeEmbedder,
     FakeEstimateRepository,
     FakeLLMMatcher,
     FakeRepository,
+    FakeTreeMatcher,
     FakeWorkTypeClassifier,
 )
 
@@ -602,3 +605,52 @@ def test_crumb_version_bump_misses_old_keys() -> None:
     svc = _matching_service(repo, articles, fund, apply_fund=True)
     svc._apply_fund(est.id)  # noqa: SLF001
     assert repo.get(est.id, 1, is_admin=True).rows[0].status == "pending"  # версия не та → холодно
+
+
+# ---------------------------------------------------------------------------
+# Task 10: ветка matching_engine=tree — bypass classify/fund/embed/gate
+# ---------------------------------------------------------------------------
+
+
+def test_tree_engine_bypasses_classifier_embedder_and_gate() -> None:
+    repo = FakeEstimateRepository()
+    est = repo.create(NewEstimate(1, "a.xlsx", "k"), [_node("1")])
+    art = FakeArticleRepository()
+    art.add_article(id=1, code="1", name="Раздел 1")
+    classifier = FakeWorkTypeClassifier(default=WorkClass.WORK)
+    embedder = _Embedder()
+    matcher = FakeTreeMatcher(
+        verdict_fn=lambda req: [
+            {"i": n.id, "code": "1", "sure": True, "alt": None} for n in req.nodes
+        ]
+    )
+    runner = TreeMatchingRunner(
+        matcher=matcher, estimates=repo, articles=art, chunk_rows=120, min_chunk_rows=10,
+        context_window=200_000, output_reserve_per_row=48,
+    )
+    svc = EstimateMatchingService(
+        matcher=MatchingService(art, embedder=None, llm_matcher=FakeLLMMatcher()),
+        embedder=embedder, estimates=repo, articles=art, classifier=classifier,
+        fund=FakeDecisionFundRepository(), tree=runner,
+    )
+    svc.match_estimate(est.id)
+    assert repo.statuses[est.id] == "ready" and classifier.calls == [] and embedder.batches == []
+    assert next(iter(repo.nodes.values()))["status"] == "confident"
+
+
+def test_tree_engine_empty_catalog_blocks_without_raise() -> None:
+    repo = FakeEstimateRepository()
+    est = repo.create(NewEstimate(1, "a.xlsx", "k"), [_node("1")])
+    art = FakeArticleRepository()
+    runner = TreeMatchingRunner(
+        matcher=FakeTreeMatcher(responses=[]), estimates=repo, articles=art, chunk_rows=120,
+        min_chunk_rows=10, context_window=200_000, output_reserve_per_row=48,
+    )
+    svc = EstimateMatchingService(
+        matcher=MatchingService(art, embedder=None, llm_matcher=FakeLLMMatcher()),
+        embedder=_Embedder(), estimates=repo, articles=art,
+        classifier=FakeWorkTypeClassifier(), fund=FakeDecisionFundRepository(), tree=runner,
+    )
+    svc.match_estimate(est.id)
+    assert repo.statuses[est.id] == "blocked" and repo.codes[est.id] == "catalog_empty"
+    assert est.id not in repo._locks

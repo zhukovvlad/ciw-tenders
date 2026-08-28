@@ -27,6 +27,7 @@ from app.domain.ports import (
     PasswordHasher,
     TaskQueue,
     TokenService,
+    TreeMatcher,
     UserRepository,
     WorkTypeClassifier,
 )
@@ -34,6 +35,7 @@ from app.infrastructure.ai.anthropic_matcher import AnthropicLLMMatcher
 from app.infrastructure.ai.openrouter_classifier import OpenRouterWorkClassifier
 from app.infrastructure.ai.openrouter_embedder import OpenRouterEmbedder
 from app.infrastructure.ai.openrouter_matcher import OpenRouterLLMMatcher
+from app.infrastructure.ai.openrouter_tree_matcher import OpenRouterTreeMatcher
 from app.infrastructure.auth.jwt_token_service import JwtTokenService
 from app.infrastructure.auth.password_hasher import Argon2PasswordHasher
 from app.infrastructure.db.article_repository import SqlAlchemyArticleRepository
@@ -54,6 +56,7 @@ from app.services.estimate_service import EstimateService
 from app.services.matching_service import MatchingService
 from app.services.template_ingest_service import TemplateIngestService
 from app.services.template_parser import TemplateParser
+from app.services.tree_matching_service import TreeMatchingRunner
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -158,6 +161,20 @@ def get_llm_matcher() -> LLMMatcher:
 
 
 @lru_cache
+def get_tree_matcher() -> TreeMatcher:
+    settings = get_settings()
+    return OpenRouterTreeMatcher(
+        api_key=settings.openrouter_api_key,
+        base_url=settings.openrouter_base_url,
+        model=settings.openrouter_tree_model,
+        reasoning_effort=settings.tree_reasoning_effort,
+        output_reserve_per_row=settings.tree_output_reserve_per_row,
+        timeout_s=max(settings.ai_call_timeout_s, 300.0),
+        retry_budget=settings.transient_retry_budget,
+    )
+
+
+@lru_cache
 def get_task_queue() -> TaskQueue:
     # Ленивый импорт: не тащить Celery при старте API-модуля.
     from app.infrastructure.tasks.task_queue import CeleryTaskQueue
@@ -201,6 +218,19 @@ def build_estimate_matching_service(
         confidence_threshold=settings.confidence_threshold,
         top_k=settings.match_top_k,
     )
+    tree = None
+    if settings.matching_engine == "tree":
+        # PR 1: фонд для tree-движка не готов — fund_enabled=False явно (PR 3 меняет одно слово).
+        tree = TreeMatchingRunner(
+            matcher=get_tree_matcher(),
+            estimates=estimates,
+            articles=articles,
+            chunk_rows=settings.tree_chunk_rows,
+            min_chunk_rows=settings.tree_min_chunk_rows,
+            context_window=settings.tree_context_window,
+            output_reserve_per_row=settings.tree_output_reserve_per_row,
+            fund_enabled=False,
+        )
     return EstimateMatchingService(
         matcher=matcher,
         embedder=get_embedder(),
@@ -209,6 +239,7 @@ def build_estimate_matching_service(
         classifier=get_work_classifier(),
         fund=fund,
         apply_fund=apply_fund,
+        tree=tree,
     )
 
 
