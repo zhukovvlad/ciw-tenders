@@ -23,7 +23,7 @@
 
 4. **`validate_verdicts(raw, targets, catalog_codes, ctx_of) → dict[int, Validated]`** — валидирует пачку сырых вердиктов сразу для всех целей (используется тестами/будущим PR 2 харнессом, не сервисом — см. TECH_DEBT). Строится поверх `validate_one` — той же функции, что и `TreeMatchingRunner` вызывает per-target: типы, согласованность kind/code, существование кода в каталоге, позиция в дереве. Любой флаг валидации (unknown_code, inconsistent, malformed, outside_parent, missing) не роняет вызов — маппится в статус в `to_node_match`.
 
-5. **`to_node_match(validated, ctx, catalog) → NodeMatch`** — **единственный** путь в `confident`: `article` + `sure` + без флагов + без uncertain_barrier. Остальные → needs_review (если эмодели, но данные сомнительны) или no_match/excluded/error.
+5. **`to_node_match(validated, ctx, catalog) → NodeMatch`** — **единственный** путь в `confident`: `article` + `sure` + без флагов + без uncertain_barrier. Остальные комбинации: вердикт `article`, но не `sure` или предки под барьером needs_review → `needs_review`; `org`/`none` → `excluded`/`no_match`; malformed/inconsistent/unknown_code → `needs_review` с `matched_* = NULL`; полностью отсутствующий вердикт → `error` (см. §«Ключевые решения» ниже).
 
 Плюс три новые сущности:
 - **`TreeNode`** — одна строка сметы с полями для движка (id, source_index, depth, code, name, status, review_status, matched_*, final_*).
@@ -85,7 +85,16 @@ lock → running → fetch_tree + resolve_parents
 Решения (видны в коде):
 1. **Бюджет из данных, не из промпта:** на сервис-уровне считаем `estimate_tokens` по каталогу, по имени раздела, по имёнам узлов. Сервис НЕ импортирует `infrastructure/` и никогда не рендерит промпт.
 2. **Дедуп и линейный проход:** чанки обработаны сверху вниз (родитель раньше дочерних), узлы-цели дедуплят по вердиктам (дублики → первый берётся, остальные — warning).
-3. **Fail-closed:** любая внутренняя ошибка движка (JSON, типы вердиктов, unknown_code) → запись `error` с match_error `tree_*`, никогда молчаливо не `confident`.
+3. **Fail-closed, но по двум разным карманам, не одному.** Отсутствующий вердикт — модель вообще
+   не ответила на цель — → `error` с `match_error=tree_missing_verdict`
+   (`to_node_match`, `backend/app/domain/tree_matching.py:299-300`). Любой ПОЛУЧЕННЫЙ, но проблемный
+   вердикт — malformed JSON, несогласованные kind/code, код вне каталога (`unknown_code`) — →
+   `needs_review` с `matched_* = NULL` и кандидатами из поддерева последнего доверенного предка
+   (`tree_matching.py:301-308`). Ни один из путей не даёт молчаливый `confident`. Смысл разделения:
+   fail-closed здесь не «всё подозрительное — в error», а «сломанный ответ обязан попасть перед
+   оператором с чем-то, что можно выбрать» — `needs_review` несёт кандидатов и живёт в общей очереди
+   ревью, а не оседает в техническом `error`, у которого кандидатов нет и семантика которого —
+   «движок не смог обработать строку», а не «данные сомнительны».
 
 **Выбор движка живёт в composition root, не в сервисе:** `build_estimate_matching_service`
 (`app/api/deps.py:222`) читает `settings.matching_engine`; при `"tree"` собирает
@@ -127,8 +136,8 @@ match). `self._tree` — `TreeMatchingRunner | None`, `None` по умолчан
 
 ### 6. Фронтенд
 
-- **`MatchCandidate.score`** теперь `number | null` во всех типах (`lib/types.ts`).
-- **Рендеринг:** строка или кандидат БЕЗ скора (`score === null`) → элемент со скором не рендерится вообще (`ReviewCard.tsx`, `ReviewGrid.tsx` — условие `score !== null`); раньше при отсутствии скора туда подставлялся `0` и рендерился как `0.00` тем же `<span className="font-mono text-xs text-muted-foreground">` (скор нигде не был цветным бейджем — это всегда был обычный текстовый спан).
+- **`Candidate.score`/`MatchRow.score`** теперь `number | null` во всех типах (`lib/types.ts`; `MatchCandidate` — это бэковая сущность, у фронта своя пара типов `Candidate`/`MatchRow`).
+- **Рендеринг:** строка или кандидат БЕЗ скора (`score === null`) в `ReviewCard.tsx` (строки 227, 289) — элемент со скором не рендерится вообще, условие `score !== null` оборачивает весь `<span>`; в `ReviewGrid.tsx` (строки 236–244) поведение другое: ячейка `role="cell"` остаётся в разметке (это грид, колонка должна быть на месте), просто её содержимое становится пустой строкой при `score === null` — тоже верно для своего контекста, разными путями к одному результату. Раньше при отсутствии скора туда подставлялся `0` и рендерился как `0.00` тем же `<span className="font-mono text-xs text-muted-foreground">` (скор нигде не был цветным бейджем — это всегда был обычный текстовый спан).
 - Логика ревью не изменилась; кандидаты из обоих движков одинаковы.
 
 ### 7. Тесты (11 задач, каждая с набором тестов)
@@ -180,7 +189,7 @@ match). `self._tree` — `TreeMatchingRunner | None`, `None` по умолчан
 - `--engine rag|tree|both` флаг CLI
 - Замер `top_1_strict` и других метрик на бенчмарке
 - Frozen RAG baseline (воспроизводимость спайка)
-- Калибровка `tree_reasoning_effort`, `tree_max_chunk_rows`
+- Калибровка `tree_reasoning_effort`, `tree_chunk_rows`
 - В финале — decision о дефолте и скорости перехода
 
 ### PR 3 — Фонд решений v3
@@ -232,8 +241,8 @@ match). `self._tree` — `TreeMatchingRunner | None`, `None` по умолчан
   единственная публичная точка входа, вложенное замыкание `process()` на чанк.
 
 **Frontend:**
-- `src/lib/types.ts` — `MatchCandidate.score: number | null` (было `number`, дефолт `?? 0` убран).
-- `src/lib/api/estimates.ts` — `RowDto` и `rowFromDto` пробрасывают `score` как `null`, не подставляют `0`.
+- `src/lib/types.ts` — `Candidate.score: number | null` и `MatchRow.score: number | null` (было `number`).
+- `src/lib/api/estimates.ts:108` — `rowFromDto` пробрасывает `score` как `null` (`r.score ?? null`), дефолт `?? 0` убран отсюда, не из `types.ts`.
 - `src/lib/mock/api.ts` — CSV-экспорт (`exportEstimateCsv`) обрабатывает `score === null` отдельной веткой.
 - `src/pages/estimate/ReviewCard.tsx` — рендер скора кандидата/AI-рекомендации только при `score !== null`.
 - `src/pages/estimate/ReviewCard.test.tsx` — тесты на условный рендеринг при `score: null`.
@@ -256,8 +265,13 @@ match). `self._tree` — `TreeMatchingRunner | None`, `None` по умолчан
 - `backend/tests/fakes.py` — `+92` строки: фейки под tree-порты (`ArticleRepository.list_catalog`,
   `EstimateRepository.fetch_tree`/`save_node_match_cas`/`refresh_tree_node`, фейковый `TreeMatcher`).
 
-`.env.example` в PR 1 не менялся — все 8 `tree_*`/`matching_engine` settings имеют дефолты в
-`config.py` и не требуют записи в `.env`, пока не нужно переопределить значение.
+`.env.example` в PR 1 (код, заморожен на `d6fca58`) не менялся — все 8 `tree_*`/`matching_engine`
+settings имеют дефолты в `config.py` и не требуют записи в `.env`, пока не нужно переопределить
+значение. **Обновление после финального ревью ветки:** это делало флаг недисковеримым для оператора
+(единственный способ увидеть, что переключатель вообще существует, — прочитать эту секцию devlog'а
+или сам `config.py`) — в `.env.example` добавлена одна закомментированная строка `MATCHING_ENGINE=tree`
+рядом с `CONFIDENCE_THRESHOLD`; семь числовых `TREE_*`-настроек калибровки по-прежнему не выносятся
+(они имеют дефолты, как и другие соседние knobs вроде `MATCH_TOP_K`).
 
 ---
 

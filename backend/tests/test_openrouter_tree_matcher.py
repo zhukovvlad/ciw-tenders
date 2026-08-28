@@ -8,6 +8,7 @@ import pytest
 from app.domain.entities import CatalogArticle, SectionMatchRequest
 from app.domain.errors import TransientError
 from app.infrastructure.ai.openrouter_tree_matcher import OpenRouterTreeMatcher, _BodyError
+from app.services.tree_matching_service import _OUTPUT_MARGIN as _SERVICE_OUTPUT_MARGIN
 from tests.fakes import make_tree_node as _tn
 
 
@@ -61,6 +62,12 @@ def test_sends_cached_system_block_reasoning_and_max_tokens() -> None:
     body = client.calls[0]["json"]
     assert body["temperature"] == 0 and body["reasoning"] == {"effort": "low"}
     assert body["max_tokens"] == 2 * 48 + 512
+    # `_OUTPUT_MARGIN` живёт как отдельная константа и в адаптере, и в сервисе (сервис не может
+    # импортировать infrastructure/, см. tree_matching_service.py) — только этот тест видит обе
+    # копии сразу. Без этой строки развал синхронизации (кто-то поменял одну копию, забыл другую)
+    # не уронит ни один существующий assert: чанк-бюджет сервиса и `max_tokens` адаптера молча
+    # разойдутся.
+    assert body["max_tokens"] == 2 * 48 + _SERVICE_OUTPUT_MARGIN
     sys_msg = body["messages"][0]
     assert sys_msg["role"] == "system"
     assert sys_msg["content"][0]["cache_control"] == {"type": "ephemeral"}
