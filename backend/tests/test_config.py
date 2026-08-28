@@ -217,7 +217,10 @@ def test_backoff_shape_mirrors_config_formula() -> None:
     def _always_fails() -> None:
         raise ValueError("boom")
 
-    for budget, expected_total in ((1, 0.0), (2, 0.5), (3, 1.5)):
+    # budget=4 обязателен: на 1..3 суммы экспоненциального и линейного бэкоффа совпадают
+    # (0.0 / 0.5 / 1.5), и подмену формы такой тест бы не заметил. На 4 они расходятся:
+    # экспоненциальный 3.5 против линейного 3.0.
+    for budget, expected_total in ((1, 0.0), (2, 0.5), (3, 1.5), (4, 3.5)):
         sleeps: list[float] = []
         with pytest.raises(TransientError):
             retry_transient(
