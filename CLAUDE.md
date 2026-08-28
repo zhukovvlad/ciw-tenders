@@ -58,7 +58,9 @@
   [decision_fund_service.py](backend/app/services/decision_fund_service.py)); промахи → RAG:
   эмбеддинг → топ-5 (pgvector, `match_top_k`) → `score > 0.90` ⇒ «Уверенное совпадение», иначе
   LLM-арбитр (Claude) выбирает из топ-5 ⇒ «Требует проверки». См.
-  [matching_service.py](backend/app/services/matching_service.py).
+  [matching_service.py](backend/app/services/matching_service.py). Альтернативный движок `tree`
+  (структурный, чанки со справочником в промпте) включается через `MATCHING_ENGINE=tree` — см. спеку
+  [2026-08-27-tree-matching-core-design.md](docs/superpowers/specs/2026-08-27-tree-matching-core-design.md).
 - **Auth-слой:** порты `UserRepository` / `PasswordHasher` / `TokenService` в `domain/ports.py`;
   роли `user` / `admin`; enforcement через `get_current_user` / `require_admin` в `api/deps.py`.
 - **Эмбеддинги справочника — асинхронно:** при импорте/добавлении статья получает `embedding_input`
