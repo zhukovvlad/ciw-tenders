@@ -13,6 +13,7 @@ from collections.abc import Sequence
 
 from app.domain.entities import (
     AncestorContext,
+    CatalogArticle,
     EstimateRowStatus,
     NodeMatch,
     SectionMatchRequest,
@@ -42,9 +43,39 @@ ERR_ROW_TOO_LARGE = "tree_row_too_large"
 _CATALOG_SHARE = 0.25
 _CONTEXT_SHARE = 0.80
 _SYSTEM_PROMPT_RESERVE = 1_500  # системный промпт + заголовки блоков (факт спайка ~900)
-_ANCESTORS_RESERVE = 600  # путь предков чанка (глубина ≤ 6 × ~100 токенов)
+_ANCESTORS_HEADER_MARGIN = 24  # запас на заголовок блока КОНТЕКСТ (см. render_ancestors)
+_UNTRUSTED_SUFFIX = " (предположительно)"  # самый длинный вариант "показанного" кода в строке
 _OUTPUT_MARGIN = 512  # = запас адаптера в max_tokens
 _ROW_FORMAT_TOKENS = 8  # «[цель] id | код | » + перенос
+
+
+def _max_ancestors_reserve(
+    tree: Sequence[TreeNode], parents: Sequence[int | None], catalog: Sequence[CatalogArticle]
+) -> int:
+    """Худшая по токенам стоимость блока КОНТЕКСТ по всему дереву (спека §5.2), считанная по
+    ДАННЫМ — по формату строки `tree_prompt.render_ancestors` (без импорта самой функции: сервис
+    не зависит от infrastructure), но не рендером промпта.
+
+    Заменяет прежнюю фиксированную оценку `_ANCESTORS_RESERVE`: `split_sections` использует ЕДИНЫЙ
+    `row_budget` на весь прогон, поэтому реальную (per-chunk) стоимость предков подставить нельзя —
+    берём МАКСИМУМ по всем узлам дерева (самый длинный путь предков + самые длинные их имена), а
+    «показанный» код каждого предка оцениваем сверху самым длинным кодом справочника с суффиксом
+    "(предположительно)" — это длиннее, чем подтверждённый `[уже: код]` или пустое "?".
+    """
+    if not tree or not catalog:
+        return _ANCESTORS_HEADER_MARGIN
+    max_code_len = max(len(a.code) for a in catalog)
+    shown = ("0" * max_code_len) + _UNTRUSTED_SUFFIX
+    best = 0
+    for i in range(len(tree)):
+        cost = 0
+        p = parents[i]
+        while p is not None:
+            anc = tree[p]
+            cost += estimate_tokens(f"  {anc.code} | {anc.name} -> {shown}")
+            p = parents[p]
+        best = max(best, cost)
+    return best + _ANCESTORS_HEADER_MARGIN
 
 
 class CatalogEmptyError(DomainError):
@@ -100,9 +131,10 @@ class TreeMatchingRunner:
         # targets×reserve + margin ≤ 0.8×window. Каждая строка чанка учитывается как
         # ПОТЕНЦИАЛЬНАЯ цель (reserve входит в её стоимость) — реальное число целей ≤ числа
         # строк, оценка сверху.
+        ancestors_reserve = _max_ancestors_reserve(tree, parents, catalog_list)
         row_budget = (
             int(_CONTEXT_SHARE * self._window)
-            - _SYSTEM_PROMPT_RESERVE - catalog_tokens - _ANCESTORS_RESERVE - _OUTPUT_MARGIN
+            - _SYSTEM_PROMPT_RESERVE - catalog_tokens - ancestors_reserve - _OUTPUT_MARGIN
         )
         if row_budget <= 0:
             raise CatalogTooLargeError(

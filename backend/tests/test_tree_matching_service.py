@@ -11,17 +11,22 @@ from app.domain.entities import (
     SectionMatchResponse,
 )
 from app.domain.errors import TransientError
-from app.domain.tree_matching import estimate_tokens
+from app.domain.tree_matching import estimate_tokens, resolve_parents
 from app.services.tree_matching_service import (
-    _ANCESTORS_RESERVE,
     _CONTEXT_SHARE,
     _OUTPUT_MARGIN,
     _SYSTEM_PROMPT_RESERVE,
     CatalogEmptyError,
     CatalogTooLargeError,
     TreeMatchingRunner,
+    _max_ancestors_reserve,
 )
-from tests.fakes import FakeArticleRepository, FakeEstimateRepository, FakeTreeMatcher
+from tests.fakes import (
+    FakeArticleRepository,
+    FakeEstimateRepository,
+    FakeTreeMatcher,
+    make_tree_node,
+)
 
 CAT = [
     ("4", "Конструктив"), ("4.2", "Надземная"), ("4.2.1", "Гориз 1-й"), ("4.2.2", "Верт 1-й"),
@@ -194,18 +199,28 @@ def test_oversized_row_commits_row_too_large_without_calling_matcher() -> None:
     # матчера (иначе повторный commit по «отсутствующему» вердикту тихо перезаписал бы
     # причину на tree_missing_verdict).
     repo, art = FakeEstimateRepository(), _articles()
-    est = repo.create(NewEstimate(1, "a.xlsx", "k"), [
-        _node("4", "Конструктив", 0), _node("4.1", "x" * 260, 1),
-    ])
+    nodes = [_node("4", "Конструктив", 0), _node("4.1", "x" * 260, 1)]
+    est = repo.create(NewEstimate(1, "a.xlsx", "k"), nodes)
     root_id, child_id = (r.id for r in est.rows)
     matcher = FakeTreeMatcher(
         verdict_fn=by_name({"Конструктив": {"code": "4", "sure": True, "alt": None}})
     )
-    # окно подобрано так, что row_budget=100 (см. отчёт), а имя ребёнка в 260 символов
-    # даёт row_cost ~108 > 100 — узел "не влезает" сам по себе
+    # окно подобрано так, что row_budget=100 (root cost ~25 влезает, имя ребёнка в 260 символов
+    # даёт row_cost ~108 > 100 — узел "не влезает" сам по себе), с учётом ФАКТИЧЕСКОГО
+    # ancestors_reserve этого дерева (P2-1: больше не фиксированная 600 — считаем её так же, как
+    # run()) и фактического catalog_tokens справочника фикстуры.
+    catalog_tokens = sum(
+        estimate_tokens("  " * a.code.count(".") + f"({a.code}) {a.name}")
+        for a in art.list_catalog()
+    )
+    shadow_tree = [make_tree_node(i, n.depth, n.code, n.name) for i, n in enumerate(nodes)]
+    ancestors_reserve = _max_ancestors_reserve(
+        shadow_tree, resolve_parents(shadow_tree), art.list_catalog()
+    )
+    window = int((1_500 + catalog_tokens + ancestors_reserve + 512 + 100) / 0.8)
     runner = TreeMatchingRunner(
         matcher=matcher, estimates=repo, articles=art, chunk_rows=120, min_chunk_rows=1,
-        context_window=3447, output_reserve_per_row=10,
+        context_window=window, output_reserve_per_row=10,
     )
     runner.run(est.id)
     assert repo.nodes[root_id]["status"] == "confident"
@@ -332,10 +347,45 @@ def test_lost_cas_refreshes_parent_before_children() -> None:
     assert counts[EstimateRowStatus.NEEDS_REVIEW] == 1
 
 
+def test_ancestors_reserve_grows_with_deeper_or_longer_named_chain() -> None:
+    # P2-1: _ANCESTORS_RESERVE был фиксированной константой (600) — теперь это фактический
+    # худший случай по дереву (см. tree_prompt.render_ancestors), так что глубокая цепочка с
+    # длинными именами должна давать БОЛЬШИЙ резерв, чем неглубокая с короткими — то есть член
+    # больше не константа.
+    catalog = _articles().list_catalog()
+    shallow = [make_tree_node(1, 1, "4", "A"), make_tree_node(2, 2, "4.1", "B")]
+    deep = [
+        make_tree_node(1, 1, "4", "x" * 40),
+        make_tree_node(2, 2, "4.1", "x" * 40),
+        make_tree_node(3, 3, "4.1.1", "x" * 40),
+        make_tree_node(4, 4, "4.1.1.1", "x" * 40),
+        make_tree_node(5, 5, "4.1.1.1.1", "x" * 40),
+        make_tree_node(6, 6, "4.1.1.1.1.1", "x" * 40),
+    ]
+    shallow_reserve = _max_ancestors_reserve(shallow, resolve_parents(shallow), catalog)
+    deep_reserve = _max_ancestors_reserve(deep, resolve_parents(deep), catalog)
+    # инвариант §5.2 — вычитаемое растёт вместе с реальной глубиной/длиной пути предков, а не
+    # остаётся одной и той же константой (600) независимо от формы дерева
+    assert deep_reserve > shallow_reserve
+    assert deep_reserve - shallow_reserve > 100  # разница ощутима, не шум округления
+
+
 def test_budget_respects_window_and_shrinks_with_output_reserve() -> None:
     # 10 узлов-сиблингов под корнем, имена по 30 символов (~10 токенов + 8 формат + reserve).
     repo, art = FakeEstimateRepository(), _articles()
     nodes = [_node("4", "Конструктив", 0)] + [_node(f"4.{k}", "x" * 30, k) for k in range(1, 11)]
+
+    # ancestors_reserve не зависит от id узлов (только код/имя/глубина) — считаем его ТОЙ ЖЕ
+    # функцией, что и run(), на «теневом» дереве такой же формы, ДО выбора окна.
+    catalog_tokens = sum(
+        estimate_tokens("  " * a.code.count(".") + f"({a.code}) {a.name}")
+        for a in art.list_catalog()
+    )
+    shadow_tree = [make_tree_node(i, n.depth, n.code, n.name) for i, n in enumerate(nodes)]
+    ancestors_reserve = _max_ancestors_reserve(
+        shadow_tree, resolve_parents(shadow_tree), art.list_catalog()
+    )
+
     est = repo.create(NewEstimate(1, "a.xlsx", "k"), nodes)
 
     def fn(req):
@@ -346,7 +396,7 @@ def test_budget_respects_window_and_shrinks_with_output_reserve() -> None:
         ]
 
     # каталог ~7 статей (~60 токенов); окно подобрано так, что бюджет строк ≈ 300 токенов
-    window = int((1_500 + 60 + 600 + 512 + 300) / 0.8)
+    window = int((1_500 + catalog_tokens + ancestors_reserve + 512 + 300) / 0.8)
     m1 = FakeTreeMatcher(verdict_fn=fn)
     TreeMatchingRunner(
         matcher=m1, estimates=repo, articles=art, chunk_rows=120, min_chunk_rows=1,
@@ -359,13 +409,9 @@ def test_budget_respects_window_and_shrinks_with_output_reserve() -> None:
         context_window=window, output_reserve_per_row=40,
     ).run(est2.id)
     # row_budget пересчитан ровно так, как это делает run() — включая индентированный catalog_tokens
-    catalog_tokens = sum(
-        estimate_tokens("  " * a.code.count(".") + f"({a.code}) {a.name}")
-        for a in art.list_catalog()
-    )
     row_budget = (
         int(_CONTEXT_SHARE * window)
-        - _SYSTEM_PROMPT_RESERVE - catalog_tokens - _ANCESTORS_RESERVE - _OUTPUT_MARGIN
+        - _SYSTEM_PROMPT_RESERVE - catalog_tokens - ancestors_reserve - _OUTPUT_MARGIN
     )
     # инвариант: каждый чанк укладывается в бюджет с учётом резерва ответа
     for m, reserve in ((m1, 1), (m2, 40)):
