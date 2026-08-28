@@ -567,8 +567,20 @@ describe("ReviewCard: score null (tree-движок)", () => {
       score: null,
       matched_code: "4.2.1",
       candidates: [
-        { id: 5, article_code: "4.2.1", name: "Гориз", score: null, breadcrumb: [] },
-        { id: 6, article_code: "4.2.3", name: "Гориз проч", score: null, breadcrumb: [] },
+        {
+          id: 5,
+          article_code: "4.2.1",
+          name: "Гориз",
+          score: null,
+          breadcrumb: [],
+        },
+        {
+          id: 6,
+          article_code: "4.2.3",
+          name: "Гориз проч",
+          score: null,
+          breadcrumb: [],
+        },
       ],
     })
     renderCard(r)
