@@ -42,6 +42,11 @@ from app.domain.ports import (
     WorkTypeClassifier,
 )
 from app.services.matching_service import MatchingService
+from app.services.tree_matching_service import (
+    CatalogEmptyError,
+    CatalogTooLargeError,
+    TreeMatchingRunner,
+)
 
 _EMBED_CHUNK = 100
 _HEARTBEAT_EVERY = 50
@@ -60,6 +65,7 @@ class EstimateMatchingService:
         classifier: WorkTypeClassifier,
         fund: DecisionFundRepository,
         apply_fund: bool = True,
+        tree: TreeMatchingRunner | None = None,
     ) -> None:
         self._matcher = matcher
         self._embedder = embedder
@@ -68,6 +74,8 @@ class EstimateMatchingService:
         self._classifier = classifier
         self._fund = fund
         self._apply_fund_enabled = apply_fund
+        self._tree = tree  # движок tree (спека 2026-08-27): не None ⇒ полностью замещает
+        # classify/fund/embed/gate/match (см. match_estimate)
 
     def match_estimate(self, estimate_id: int) -> None:
         if not self._estimates.try_matching_lock(estimate_id):
@@ -78,21 +86,47 @@ class EstimateMatchingService:
         counts: Counter[EstimateRowStatus] = Counter()
         try:
             self._estimates.set_status(estimate_id, EstimateStatus.RUNNING)  # COMMIT до embed
-            excluded = self._classify_nodes(estimate_id)
-            logger.debug(
-                "Матчинг %s: классификация завершена (ORG-исключено: %d)", estimate_id, excluded
-            )
-            fund_hits = self._apply_fund(estimate_id)  # ДО эмбеддинга: хиту вектор не нужен (§12.2)
-            self._embed_nodes(estimate_id)  # только промахи фонда (без matched_fund)
-            logger.debug("Матчинг %s: эмбеддинг завершён", estimate_id)
-            # гейт каталога — только если после фонда остались не-фондовые matchable (pending).
-            # На полностью-фондовой смете (0 pending) спурьозный DictionaryNotReadyError не летит.
-            if self._estimates.count_unfinished_nodes(estimate_id):
-                total, pending = self._articles.matching_readiness()
-                if total == 0 or pending > 0:
-                    raise DictionaryNotReadyError(total=total, pending=pending)
-            counts = self._match_nodes(estimate_id)
-            logger.debug("Матчинг %s: сопоставление завершено", estimate_id)
+            if self._tree is not None:
+                # Tree-движок сам детектит org-строки (excluded) и не нуждается в эмбеддинге —
+                # classify/fund/embed/gate целиком заменяются одним вызовом рантайма (§ спеки).
+                try:
+                    counts = self._tree.run(estimate_id)
+                except (CatalogEmptyError, CatalogTooLargeError) as exc:
+                    # В ОТЛИЧИЕ от DictionaryNotReadyError (транзиентный gate — обёртка ретраит):
+                    # пустой/переросший каталог чинит только админ, ретраить нечего →
+                    # блокируем сразу и НЕ пробрасываем исключение выше.
+                    self._estimates.set_status(
+                        estimate_id, EstimateStatus.BLOCKED, detail=str(exc), code=exc.code
+                    )
+                    self._log_summary(estimate_id, counts, excluded, fund_hits, start)
+                    return
+                excluded = counts.pop(EstimateRowStatus.EXCLUDED, 0)
+                logger.debug(
+                    "Матчинг %s (tree): сопоставление завершено (excluded=%d)",
+                    estimate_id,
+                    excluded,
+                )
+            else:
+                excluded = self._classify_nodes(estimate_id)
+                logger.debug(
+                    "Матчинг %s: классификация завершена (ORG-исключено: %d)",
+                    estimate_id,
+                    excluded,
+                )
+                fund_hits = self._apply_fund(
+                    estimate_id
+                )  # ДО эмбеддинга: хиту вектор не нужен (§12.2)
+                self._embed_nodes(estimate_id)  # только промахи фонда (без matched_fund)
+                logger.debug("Матчинг %s: эмбеддинг завершён", estimate_id)
+                # гейт каталога — только если после фонда остались не-фондовые matchable (pending).
+                # На полностью-фондовой смете (0 pending) спурьозный DictionaryNotReadyError
+                # не летит.
+                if self._estimates.count_unfinished_nodes(estimate_id):
+                    total, pending = self._articles.matching_readiness()
+                    if total == 0 or pending > 0:
+                        raise DictionaryNotReadyError(total=total, pending=pending)
+                counts = self._match_nodes(estimate_id)
+                logger.debug("Матчинг %s: сопоставление завершено", estimate_id)
             errors = self._estimates.count_node_errors(estimate_id)
             unfinished = self._estimates.count_unfinished_nodes(estimate_id)
             if errors or unfinished:

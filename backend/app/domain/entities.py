@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 
@@ -277,7 +277,7 @@ class MatchCandidate:
     id: int | None
     code: str
     name: str
-    score: float
+    score: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -326,6 +326,86 @@ class NodeToClassify:
 
     name: str
     ancestors: tuple[str, ...]
+
+
+# --- Tree Matching (спека tree matching §3.1 и §3.2) ---
+
+
+@dataclass(frozen=True, slots=True)
+class TreeNode:
+    """Строка сметы для tree-движка: контекст + цель. fetch_tree отдаёт в порядке source_index."""
+
+    id: int
+    source_index: int
+    depth: int
+    code: str
+    name: str
+    status: str
+    review_status: str
+    matched_code: str | None
+    matched_article_id: int | None
+    final_code: str | None
+    final_article_id: int | None
+
+    def with_result(self, result: NodeMatch) -> TreeNode:
+        """Копия узла после успешного CAS — рабочее дерево должно видеть свежий снимок."""
+        return replace(
+            self, status=str(result.status), matched_code=result.matched_code,
+            matched_article_id=result.matched_id,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogArticle:
+    id: int
+    code: str
+    name: str
+    parent_code: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class FundPrecedent:
+    name: str
+    parent_article_code: str
+    article_code: str
+    article_name: str
+    votes: int
+    article_id: int
+    key: str
+
+
+@dataclass(frozen=True, slots=True)
+class SectionMatchRequest:
+    nodes: list[TreeNode]
+    # (код, trusted) из hint_for; None — прозрачный предок
+    ancestors: list[tuple[TreeNode, tuple[str, bool] | None]]
+    hints: dict[int, tuple[str, bool]]
+    targets: frozenset[int]
+    catalog: list[CatalogArticle]
+    precedents: list[FundPrecedent]
+
+
+@dataclass(frozen=True, slots=True)
+class NodeVerdict:
+    node_id: int
+    kind: str  # "article" | "org" | "none"
+    article_code: str | None
+    sure: bool
+    alt_code: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class AncestorContext:
+    trusted_code: str | None
+    has_uncertain_barrier: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SectionMatchResponse:
+    """Сырой ответ адаптера: словари {"i","code","sure","alt"} валидирует домен (fail-closed)."""
+
+    items: list[dict]
+    truncated: bool  # finish_reason == "length" → сервис делит чанк
 
 
 @dataclass(frozen=True, slots=True)

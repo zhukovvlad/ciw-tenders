@@ -16,7 +16,7 @@ export interface Candidate {
   id: number | null
   article_code: string
   name: string
-  score: number
+  score: number | null
   breadcrumb: string[]
 }
 
@@ -28,7 +28,7 @@ export interface MatchRow {
   breadcrumb: string[] // ПОЛНАЯ цепочка предков (включая org) — крошка карточки
   matchError: string | null // текст ошибки для status="error"
   status: MatchStatus
-  score: number
+  score: number | null
   matched_code: string | null
   matched_name: string | null
   matched_article_id: number | null

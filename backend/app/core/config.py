@@ -7,6 +7,21 @@ from functools import lru_cache
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Зеркало `app/infrastructure/retry.py::_BACKOFF_BASE_S` — `config.py` не может импортировать
+# `infrastructure/` (направление зависимостей api → services → domain ← infrastructure), поэтому
+# константа продублирована. Синхронизацию проверяет
+# `test_config.py::test_backoff_base_mirrors_retry_module`.
+_BACKOFF_BASE_S = 0.5
+
+# Операционный запас для инварианта бюджета tree-вызова (см. `_validate_llm` ниже): устанавливает
+# соединение (DNS/TLS-хендшейк до OpenRouter) и собственная работа раннера на чанк (сборка чанка,
+# CAS-запись, логирование) занимают время СНАРУЖИ таймаута одной попытки (`tree_call_timeout_s`
+# мерит только сам HTTP-вызов), но по-прежнему тратят soft time limit Celery-задачи. Число не
+# измерено профилированием — выбрано с явным запасом (десятки секунд) на медленный
+# DNS/TLS-хендшейк и GC-паузы под нагрузкой; дефолты (180×2=360 + 0.5 backoff + 30 margin = 390.5)
+# оставляют больше 200с запаса до `task_soft_time_limit_s=600`.
+_TREE_BUDGET_MARGIN_S = 30.0
+
 
 class Settings(BaseSettings):
     """Настройки читаются из переменных окружения / .env (см. .env.example)."""
@@ -26,6 +41,15 @@ class Settings(BaseSettings):
     # Сколько кандидатов pgvector отдаёт арбитру. 5 (не 3): в тесных кластерах сестёр-статей
     # правильная статья выпадает из топ-3 на доли score (TECH_DEBT «Качество матчинга», Кейс C).
     match_top_k: int = 5
+    # Движок сопоставления (спека tree matching 2026-08-27): "rag" (текущий) | "tree".
+    matching_engine: str = "rag"
+    openrouter_tree_model: str = "anthropic/claude-sonnet-5"
+    tree_reasoning_effort: str = "low"     # без ограничения Sonnet 5 давал ×3 completion-токенов
+    tree_context_window: int = 200_000     # окно модели, задаётся явно
+    tree_chunk_rows: int = 120
+    tree_min_chunk_rows: int = 10
+    tree_output_reserve_per_row: int = 48
+    tree_precedents_budget: int = 2_000
     embedding_base_url: str = "https://openrouter.ai/api/v1"
     embedding_model: str = "google/gemini-embedding-2"
     # LLM-арбитр матчинга — переключаемый провайдер.
@@ -68,6 +92,13 @@ class Settings(BaseSettings):
     ai_call_timeout_s: float = 30.0       # hard per-call timeout
     transient_retry_budget: int = 3       # попыток на один вызов до TransientError
 
+    # Отдельный бюджет tree-вызова (P1-2 codex round 2): один чанк не должен быть способен
+    # пережить бюджет всей задачи. Инвариант (round 3, см. `_validate_llm` ниже):
+    # timeout×budget + бэкофф + запас <= task_soft_time_limit_s; с дефолтами
+    # 180×2 + 0.5 + 30 = 390.5 <= task_soft_time_limit_s=600.
+    tree_call_timeout_s: float = 180.0    # hard per-call timeout для tree-матчера
+    tree_retry_budget: int = 2            # попыток на один tree-вызов до TransientError
+
     # Bounded gate-retry: ожидание готовности справочника (DictionaryNotReadyError → self.retry).
     gate_retry_max: int = 30
     gate_retry_backoff_s: float = 20.0
@@ -106,6 +137,37 @@ class Settings(BaseSettings):
             raise ValueError("CLASSIFIER_BATCH_SIZE должен быть > 0")
         if self.match_top_k <= 0:
             raise ValueError("MATCH_TOP_K должен быть > 0 (иначе арбитр не получит кандидатов)")
+        if self.matching_engine not in ("rag", "tree"):
+            raise ValueError("MATCHING_ENGINE должен быть 'rag' или 'tree'")
+        if not self.openrouter_tree_model.strip():
+            raise ValueError("OPENROUTER_TREE_MODEL не может быть пустым")
+        if self.tree_context_window <= 0 or self.tree_chunk_rows <= 0:
+            raise ValueError("TREE_CONTEXT_WINDOW и TREE_CHUNK_ROWS должны быть > 0")
+        if not 1 <= self.tree_min_chunk_rows <= self.tree_chunk_rows:
+            raise ValueError("TREE_MIN_CHUNK_ROWS должен быть в [1, TREE_CHUNK_ROWS]")
+        if self.tree_output_reserve_per_row <= 0 or self.tree_precedents_budget < 0:
+            raise ValueError("TREE_OUTPUT_RESERVE_PER_ROW > 0, TREE_PRECEDENTS_BUDGET >= 0")
+        if self.tree_call_timeout_s <= 0:
+            raise ValueError("TREE_CALL_TIMEOUT_S должен быть > 0")
+        if self.tree_retry_budget < 1:
+            raise ValueError("TREE_RETRY_BUDGET должен быть >= 1")
+        # Точный худший случай `retry_transient` (retry.py): между попытками 1..budget-1 —
+        # экспоненциальный бэкофф `_BACKOFF_BASE_S * 2**attempt`, поэтому суммарный бэкофф —
+        # не 0 (как в прежней проверке), а геометрическая прогрессия. Плюс операционный запас
+        # `_TREE_BUDGET_MARGIN_S` на то, что происходит вне таймаута самого вызова.
+        backoff_total = _BACKOFF_BASE_S * (2 ** (self.tree_retry_budget - 1) - 1)
+        worst_case = (
+            self.tree_call_timeout_s * self.tree_retry_budget
+            + backoff_total
+            + _TREE_BUDGET_MARGIN_S
+        )
+        if worst_case > self.task_soft_time_limit_s:
+            raise ValueError(
+                "TREE_CALL_TIMEOUT_S * TREE_RETRY_BUDGET + бэкофф между попытками "
+                f"(шаг {_BACKOFF_BASE_S}s, экспоненциальный, см. retry.py) + операционный "
+                f"запас {_TREE_BUDGET_MARGIN_S}s должны быть <= TASK_SOFT_TIME_LIMIT_S — "
+                "иначе один чанк способен пережить бюджет всей задачи"
+            )
         return self
 
 

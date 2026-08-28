@@ -27,12 +27,32 @@ from app.domain.entities import (
     PromotableRow,
     StoredEstimateRow,
     StructuralAnomaly,
+    TreeNode,
 )
 from app.domain.errors import EstimateNotCompletableError
 from app.domain.ports import EstimateRepository
 from app.infrastructure.db.models import EstimateModel, EstimateRowModel
 
 _NS_MATCH = 0x4D415443  # "MATC" — namespace advisory-лока матчинга сметы
+
+# Только нужные для tree-движка колонки — полная ORM-модель тянет embedding (~3 КБ/строку,
+# ~9 МБ на смету из 3000 строк), а fetch_tree/refresh_tree_node нужны лишь эти 11 скаляров.
+_TREE_COLUMNS = (
+    EstimateRowModel.id, EstimateRowModel.source_index, EstimateRowModel.depth,
+    EstimateRowModel.code, EstimateRowModel.name, EstimateRowModel.status,
+    EstimateRowModel.review_status, EstimateRowModel.matched_code,
+    EstimateRowModel.matched_article_id, EstimateRowModel.final_code,
+    EstimateRowModel.final_article_id,
+)
+
+
+def _row_to_tree_node(r) -> TreeNode:  # r — sqlalchemy Row с колонками _TREE_COLUMNS
+    return TreeNode(
+        id=r.id, source_index=r.source_index, depth=r.depth, code=r.code, name=r.name,
+        status=r.status, review_status=r.review_status, matched_code=r.matched_code,
+        matched_article_id=r.matched_article_id, final_code=r.final_code,
+        final_article_id=r.final_article_id,
+    )
 
 
 class SqlAlchemyEstimateRepository(EstimateRepository):
@@ -344,6 +364,42 @@ class SqlAlchemyEstimateRepository(EstimateRepository):
             .values(**self._match_values(result))
         )
         self._session.commit()
+
+    def fetch_tree(self, estimate_id: int) -> list[TreeNode]:
+        """Все строки сметы в порядке source_index — рабочее дерево tree-движка."""
+        stmt = (
+            select(*_TREE_COLUMNS)
+            .where(EstimateRowModel.estimate_id == estimate_id)
+            .order_by(EstimateRowModel.source_index)
+        )
+        return [_row_to_tree_node(r) for r in self._session.execute(stmt)]
+
+    def refresh_tree_node(self, node_id: int) -> TreeNode:
+        """Перечитать одну строку (после проигранного CAS)."""
+        # чужой коммит (ревью оператора) — SELECT идёт в БД, кэш сессии не участвует (колонки,
+        # не ORM: session.get вернул бы устаревший экземпляр из identity map)
+        r = self._session.execute(
+            select(*_TREE_COLUMNS).where(EstimateRowModel.id == node_id)
+        ).one_or_none()
+        if r is None:
+            raise KeyError(node_id)
+        return _row_to_tree_node(r)
+
+    def save_node_match_cas(
+        self, node_id: int, result: NodeMatch, expected_statuses: Sequence[str]
+    ) -> bool:
+        """UPDATE … WHERE status IN expected AND review_status='unreviewed'. False = гонка."""
+        res = self._session.execute(
+            update(EstimateRowModel)
+            .where(
+                EstimateRowModel.id == node_id,
+                EstimateRowModel.status.in_(tuple(expected_statuses)),
+                EstimateRowModel.review_status == "unreviewed",
+            )
+            .values(**self._match_values(result))
+        )
+        self._session.commit()
+        return res.rowcount > 0
 
     @staticmethod
     def _match_values(result: NodeMatch) -> dict:

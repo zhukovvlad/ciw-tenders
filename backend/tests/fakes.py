@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timezone
 
@@ -10,6 +10,7 @@ from app.domain import catalog_tree
 from app.domain.decision_fund import AppliedFundHit, FundEntry, FundHit
 from app.domain.entities import (
     ArticleCandidate,
+    CatalogArticle,
     ClassifiableNode,
     Estimate,
     EstimateNode,
@@ -26,9 +27,12 @@ from app.domain.entities import (
     PendingEmbedding,
     PendingNode,
     PromotableRow,
+    SectionMatchRequest,
+    SectionMatchResponse,
     StoredEstimateRow,
     TemplateArticle,
     TokenPayload,
+    TreeNode,
     User,
     WorkClass,
 )
@@ -44,9 +48,22 @@ from app.domain.ports import (
     PasswordHasher,
     TaskQueue,
     TokenService,
+    TreeMatcher,
     UserRepository,
     WorkTypeClassifier,
 )
+
+
+def make_tree_node(
+    i: int, depth: int, code: str, name: str = "", status: str = "pending", **kw
+) -> TreeNode:
+    """Хелпер для построения TreeNode в тестах tree-матчинга."""
+    return TreeNode(
+        id=i, source_index=i, depth=depth, code=code, name=name or f"n{code}", status=status,
+        review_status=kw.get("review_status", "unreviewed"),
+        matched_code=kw.get("matched_code"), matched_article_id=kw.get("matched_article_id"),
+        final_code=kw.get("final_code"), final_article_id=kw.get("final_article_id"),
+    )
 
 
 class FakeEmbedder(Embedder):
@@ -114,6 +131,15 @@ class FakeRepository(ArticleRepository):
     def ancestor_names_by_ids(self, article_ids: Sequence[int]) -> dict[int, list[str]]:
         nodes = {a.id: (a.name, a.parent_id) for a in self._store if a.id is not None}
         return catalog_tree.ancestor_names_by_ids(nodes, article_ids)
+
+    def list_catalog(self) -> list[CatalogArticle]:
+        return [
+            CatalogArticle(
+                id=a.id or 0, code=a.article_code, name=a.name,
+                parent_code=".".join(a.article_code.split(".")[:-1]) or None,
+            )
+            for a in self._store
+        ]
 
 
 class FakeArticleRepository(ArticleRepository):
@@ -192,6 +218,15 @@ class FakeArticleRepository(ArticleRepository):
         }
         return catalog_tree.ancestor_names_by_ids(nodes, article_ids)
 
+    def list_catalog(self) -> list[CatalogArticle]:
+        return [
+            CatalogArticle(
+                id=a.id or 0, code=a.article_code, name=a.name,
+                parent_code=".".join(a.article_code.split(".")[:-1]) or None,
+            )
+            for a in self.rows.values()
+        ]
+
 
 class FakeLLMMatcher(LLMMatcher):
     def __init__(self, pick_index: int = 0) -> None:
@@ -201,6 +236,29 @@ class FakeLLMMatcher(LLMMatcher):
         if not candidates:
             return None
         return candidates[self._pick_index].article
+
+
+class FakeTreeMatcher(TreeMatcher):
+    """Тестовый дублёр tree-арбитра: ответы по очереди либо через verdict_fn."""
+
+
+    def __init__(
+        self,
+        responses: list[SectionMatchResponse | Exception] | None = None,
+        verdict_fn: Callable[[SectionMatchRequest], list[dict]] | None = None,
+    ) -> None:
+        self._responses = list(responses or [])
+        self._fn = verdict_fn
+        self.requests: list[SectionMatchRequest] = []
+
+    def match_section(self, req: SectionMatchRequest) -> SectionMatchResponse:
+        self.requests.append(req)
+        if self._fn is not None:
+            return SectionMatchResponse(items=self._fn(req), truncated=False)
+        item = self._responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
 
 
 class FakePasswordHasher(PasswordHasher):
@@ -385,6 +443,10 @@ class FakeEstimateRepository(EstimateRepository):
             self.nodes[nid] = {
                 "id": nid,
                 "estimate_id": eid,
+                "code": n.code,
+                "name": n.name,
+                "depth": n.depth,
+                "source_index": n.source_index,
                 "embedding_input": n.embedding_input,
                 "embedding": None,
                 "status": "pending",
@@ -615,6 +677,34 @@ class FakeEstimateRepository(EstimateRepository):
             {"id": c.id, "code": c.code, "name": c.name, "score": c.score}
             for c in result.candidates
         ]
+
+    @staticmethod
+    def _tree_node(n: dict) -> TreeNode:
+        return TreeNode(
+            id=n["id"], source_index=n["source_index"], depth=n["depth"], code=n["code"],
+            name=n["name"], status=n["status"], review_status=n["review_status"],
+            matched_code=n["matched_code"], matched_article_id=n["matched_article_id"],
+            final_code=n["final_code"], final_article_id=n["final_article_id"],
+        )
+
+    def fetch_tree(self, estimate_id: int) -> list[TreeNode]:
+        rows = sorted(
+            (n for n in self.nodes.values() if n["estimate_id"] == estimate_id),
+            key=lambda n: n["source_index"],
+        )
+        return [self._tree_node(n) for n in rows]
+
+    def refresh_tree_node(self, node_id: int) -> TreeNode:
+        return self._tree_node(self.nodes[node_id])
+
+    def save_node_match_cas(
+        self, node_id: int, result: NodeMatch, expected_statuses: Sequence[str]
+    ) -> bool:
+        n = self.nodes[node_id]
+        if n["review_status"] != "unreviewed" or n["status"] not in expected_statuses:
+            return False
+        self.save_node_match(node_id, result)
+        return True
 
     def count_node_errors(self, estimate_id: int) -> int:
         return sum(

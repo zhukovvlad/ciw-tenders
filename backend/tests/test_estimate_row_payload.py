@@ -83,3 +83,17 @@ def test_candidate_without_id_gets_no_breadcrumb() -> None:
     crumbs = {3: ["03 Фундаменты и основания"]}
     out = EstimateRowOut.from_entity(row, article_crumbs=crumbs)
     assert out.candidates[0].breadcrumb == []
+
+
+def test_candidate_score_none_serializes_as_null() -> None:
+    from app.api.schemas import EstimateRowOut
+    from app.domain.entities import MatchCandidate, StoredEstimateRow
+
+    row = StoredEstimateRow(
+        id=1, code="1", name="n", parent_code=None, section_type=None, depth=1,
+        embedding_input="n", source_index=0, status="needs_review",
+        candidates=[MatchCandidate(id=5, code="1.1", name="a", score=None)],
+    )
+    out = EstimateRowOut.from_entity(row)
+    assert out.candidates[0].score is None
+    assert out.model_dump()["candidates"][0]["score"] is None

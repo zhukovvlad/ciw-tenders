@@ -560,3 +560,32 @@ describe("ReviewCard: Enter гаснет на решённых строках", 
     expect(within(cand).queryByText("Enter")).toBeNull()
   })
 })
+
+describe("ReviewCard: score null (tree-движок)", () => {
+  it("не рендерит score строки и кандидата, когда он null", () => {
+    const r = row(7, 3, "needs_review", {
+      score: null,
+      matched_code: "4.2.1",
+      candidates: [
+        {
+          id: 5,
+          article_code: "4.2.1",
+          name: "Гориз",
+          score: null,
+          breadcrumb: [],
+        },
+        {
+          id: 6,
+          article_code: "4.2.3",
+          name: "Гориз проч",
+          score: null,
+          breadcrumb: [],
+        },
+      ],
+    })
+    renderCard(r)
+    expect(screen.queryByText("0.00")).toBeNull()
+    expect(screen.getByText("Гориз")).toBeInTheDocument()
+    expect(screen.getByText("Гориз проч")).toBeInTheDocument()
+  })
+})

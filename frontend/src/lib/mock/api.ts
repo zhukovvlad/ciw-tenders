@@ -77,7 +77,12 @@ export function exportEstimateCsv(state: ReviewState): string {
     const manual = d.kind === "confirmed" && d.manual
     const code = d.kind === "confirmed" ? d.code : ""
     const name = d.kind === "confirmed" ? d.name : ""
-    const score = manual || d.kind === "no_match" ? "" : row.score.toFixed(2)
+    const score =
+      manual || d.kind === "no_match"
+        ? ""
+        : row.score === null
+          ? ""
+          : row.score.toFixed(2)
     const alt2 = row.candidates[1]
       ? `${row.candidates[1].article_code} ${row.candidates[1].name}`
       : ""

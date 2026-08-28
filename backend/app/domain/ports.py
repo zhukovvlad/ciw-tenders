@@ -14,6 +14,7 @@ from app.domain.decision_fund import AppliedFundHit, FundEntry, FundHit
 from app.domain.entities import (
     ArticleCandidate,
     BenchmarkNodeSeed,
+    CatalogArticle,
     ClassifiableNode,
     Estimate,
     EstimateNode,
@@ -29,8 +30,11 @@ from app.domain.entities import (
     PendingEmbedding,
     PendingNode,
     PromotableRow,
+    SectionMatchRequest,
+    SectionMatchResponse,
     TemplateArticle,
     TokenPayload,
+    TreeNode,
     User,
     WorkClass,
 )
@@ -85,6 +89,11 @@ class ArticleRepository(ABC):
         неизвестные id опускаются. Для крошек справочника в UI ревью."""
         ...
 
+    @abstractmethod
+    def list_catalog(self) -> list[CatalogArticle]:
+        """Весь справочник (id, code, name, parent_code) для промпта tree-движка."""
+        ...
+
 
 class Embedder(ABC):
     """Порт векторизации текста (RAG: retrieval)."""
@@ -103,6 +112,13 @@ class LLMMatcher(ABC):
     def choose_best(
         self, query: str, candidates: list[ArticleCandidate]
     ) -> TemplateArticle | None: ...
+
+
+class TreeMatcher(ABC):
+    """Сопоставляет раздел сметы целиком (спека tree matching §3.2)."""
+
+    @abstractmethod
+    def match_section(self, req: SectionMatchRequest) -> SectionMatchResponse: ...
 
 
 class UserRepository(ABC):
@@ -267,6 +283,20 @@ class EstimateRepository(ABC):
         """Перезаписывает весь AI-снимок узла (status/matched_*/score/candidates),
         НО только WHERE review_status='unreviewed' (CAS). На успехе match_error→NULL."""
         ...
+
+    @abstractmethod
+    def fetch_tree(self, estimate_id: int) -> list[TreeNode]:
+        """Все строки сметы в порядке source_index — рабочее дерево tree-движка."""
+
+    @abstractmethod
+    def refresh_tree_node(self, node_id: int) -> TreeNode:
+        """Перечитать одну строку (после проигранного CAS)."""
+
+    @abstractmethod
+    def save_node_match_cas(
+        self, node_id: int, result: NodeMatch, expected_statuses: Sequence[str]
+    ) -> bool:
+        """UPDATE … WHERE status IN expected AND review_status='unreviewed'. False = гонка."""
 
     @abstractmethod
     def save_review_decision(
