@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timezone
 
@@ -27,6 +27,8 @@ from app.domain.entities import (
     PendingEmbedding,
     PendingNode,
     PromotableRow,
+    SectionMatchRequest,
+    SectionMatchResponse,
     StoredEstimateRow,
     TemplateArticle,
     TokenPayload,
@@ -46,6 +48,7 @@ from app.domain.ports import (
     PasswordHasher,
     TaskQueue,
     TokenService,
+    TreeMatcher,
     UserRepository,
     WorkTypeClassifier,
 )
@@ -233,6 +236,29 @@ class FakeLLMMatcher(LLMMatcher):
         if not candidates:
             return None
         return candidates[self._pick_index].article
+
+
+class FakeTreeMatcher(TreeMatcher):
+    """Тестовый дублёр tree-арбитра: ответы по очереди либо через verdict_fn."""
+
+
+    def __init__(
+        self,
+        responses: list[SectionMatchResponse | Exception] | None = None,
+        verdict_fn: Callable[[SectionMatchRequest], list[dict]] | None = None,
+    ) -> None:
+        self._responses = list(responses or [])
+        self._fn = verdict_fn
+        self.requests: list[SectionMatchRequest] = []
+
+    def match_section(self, req: SectionMatchRequest) -> SectionMatchResponse:
+        self.requests.append(req)
+        if self._fn is not None:
+            return SectionMatchResponse(items=self._fn(req), truncated=False)
+        item = self._responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
 
 
 class FakePasswordHasher(PasswordHasher):
