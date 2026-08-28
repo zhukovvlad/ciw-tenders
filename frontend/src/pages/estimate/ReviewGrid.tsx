@@ -238,7 +238,8 @@ export function ReviewGrid({
                   >
                     {r.status !== "no_match" &&
                     r.status !== "matched_fund" &&
-                    !contextRow
+                    !contextRow &&
+                    r.score !== null
                       ? r.score.toFixed(2)
                       : ""}
                   </div>

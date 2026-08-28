@@ -224,7 +224,7 @@ export function ReviewCard({
                     className="min-w-0 truncate"
                   />
                 </span>
-                {row.status !== "matched_fund" && (
+                {row.status !== "matched_fund" && row.score !== null && (
                   <span className="font-mono text-xs text-muted-foreground">
                     {row.score.toFixed(2)}
                   </span>
@@ -286,9 +286,11 @@ export function ReviewCard({
                       className="min-w-0 truncate"
                     />
                   </span>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {c.score.toFixed(2)}
-                  </span>
+                  {c.score !== null && (
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {c.score.toFixed(2)}
+                    </span>
+                  )}
                   {isRecommendation && (
                     <>
                       <span className="text-xs text-muted-foreground">

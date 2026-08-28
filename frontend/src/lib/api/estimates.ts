@@ -25,7 +25,7 @@ interface RowDto {
     id: number | null
     code: string
     name: string
-    score: number
+    score: number | null
     breadcrumb?: string[]
   }[]
   review_status: ReviewStatus
@@ -105,7 +105,7 @@ export function rowFromDto(r: RowDto, prev?: MatchRow): MatchRow {
         : (prev?.breadcrumb ?? []),
     matchError: r.match_error ?? null,
     status: r.status,
-    score: r.score ?? 0,
+    score: r.score ?? null,
     matched_code: r.matched_code,
     matched_name: r.matched_name,
     matched_article_id: r.matched_article_id,
