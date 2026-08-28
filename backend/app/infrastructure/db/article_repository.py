@@ -8,17 +8,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
 from sqlalchemy import Integer, cast, delete, func, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
 
-if TYPE_CHECKING:
-    from app.domain.entities import CatalogArticle
-
 from app.domain.catalog_tree import ancestor_names_by_ids
-from app.domain.entities import ArticleCandidate, TemplateArticle
+from app.domain.entities import ArticleCandidate, CatalogArticle, TemplateArticle
 from app.domain.ports import ArticleRepository
 from app.infrastructure.db.models import TemplateArticleModel
 
@@ -135,4 +131,17 @@ class SqlAlchemyArticleRepository(ArticleRepository):
 
     def list_catalog(self) -> list[CatalogArticle]:
         """Весь справочник (id, code, name, parent_code) для промпта tree-движка."""
-        raise NotImplementedError("tree-движок: реализуется в Task 6 плана")
+        rows = self._session.execute(
+            select(
+                TemplateArticleModel.id, TemplateArticleModel.article_code,
+                TemplateArticleModel.name, TemplateArticleModel.parent_id,
+            ).order_by(_CODE_ORDER)
+        ).all()
+        code_by_id = {r.id: r.article_code for r in rows}
+        return [
+            CatalogArticle(
+                id=r.id, code=r.article_code, name=r.name,
+                parent_code=code_by_id.get(r.parent_id) if r.parent_id else None,
+            )
+            for r in rows
+        ]

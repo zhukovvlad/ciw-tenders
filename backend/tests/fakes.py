@@ -417,6 +417,10 @@ class FakeEstimateRepository(EstimateRepository):
             self.nodes[nid] = {
                 "id": nid,
                 "estimate_id": eid,
+                "code": n.code,
+                "name": n.name,
+                "depth": n.depth,
+                "source_index": n.source_index,
                 "embedding_input": n.embedding_input,
                 "embedding": None,
                 "status": "pending",
@@ -648,19 +652,33 @@ class FakeEstimateRepository(EstimateRepository):
             for c in result.candidates
         ]
 
+    @staticmethod
+    def _tree_node(n: dict) -> TreeNode:
+        return TreeNode(
+            id=n["id"], source_index=n["source_index"], depth=n["depth"], code=n["code"],
+            name=n["name"], status=n["status"], review_status=n["review_status"],
+            matched_code=n["matched_code"], matched_article_id=n["matched_article_id"],
+            final_code=n["final_code"], final_article_id=n["final_article_id"],
+        )
+
     def fetch_tree(self, estimate_id: int) -> list[TreeNode]:
-        # заполняется в Task 6
-        return []
+        rows = sorted(
+            (n for n in self.nodes.values() if n["estimate_id"] == estimate_id),
+            key=lambda n: n["source_index"],
+        )
+        return [self._tree_node(n) for n in rows]
 
     def refresh_tree_node(self, node_id: int) -> TreeNode:
-        # заполняется в Task 6
-        raise KeyError(node_id)
+        return self._tree_node(self.nodes[node_id])
 
     def save_node_match_cas(
         self, node_id: int, result: NodeMatch, expected_statuses: Sequence[str]
     ) -> bool:
-        # заполняется в Task 6
-        return False
+        n = self.nodes[node_id]
+        if n["review_status"] != "unreviewed" or n["status"] not in expected_statuses:
+            return False
+        self.save_node_match(node_id, result)
+        return True
 
     def count_node_errors(self, estimate_id: int) -> int:
         return sum(
