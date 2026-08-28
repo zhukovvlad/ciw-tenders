@@ -158,22 +158,29 @@ def test_tree_engine_validation(monkeypatch: pytest.MonkeyPatch, env: str, value
 def test_tree_call_budget_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     # P1-2: собственный бюджет tree-вызова, отдельный от ai_call_timeout_s/transient_retry_budget —
     # регресс-гард на дефолты, как test_tree_engine_defaults.
-    from app.core.config import Settings
+    from app.core.config import _BACKOFF_BASE_S, _TREE_BUDGET_MARGIN_S, Settings
 
     monkeypatch.delenv("TREE_CALL_TIMEOUT_S", raising=False)
     monkeypatch.delenv("TREE_RETRY_BUDGET", raising=False)
     s = Settings(_env_file=None)  # type: ignore[call-arg]
     assert s.tree_call_timeout_s == 180.0
     assert s.tree_retry_budget == 2
-    # инвариант из спеки должен выполняться на дефолтах с запасом
-    assert s.tree_call_timeout_s * s.tree_retry_budget < s.task_soft_time_limit_s
+    # инвариант из валидатора (round 3) должен выполняться на дефолтах с запасом — проверяем
+    # полную формулу (timeout*budget + бэкофф + запас), а не урезанную, иначе тест не заметит
+    # выпадение бэкоффа/запаса из проверки.
+    backoff_total = _BACKOFF_BASE_S * (2 ** (s.tree_retry_budget - 1) - 1)
+    worst_case = (
+        s.tree_call_timeout_s * s.tree_retry_budget + backoff_total + _TREE_BUDGET_MARGIN_S
+    )
+    assert worst_case <= s.task_soft_time_limit_s
 
 
 @pytest.mark.parametrize("env,value", [
     ("TREE_CALL_TIMEOUT_S", "0"),
     ("TREE_CALL_TIMEOUT_S", "-1"),
     ("TREE_RETRY_BUDGET", "0"),
-    # 400*2=800 >= task_soft_time_limit_s=600 → нарушение кросс-полевого инварианта
+    # 400*2 + 0.5 бэкофф + 30 запас = 830.5 > task_soft_time_limit_s=600 → нарушение
+    # кросс-полевого инварианта
     ("TREE_CALL_TIMEOUT_S", "400"),
 ])
 def test_tree_call_budget_validation(monkeypatch: pytest.MonkeyPatch, env: str, value: str) -> None:
@@ -195,6 +202,31 @@ def test_backoff_base_mirrors_retry_module() -> None:
     from app.infrastructure.retry import _BACKOFF_BASE_S as _RETRY_BACKOFF_BASE_S
 
     assert _CONFIG_BACKOFF_BASE_S == _RETRY_BACKOFF_BASE_S
+
+
+def test_backoff_shape_mirrors_config_formula() -> None:
+    # test_backoff_base_mirrors_retry_module пинит только шаг (_BACKOFF_BASE_S), но не форму
+    # бэкоффа. Если retry.py сменит экспоненциальный бэкофф на линейный/джиттер, оставив
+    # _BACKOFF_BASE_S=0.5, geometric-sum формула в config.py::_validate_llm тихо станет неверной,
+    # а прежний тест этого не заметит. Гоняем настоящий retry_transient с записывающим sleep
+    # (инъекция аргумента, а не патч time.sleep — instrumented_call биндит sleep как keyword
+    # default на импорте) и сверяем сумму задержек с формулой из валидатора.
+    from app.domain.errors import TransientError
+    from app.infrastructure.retry import _BACKOFF_BASE_S, retry_transient
+
+    def _always_fails() -> None:
+        raise ValueError("boom")
+
+    for budget, expected_total in ((1, 0.0), (2, 0.5), (3, 1.5)):
+        sleeps: list[float] = []
+        with pytest.raises(TransientError):
+            retry_transient(
+                _always_fails,
+                budget=budget,
+                classify=lambda exc: True,
+                sleep=sleeps.append,
+            )
+        assert sum(sleeps) == _BACKOFF_BASE_S * (2 ** (budget - 1) - 1) == expected_total
 
 
 def test_tree_call_budget_ignores_backoff_and_margin_regression(

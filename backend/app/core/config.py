@@ -93,7 +93,9 @@ class Settings(BaseSettings):
     transient_retry_budget: int = 3       # попыток на один вызов до TransientError
 
     # Отдельный бюджет tree-вызова (P1-2 codex round 2): один чанк не должен быть способен
-    # пережить бюджет всей Celery-задачи. С дефолтами 180×2=360 < task_soft_time_limit_s=600.
+    # пережить бюджет всей задачи. Инвариант (round 3, см. `_validate_llm` ниже):
+    # timeout×budget + бэкофф + запас <= task_soft_time_limit_s; с дефолтами
+    # 180×2 + 0.5 + 30 = 390.5 <= task_soft_time_limit_s=600.
     tree_call_timeout_s: float = 180.0    # hard per-call timeout для tree-матчера
     tree_retry_budget: int = 2            # попыток на один tree-вызов до TransientError
 
